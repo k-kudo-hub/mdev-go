@@ -37,7 +37,7 @@ ADR-0001 フェーズ 1 のうち、hook イベント処理系(`pending-notify.s
 
 ### infra(adapter)
 
-- [ ] pending ファイルストアのテストを作成(パス規約 / 同一ディレクトリ temp+rename での原子書き込み / 壊れ JSON を「event 空」として返す)→ 実装
+- [x] pending ファイルストアのテストを作成(パス規約 / 同一ディレクトリ temp+rename での原子書き込み / 壊れ JSON を「event 空」として返す)→ 実装
 - [ ] registry ファイルストアのテストを作成(パス規約 / 原子書き込み / 壊れファイルを 1 件単位でスキップ)→ 実装
 - [ ] config ローダのテストを作成(`config.json` → `config.default.json` のファイル単位フォールバック / `.pricing` の型)→ 実装
 - [ ] mkdir ロックのテストを作成(獲得・解放 / stale 検出 / タイムアウト 2 秒 / fail-open)→ 実装
