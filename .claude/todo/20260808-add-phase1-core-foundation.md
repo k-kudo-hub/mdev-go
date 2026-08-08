@@ -24,7 +24,7 @@ ADR-0001 フェーズ 1 のうち、hook イベント処理系(`pending-notify.s
 ### domain(純粋ロジック)
 
 - [x] pending レコード型のテストを作成(全 string / 空フィールドのキー省略 / JSON round-trip)→ 実装
-- [ ] event 上書き規則のテストを作成(Notification 無条件上書き / Stop は Notification・Waiting を潰さない / 壊れ JSON = event 空は上書きされる)→ 純粋関数として実装
+- [x] event 上書き規則のテストを作成(Notification 無条件上書き / Stop は Notification・Waiting を潰さない / 壊れ JSON = event 空は上書きされる)→ 純粋関数として実装
 - [ ] tab 名フォールバック連鎖のテストを作成(`TASK_TAB_NAME` → `basename(cwd)` → `"unknown"`、空 cwd の挙動含む)→ 実装
 - [ ] registry レコード型と「タブごと `updated_at` 最新 1 件選択」のテストを作成 → 実装
 
