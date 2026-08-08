@@ -11,5 +11,7 @@ import (
 
 func main() {
 	// フェーズ 1 のサブコマンド実装まではプレースホルダとして振る舞う。
-	fmt.Fprintln(os.Stdout, "mdev: not implemented yet")
+	if _, err := fmt.Fprintln(os.Stdout, "mdev: not implemented yet"); err != nil {
+		os.Exit(1)
+	}
 }

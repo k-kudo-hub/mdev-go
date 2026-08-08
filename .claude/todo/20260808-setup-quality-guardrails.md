@@ -19,7 +19,7 @@ ADR-0003 の決定に従い、機能実装より先に「設計違反・品質�
 - [x] domain に最小の実装とテストを 1 組作成(タスク名の重複採番 `UniqueTaskName`。claude-conductor の `ensure_unique_tab_name` を移植)
 - [x] `.go-arch-lint.yml` を作成し、ADR-0002 の依存方向を定義
 - [x] go-arch-lint の違反検出を確認(domain→infra / cli→tui / app→infra の 3 パターンで fail を確認し、戻す。記録: `20260808-guardrail-evidence.md`)
-- [ ] `.golangci.yml` を作成(depguard 許可リスト = cobra / bubbletea / 標準ライブラリ、errcheck / errorlint / gocritic 有効)
+- [x] `.golangci.yml` を作成(depguard 許可リスト = cobra / bubbletea v2 / bubbles v2 / golang.org/x / 標準ライブラリ、errcheck / errorlint / gocritic 有効。domain は標準ライブラリのみの追加ルール)
 - [ ] golangci-lint の違反検出を確認(許可外 import と握り潰しエラーで fail を確認し、戻す)
 - [ ] `.testcoverage.yml` を作成(全体 70%、`internal/domain`・`internal/app` は 90% の上書きルール)
 - [ ] ツールのバージョン固定方法を確定し適用(go.mod tool ディレクティブを検証、不可なら別手段を ADR 追記)
