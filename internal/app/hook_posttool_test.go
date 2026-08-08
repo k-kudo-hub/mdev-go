@@ -96,11 +96,15 @@ func TestHandlePostToolPropagatesErrors(t *testing.T) {
 
 	t.Run("削除の失敗", func(t *testing.T) {
 		t.Parallel()
-		h, pending, _, _ := newHandler()
+		h, pending, _, focuser := newHandler()
 		pending.events[pendingKey("s", "sid")] = "Notification"
 		pending.deleteErr = wantErr
 		if err := h.HandlePostTool(raw, env); !errors.Is(err, wantErr) {
 			t.Errorf("HandlePostTool() = %v, want %v", err, wantErr)
+		}
+		// 現行版は set -e を使っておらず、失敗しても後続の副作用へ進む。
+		if len(focuser.focused) != 1 {
+			t.Errorf("focused = %v, want 削除に失敗してもフォーカス移動する", focuser.focused)
 		}
 	})
 

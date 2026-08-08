@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -23,6 +24,10 @@ type HookHandler struct {
 // 処理順は現行版に合わせている。レジストリの更新を pending の上書き判定より
 // 先に行うため、Stop が Notification を上書きしない場合でもレジストリは
 // 最新化される。
+//
+// 途中の失敗で処理を打ち切らない。現行版は set -e を使っておらず、レジストリの
+// 更新に失敗しても pending の書き込みへ進むため、失敗経路でもファイル状態が
+// 現行版と一致するよう副作用をすべて実行してからエラーをまとめて返す。
 func (h *HookHandler) HandleNotify(raw []byte, env HookEnv) error {
 	in := domain.ParseHookInput(raw)
 	if in.SessionID == "" {
@@ -34,6 +39,7 @@ func (h *HookHandler) HandleNotify(raw []byte, env HookEnv) error {
 	agent := domain.AgentName(env.TaskAgent)
 	now := h.Clock.Now()
 
+	var errs []error
 	if env.IsTaskTab() {
 		entry := domain.RegistryEntry{
 			Tab:             tab,
@@ -46,13 +52,13 @@ func (h *HookHandler) HandleNotify(raw []byte, env HookEnv) error {
 			TranscriptPath:  in.TranscriptPath,
 		}
 		if err := h.Registry.Upsert(entry); err != nil {
-			return fmt.Errorf("レジストリの更新に失敗しました: %w", err)
+			errs = append(errs, fmt.Errorf("レジストリの更新に失敗しました: %w", err))
 		}
 	}
 
 	existing := h.Pending.Event(session, in.SessionID)
 	if !domain.ShouldOverwritePending(existing, in.HookEventName) {
-		return nil
+		return errors.Join(errs...)
 	}
 
 	pending := domain.Pending{
@@ -68,9 +74,9 @@ func (h *HookHandler) HandleNotify(raw []byte, env HookEnv) error {
 		TaskType:        env.TaskType,
 	}
 	if err := h.Pending.Save(session, in.SessionID, pending); err != nil {
-		return fmt.Errorf("pending の書き込みに失敗しました: %w", err)
+		errs = append(errs, fmt.Errorf("pending の書き込みに失敗しました: %w", err))
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // HandlePostTool は PostToolUse hook を処理する
@@ -93,10 +99,14 @@ func (h *HookHandler) HandlePostTool(raw []byte, env HookEnv) error {
 		return nil
 	}
 
+	var errs []error
 	if err := h.Pending.Delete(session, in.SessionID); err != nil {
-		return fmt.Errorf("pending の削除に失敗しました: %w", err)
+		errs = append(errs, fmt.Errorf("pending の削除に失敗しました: %w", err))
 	}
-	return h.focusMain(env)
+	if err := h.focusMain(env); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // HandleResolve は UserPromptSubmit hook を処理する
@@ -115,8 +125,9 @@ func (h *HookHandler) HandleResolve(raw []byte, env HookEnv) error {
 	}
 
 	session := domain.SessionName(env.ZellijSession)
+	var errs []error
 	if err := h.Pending.Delete(session, in.SessionID); err != nil {
-		return fmt.Errorf("pending の削除に失敗しました: %w", err)
+		errs = append(errs, fmt.Errorf("pending の削除に失敗しました: %w", err))
 	}
 
 	if env.IsTaskTab() {
@@ -133,11 +144,14 @@ func (h *HookHandler) HandleResolve(raw []byte, env HookEnv) error {
 			TranscriptPath:  in.TranscriptPath,
 		}
 		if err := h.Registry.Upsert(entry); err != nil {
-			return fmt.Errorf("レジストリの更新に失敗しました: %w", err)
+			errs = append(errs, fmt.Errorf("レジストリの更新に失敗しました: %w", err))
 		}
 	}
 
-	return h.focusMain(env)
+	if err := h.focusMain(env); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // focusMain は zellij セッション内であればダッシュボードへフォーカスを戻す。

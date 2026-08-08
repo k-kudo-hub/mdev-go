@@ -136,19 +136,27 @@ func TestHandleResolvePropagatesErrors(t *testing.T) {
 
 	t.Run("削除の失敗", func(t *testing.T) {
 		t.Parallel()
-		h, pending, _, _ := newHandler()
+		h, pending, registry, focuser := newHandler()
 		pending.deleteErr = wantErr
 		if err := h.HandleResolve(raw, env); !errors.Is(err, wantErr) {
 			t.Errorf("HandleResolve() = %v, want %v", err, wantErr)
+		}
+		// 現行版は set -e を使っておらず、失敗しても後続の副作用へ進む。
+		if len(registry.upserted) != 1 || len(focuser.focused) != 1 {
+			t.Errorf("upserted = %v, focused = %v, want 削除に失敗しても後続を実行する",
+				registry.upserted, focuser.focused)
 		}
 	})
 
 	t.Run("registry の失敗", func(t *testing.T) {
 		t.Parallel()
-		h, _, registry, _ := newHandler()
+		h, _, registry, focuser := newHandler()
 		registry.upsertErr = wantErr
 		if err := h.HandleResolve(raw, env); !errors.Is(err, wantErr) {
 			t.Errorf("HandleResolve() = %v, want %v", err, wantErr)
+		}
+		if len(focuser.focused) != 1 {
+			t.Errorf("focused = %v, want レジストリに失敗してもフォーカス移動する", focuser.focused)
 		}
 	})
 

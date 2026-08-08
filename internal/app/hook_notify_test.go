@@ -224,10 +224,14 @@ func TestHandleNotifyPropagatesErrors(t *testing.T) {
 
 	t.Run("registry の失敗", func(t *testing.T) {
 		t.Parallel()
-		h, _, registry, _ := newHandler()
+		h, pending, registry, _ := newHandler()
 		registry.upsertErr = wantErr
 		if err := h.HandleNotify(raw, env); !errors.Is(err, wantErr) {
 			t.Errorf("HandleNotify() = %v, want %v", err, wantErr)
+		}
+		// 現行版は set -e を使っておらず、レジストリの失敗後も pending を書く。
+		if len(pending.saved) != 1 {
+			t.Errorf("saved = %v, want レジストリに失敗しても pending を書く", pending.saved)
 		}
 	})
 
