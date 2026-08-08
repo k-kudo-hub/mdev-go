@@ -41,7 +41,7 @@ ADR-0001 フェーズ 1 のうち、hook イベント処理系(`pending-notify.s
 - [x] registry ファイルストアのテストを作成(パス規約 / 原子書き込み / 壊れファイルを 1 件単位でスキップ)→ 実装
 - [x] config ローダのテストを作成(`config.json` → `config.default.json` のファイル単位フォールバック / `.pricing` の型)→ 実装
 - [x] mkdir ロックのテストを作成(獲得・解放 / stale 検出 / タイムアウト 2 秒 / fail-open)→ 実装
-- [ ] Zellij Focuser adapter を実装(`zellij action go-to-tab-name`、エラーは無視 = 現行挙動)
+- [x] Zellij Focuser adapter を実装(`zellij action go-to-tab-name`、エラーは無視 = 現行挙動)
 
 ### cli(結線)
 
