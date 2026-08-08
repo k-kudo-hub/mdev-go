@@ -21,7 +21,7 @@ ADR-0003 の決定に従い、機能実装より先に「設計違反・品質�
 - [x] go-arch-lint の違反検出を確認(domain→infra / cli→tui / app→infra の 3 パターンで fail を確認し、戻す。記録: `20260808-guardrail-evidence.md`)
 - [x] `.golangci.yml` を作成(depguard 許可リスト = cobra / bubbletea v2 / bubbles v2 / golang.org/x / 標準ライブラリ、errcheck / errorlint / gocritic 有効。domain は標準ライブラリのみの追加ルール)
 - [x] golangci-lint の違反検出を確認(許可外 import / domain からの許可ライブラリ import / 握り潰しエラー / `==` 比較 / `%v` ラップ / if-else 連鎖で fail を確認し、戻す。記録: `20260808-guardrail-evidence.md`)
-- [ ] `.testcoverage.yml` を作成(全体 70%、`internal/domain`・`internal/app` は 90% の上書きルール)
+- [x] `.testcoverage.yml` を作成(全体 70%、`internal/domain`・`internal/app` は 90% の上書きルール。3 パターンの違反検出と空パッケージの扱いを `20260808-guardrail-evidence.md` に記録)
 - [ ] ツールのバージョン固定方法を確定し適用(go.mod tool ディレクティブを検証、不可なら別手段を ADR 追記)
 - [ ] CI ワークフロー `.github/workflows/ci.yml` を作成(gofmt 差分ゼロ / golangci-lint / go-arch-lint / go test -race -cover + go-test-coverage / go build、macOS ランナー)
 - [ ] `bump-label-check.yml`・`tag.yml`・`bump-version.sh` を claude-conductor から移植

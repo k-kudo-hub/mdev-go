@@ -1,0 +1,23 @@
+# カバレッジ閾値(ADR-0003 のガードレール 3)。
+# ツール: github.com/vladopajic/go-test-coverage/v2(バージョンは Makefile で固定)。
+#
+# 閾値の変更は ADR の改訂を伴う PR としてレビューする。
+profile: cover.out
+
+threshold:
+  # ファイル単位・パッケージ単位の一律閾値は設けない(0 = 無効)。
+  # 層別の基準は override で表現する。
+  file: 0
+  package: 0
+  # リポジトリ全体の基準。
+  total: 70
+
+# 層別の基準: domain / app は 90% 以上。
+# path は go-test-coverage が扱う名前に対する正規表現で、名前はモジュールパスを
+# 取り除いたリポジトリ相対パス(例: internal/domain/taskname.go)である。
+# パッケージ単位の閾値として解釈させるため `.go` で終わらない形にする。
+override:
+  - threshold: 90
+    path: ^internal/domain$
+  - threshold: 90
+    path: ^internal/app$

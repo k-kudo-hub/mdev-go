@@ -125,3 +125,91 @@ errcheck / errorlint / gocritic に加え、既定の staticcheck も併せて�
 - golangci-lint v2 の既定 (`default: standard`) は errcheck / govet / ineffassign /
   staticcheck / unused。errcheck は既定に含まれるが、ADR-0003 の意図を明示するため
   `enable` にも列挙している。
+
+## 3. go-test-coverage(カバレッジ閾値)
+
+- ツール: `github.com/vladopajic/go-test-coverage/v2@v2.19.0`
+- 設定: `.testcoverage.yml`(全体 70%、`internal/domain` と `internal/app` は 90%)
+- コマンド:
+  ```
+  go test -race -covermode=atomic -coverprofile=cover.out ./...
+  go run github.com/vladopajic/go-test-coverage/v2@v2.19.0 --config=.testcoverage.yml
+  ```
+
+### 正常時
+
+```
+Package coverage threshold (0%) satisfied:	PASS
+Total coverage threshold (70%) satisfied:	PASS
+Total test coverage: 80.0% (8/10)
+exit status 0
+```
+
+### 違反 1: domain のカバレッジが 90% を下回る
+
+`internal/domain/violation_tmp.go` にテストのない 1 文の関数を追加(domain 8/9 = 88.9%)。
+
+```
+Package coverage threshold (0%) satisfied:	FAIL
+  below threshold:				coverage:	threshold:
+  internal/domain				88.9% (8/9)	90%
+
+Total coverage threshold (70%) satisfied:	PASS
+Total test coverage: 72.7% (8/11)
+exit status 1
+```
+
+全体は 72.7% で PASS のまま domain だけが落ちており、層別の上書きルールが効いている。
+
+### 違反 2: app のカバレッジが 90% を下回る
+
+`internal/app/violation_tmp.go` にテストのない 1 文の関数を追加(app 0/1 = 0.0%)。
+
+```
+Package coverage threshold (0%) satisfied:	FAIL
+  below threshold:				coverage:	threshold:
+  internal/app					 0.0% (0/1)	90%
+exit status 1
+```
+
+### 違反 3: 全体が 70% を下回る
+
+`internal/cli/violation_tmp.go` にテストのない 5 文の関数を追加。
+
+```
+Package coverage threshold (0%) satisfied:	PASS
+Total coverage threshold (70%) satisfied:	FAIL
+Total test coverage: 53.3% (8/15)
+exit status 1
+```
+
+domain の上書きルール外(cli)の未テストコードは全体閾値で捕まる。
+
+確認後、一時ファイルをすべて削除し、再実行して PASS(80.0%)に戻ることを確認済み。
+
+### テストなし・空パッケージの扱い(実行して確認)
+
+- **doc.go のみで実行文を 1 つも持たないパッケージ**(現状の `internal/app`、`internal/cli`、
+  `internal/tui`、`internal/infra`)は、カバレッジプロファイルに 1 行も出力されないため
+  go-test-coverage の統計に現れず、**閾値判定の対象外**になる。
+  `--breakdown-file-name` の出力も `cmd/mdev/main.go;2;0` と
+  `internal/domain/taskname.go;8;8` の 2 行のみで、空パッケージは含まれない
+  (go-test-coverage 側にも「statements を持たないファイルは含めない」実装がある)。
+- したがって「`internal/app` に 90% を課しているのに app にテストが無い」状態でも現時点では
+  緑になる。実行文が 1 つでも追加された瞬間に 90% 判定の対象となり、違反 2 のとおり落ちる。
+- **テストファイルが 1 つも無いパッケージ**であっても、実行文があればプロファイルに 0% として
+  出力され判定対象になる(違反 2 と違反 3 がその実例)。
+
+### 設定上の注意(実行して判明した挙動)
+
+- `override.path` の正規表現が照合されるのは**モジュールパスを取り除いたリポジトリ相対パス**
+  (例: `internal/domain`、`internal/domain/taskname.go`)である。
+  当初 `^github\.com/k-kudo-hub/mdev-go/internal/domain$` と書いていたが**一切マッチせず**、
+  domain のカバレッジが 88.9% でも PASS してしまった。`^internal/domain$` に修正して検出された。
+- `threshold.package` を 0(無効)にしていても `override` は機能する。レポートの見出しは
+  `Package coverage threshold (0%)` のままだが、上書きルールに一致したパッケージには
+  上書き後の閾値が適用される。
+- `override.path` が `.go` / `.go$` で終わるかどうかでファイル単位かパッケージ単位かが
+  判定される。パッケージ単位にしたい場合は `.go` で終わらせないこと。
+- カバレッジプロファイルが古い(削除済みファイルを含む)と
+  `could not find file [...]` で失敗する。`go test` の後に必ず実行すること。
