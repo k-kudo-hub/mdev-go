@@ -345,3 +345,22 @@ gh label create bump:major --color B60205 --description "..." -R k-kudo-hub/mdev
 gh label create bump:minor --color FBCA04 --description "..." -R k-kudo-hub/mdev-go
 gh label create bump:patch --color 0E8A16 --description "..." -R k-kudo-hub/mdev-go
 ```
+
+## 6. 追記(レビュー後の CI 実測): go-test-coverage を v2.18.3 に変更
+
+PR #1 の CI(run 31262021632)で `make cover` が失敗した。
+
+```
+go: github.com/vladopajic/go-test-coverage/v2@v2.19.0 requires go >= 1.26
+(running go 1.25.12; GOTOOLCHAIN=local)
+```
+
+ローカルで観測した「go1.26.5 への自動切り替え」は、CI では働かない。
+`actions/setup-go` がインストールした Go を確実に使わせるため `GOTOOLCHAIN=local` を
+設定するためである。go 1.25 で動く最終版 v2.18.3(Go 1.24 要求)に固定して解決した。
+
+v2.18.3 での再検証(ローカル):
+
+- 正常時: `Total test coverage: 80.0% (8/10)` で PASS(exit 0)
+- 違反時(domain に未テスト 1 文を追加): `make: *** [cover] Error 1` で fail
+- 一時ファイル削除後: PASS に復帰

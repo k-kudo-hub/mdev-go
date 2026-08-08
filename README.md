@@ -27,10 +27,11 @@ lint / アーキテクチャ検査 / カバレッジ検査のツールは個別�
 |--------|-----------|------|
 | [golangci-lint](https://golangci-lint.run/) | v2.12.2 | Lint(depguard / errcheck / errorlint / gocritic ほか) |
 | [go-arch-lint](https://github.com/fe3dback/go-arch-lint) | v1.17.0 | ADR-0002 の依存方向の検証 |
-| [go-test-coverage](https://github.com/vladopajic/go-test-coverage) | v2.19.0 | カバレッジ閾値の検証 |
+| [go-test-coverage](https://github.com/vladopajic/go-test-coverage) | v2.18.3 | カバレッジ閾値の検証 |
 
-初回実行時はツールのビルドのため時間がかかる。go-test-coverage は Go 1.26 を要求するため、
-実行時に Go ツールチェーンが自動取得される(本体の `go.mod` には影響しない)。
+初回実行時はツールのビルドのため時間がかかる。go-test-coverage を v2.18.4 以降に
+上げる場合は Go 1.26 が必要になる(CI の setup-go は `GOTOOLCHAIN=local` を設定する
+ため、ツールチェーン自動取得では解決されない)。
 
 ### よく使うコマンド
 
