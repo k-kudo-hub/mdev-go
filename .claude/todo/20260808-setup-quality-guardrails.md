@@ -25,7 +25,7 @@ ADR-0003 の決定に従い、機能実装より先に「設計違反・品質�
 - [x] ツールのバージョン固定方法を確定し適用(go.mod tool ディレクティブを検証したが、3 ツール同居で `go mod tidy` が失敗し `go` ディレクティブも 1.26 に上がるため不採用。Makefile + 固定バージョン `go run` を採用。検証結果は `20260808-guardrail-evidence.md`)
 - [x] CI ワークフロー `.github/workflows/ci.yml` を作成(gofmt 差分ゼロ / golangci-lint / go-arch-lint / go test -race -cover + go-test-coverage / go build、macOS ランナー)
 - [x] `bump-label-check.yml`・`tag.yml`・`bump-version.sh` を claude-conductor から移植
-- [ ] `bump:major` / `bump:minor` / `bump:patch` ラベルを mdev-go リポジトリに作成
+- [x] `bump:major` / `bump:minor` / `bump:patch` ラベルを mdev-go リポジトリに作成(gh label create で 3 件作成済み)
 - [ ] README に開発手順(ビルド・テスト・lint の実行方法)を追記
 
 ## 完了条件
