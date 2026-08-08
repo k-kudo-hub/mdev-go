@@ -26,6 +26,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          # 依存ゼロの間は go.sum が存在せず、既定のキャッシュキー解決が
+          # エラーになる(actions/setup-go#427)。go.mod をキーにして回避し、
+          # ツールのバージョンを持つ Makefile もキーに含めることで
+          # ツール更新時にキャッシュを作り直す。
+          cache-dependency-path: |
+            go.mod
+            Makefile
 
       - name: gofmt 差分ゼロ検査
         run: make fmt-check
