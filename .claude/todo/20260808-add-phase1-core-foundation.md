@@ -30,7 +30,7 @@ ADR-0001 フェーズ 1 のうち、hook イベント処理系(`pending-notify.s
 
 ### app(ユースケースと port)
 
-- [ ] port を定義(`PendingStore` / `RegistryStore` / `Focuser`(Zellij)/ `Clock`)し、fake 実装をテスト用に用意
+- [x] port を定義(`PendingStore` / `RegistryStore` / `Focuser`(Zellij)/ `Clock`)し、fake 実装をテスト用に用意
 - [ ] `HandleNotify`(pending-notify.sh 相当)のテストを作成(session_id 空で no-op / registry の AND ガード / 上書き規則の適用)→ 実装
 - [ ] `HandlePostTool` のテストを作成(Notification のみ削除 / Main フォーカス / registry 不触)→ 実装
 - [ ] `HandleResolve` のテストを作成(無条件削除 / upsert / pending 無しでもフォーカス)→ 実装
