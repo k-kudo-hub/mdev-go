@@ -169,3 +169,45 @@ hook では 2 以外の非ゼロは非ブロッキング扱いで、会話を止
 | PostToolUse が Stop の pending も削除するようにする | `post-tool-keeps-stop` が「生成されていない」と zellij 呼び出しの差で fail |
 | タブ名の cwd フォールバックを無効化 | `notify-tab-fallback-from-cwd` が fail |
 | `session_id` 空の early return を削除 | `notify-no-session-id` / `notify-broken-stdin` が「Shell 版が作らないファイルが生成された」で fail |
+
+## 9. `make check` の結果
+
+```
+gofmt: no diff
+golangci-lint run ./...          -> 0 issues.
+go-arch-lint check               -> OK - No warnings found
+go test -race -covermode=atomic  -> 全パッケージ ok
+  internal/app          100.0%
+  internal/cli           90.5%
+  internal/domain       100.0%
+  internal/infra        100.0%
+  internal/infra/store   87.6%
+  internal/infra/zellij 100.0%
+go-test-coverage                 -> Total 90.8% (276/304) PASS
+go build -o bin/mdev ./cmd/mdev  -> 成功
+CHECK_EXIT=0
+```
+
+### 層別閾値(domain / app 90%)が実際に効いていることの確認
+
+`internal/app` に未テストの 22 文を持つ一時ファイルを置いて実行した。
+
+```
+below threshold:                        coverage:       threshold:
+internal/app                            68.2% (45/66)   90%
+
+Total coverage threshold (70%) satisfied:       PASS
+Total test coverage: 84.9% (276/325)
+exit status 1
+```
+
+全体は 84.9% で PASS のまま `internal/app` だけが落ちており、前タスクで設定した
+層別の上書きルールが、実行文を持つようになったこの PR から実際に機能している。
+確認後、一時ファイルを削除して PASS に戻ることを確認済み。
+
+### 未カバーの箇所(意図的に残したもの)
+
+- `cmd/mdev/main.go`: DI の組み立てのみ。実プロセスの起動でしか通らない
+- `internal/infra/store/atomic.go` / `registry.go` / `lock.go` の一部エラー分岐:
+  一時ファイルの chmod / rename 失敗など、ファイルシステムを壊さないと再現
+  できない経路。閾値を下げずに済む範囲なので、無理な再現テストは書いていない

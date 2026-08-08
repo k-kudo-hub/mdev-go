@@ -50,7 +50,7 @@ ADR-0001 フェーズ 1 のうち、hook イベント処理系(`pending-notify.s
 ### 互換性検証
 
 - [x] ゴールデンテスト: 現行 Shell 版に同じ stdin / 環境変数を与えて生成させた pending / registry 実ファイルを fixture 化し、Go 版の出力と JSON 等価(フィールド集合と値)で比較
-- [ ] `make check` を実行し、カバレッジ層別閾値(domain / app 90%)を含む全ガードレールが緑であることを確認
+- [x] `make check` を実行し、カバレッジ層別閾値(domain / app 90%)を含む全ガードレールが緑であることを確認
 
 ## 完了条件
 
