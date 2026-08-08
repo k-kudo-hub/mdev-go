@@ -14,7 +14,7 @@ ADR-0003 の決定に従い、機能実装より先に「設計違反・品質�
 ## TODO
 
 - [x] `.gitignore` を作成(バイナリ、cover.out、.worktree/)
-- [ ] `go.mod` を初期化(module `github.com/k-kudo-hub/mdev-go`、go 1.25)
+- [x] `go.mod` を初期化(module `github.com/k-kudo-hub/mdev-go`、go 1.25)
 - [ ] ADR-0002 のパッケージ骨格を作成(`cmd/mdev` の main、`internal/{cli,tui,app,domain,infra}` の doc.go)
 - [ ] domain に最小の実装とテストを 1 組作成(検証パイプラインを通すための実体。例: config のデフォルト値かバージョン文字列の検証)
 - [ ] `.go-arch-lint.yml` を作成し、ADR-0002 の依存方向を定義
