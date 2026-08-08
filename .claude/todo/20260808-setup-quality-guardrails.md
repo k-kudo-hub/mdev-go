@@ -26,7 +26,7 @@ ADR-0003 の決定に従い、機能実装より先に「設計違反・品質�
 - [x] CI ワークフロー `.github/workflows/ci.yml` を作成(gofmt 差分ゼロ / golangci-lint / go-arch-lint / go test -race -cover + go-test-coverage / go build、macOS ランナー)
 - [x] `bump-label-check.yml`・`tag.yml`・`bump-version.sh` を claude-conductor から移植
 - [x] `bump:major` / `bump:minor` / `bump:patch` ラベルを mdev-go リポジトリに作成(gh label create で 3 件作成済み)
-- [ ] README に開発手順(ビルド・テスト・lint の実行方法)を追記
+- [x] README に開発手順(ビルド・テスト・lint の実行方法)を追記
 
 ## 完了条件
 
