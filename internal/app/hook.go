@@ -99,6 +99,47 @@ func (h *HookHandler) HandlePostTool(raw []byte, env HookEnv) error {
 	return h.focusMain(env)
 }
 
+// HandleResolve は UserPromptSubmit hook を処理する
+// (現行 pending-resolve.sh 相当)。
+//
+// ユーザーが次の指示を出した時点でタスクは待ち状態ではなくなるため、
+// event を問わず pending を削除する(Waiting の解除もこの経路である)。
+// 応答後もタスクは動き続けるので、レジストリは最新の内容へ更新する。
+//
+// pending が無くても Main へフォーカスを戻す。ユーザーがタスクタブで入力を
+// 終えたら常にダッシュボードへ戻す、という操作感を保つためである。
+func (h *HookHandler) HandleResolve(raw []byte, env HookEnv) error {
+	in := domain.ParseHookInput(raw)
+	if in.SessionID == "" {
+		return nil
+	}
+
+	session := domain.SessionName(env.ZellijSession)
+	if err := h.Pending.Delete(session, in.SessionID); err != nil {
+		return fmt.Errorf("pending の削除に失敗しました: %w", err)
+	}
+
+	if env.IsTaskTab() {
+		// notify と違い cwd の basename へフォールバックしない。
+		// レジストリ登録自体が TASK_TAB_NAME 非空を条件にしているためである。
+		entry := domain.RegistryEntry{
+			Tab:             env.TaskTabName,
+			Session:         session,
+			ClaudeSessionID: in.SessionID,
+			UpdatedAt:       h.Clock.Now().Format(domain.RegistryUpdatedAtLayout),
+			Dir:             in.Cwd,
+			TaskType:        env.TaskType,
+			Agent:           domain.AgentName(env.TaskAgent),
+			TranscriptPath:  in.TranscriptPath,
+		}
+		if err := h.Registry.Upsert(entry); err != nil {
+			return fmt.Errorf("レジストリの更新に失敗しました: %w", err)
+		}
+	}
+
+	return h.focusMain(env)
+}
+
 // focusMain は zellij セッション内であればダッシュボードへフォーカスを戻す。
 func (h *HookHandler) focusMain(env HookEnv) error {
 	if !env.InZellij() {
