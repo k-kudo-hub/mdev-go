@@ -10,7 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  # ci.yml の check ジョブと区別できる名前にする(ブランチ保護の必須チェック指定のため)。
+  bump-label:
     runs-on: ubuntu-latest
     steps:
       - name: Require a bump:* label
