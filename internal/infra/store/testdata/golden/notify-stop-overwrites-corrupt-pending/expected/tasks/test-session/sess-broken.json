@@ -1,0 +1,8 @@
+{
+  "tab": "api-feature",
+  "session": "test-session",
+  "claude_session_id": "sess-broken",
+  "updated_at": "2026-08-09T00:18:31+0900",
+  "dir": "/tmp/myapp",
+  "agent": "claude"
+}

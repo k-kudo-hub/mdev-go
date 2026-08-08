@@ -1,0 +1,10 @@
+{
+  "tab": "api-feature",
+  "session": "test-session",
+  "claude_session_id": "sess-empty",
+  "message": "",
+  "event": "Stop",
+  "time": "00:18:31",
+  "agent": "claude",
+  "dir": "/tmp/myapp"
+}

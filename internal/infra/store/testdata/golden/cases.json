@@ -1,0 +1,261 @@
+[
+  {
+    "name": "notify-notification-full",
+    "description": "Notification: 全項目そろった入力。pending とレジストリの両方を書く",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-aaa\",\"message\":\"Permission needed\",\"hook_event_name\":\"Notification\",\"cwd\":\"/tmp/myapp\",\"transcript_path\":\"/tmp/t-aaa.jsonl\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature",
+      "TASK_TYPE": "dev",
+      "TASK_AGENT": "claude"
+    },
+    "pre": {}
+  },
+  {
+    "name": "notify-stop-new",
+    "description": "Stop: pending が無ければ新規に作る",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-bbb\",\"message\":\"Review done\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "review-pr"
+    },
+    "pre": {}
+  },
+  {
+    "name": "notify-stop-keeps-notification",
+    "description": "Stop: 既存の Notification は上書きしない(レジストリだけ更新される)",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-aaa\",\"message\":\"Task done\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {
+      "pending/test-session/sess-aaa.json": "{\"tab\":\"api-feature\",\"session\":\"test-session\",\"claude_session_id\":\"sess-aaa\",\"message\":\"Permission needed\",\"event\":\"Notification\",\"time\":\"09:00:00\",\"agent\":\"claude\",\"dir\":\"/tmp/myapp\"}\n"
+    }
+  },
+  {
+    "name": "notify-stop-keeps-waiting",
+    "description": "Stop: 退避中(Waiting)の pending も上書きしない",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-wait\",\"message\":\"Task done\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {
+      "pending/test-session/sess-wait.json": "{\"tab\":\"api-feature\",\"session\":\"test-session\",\"claude_session_id\":\"sess-wait\",\"message\":\"waiting for review\",\"event\":\"Waiting\",\"time\":\"10:00:00\",\"agent\":\"claude\",\"prev_event\":\"Stop\"}\n"
+    }
+  },
+  {
+    "name": "notify-notification-overwrites-waiting",
+    "description": "Notification: Waiting を無条件に上書きする(prev_event は消える)",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-wait\",\"message\":\"Permission needed\",\"hook_event_name\":\"Notification\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {
+      "pending/test-session/sess-wait.json": "{\"tab\":\"api-feature\",\"session\":\"test-session\",\"claude_session_id\":\"sess-wait\",\"message\":\"waiting for review\",\"event\":\"Waiting\",\"time\":\"10:00:00\",\"agent\":\"claude\",\"prev_event\":\"Stop\"}\n"
+    }
+  },
+  {
+    "name": "notify-stop-overwrites-corrupt-pending",
+    "description": "Stop: 壊れた pending は event 空として扱われ上書きされる",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-broken\",\"message\":\"Task done\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {
+      "pending/test-session/sess-broken.json": "{\"event\":"
+    }
+  },
+  {
+    "name": "notify-tab-fallback-from-cwd",
+    "description": "TASK_TAB_NAME が無ければ cwd の basename をタブ名にし、レジストリには登録しない",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-ccc\",\"message\":\"test\",\"hook_event_name\":\"Notification\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "pre": {}
+  },
+  {
+    "name": "notify-minimal-input",
+    "description": "session_id だけの入力。message と hook_event_name が既定値になり、タブ名は unknown",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-min\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "pre": {}
+  },
+  {
+    "name": "notify-empty-message",
+    "description": "message が空文字なら既定値に置き換わらない(jq の // は null と false にのみ作用する)",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-empty\",\"message\":\"\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {}
+  },
+  {
+    "name": "notify-null-message",
+    "description": "message が null なら既定値になる",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-null\",\"message\":null,\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {}
+  },
+  {
+    "name": "notify-outside-zellij",
+    "description": "zellij 外では session が unknown になり、レジストリには登録しない",
+    "hook": "notify",
+    "stdin": "{\"session_id\":\"sess-nozellij\",\"message\":\"m\",\"hook_event_name\":\"Stop\",\"cwd\":\"/tmp/x\"}",
+    "env": {
+      "TASK_TAB_NAME": "some-tab"
+    },
+    "pre": {}
+  },
+  {
+    "name": "notify-no-session-id",
+    "description": "session_id が無ければ何も書かない",
+    "hook": "notify",
+    "stdin": "{\"message\":\"no session id\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {}
+  },
+  {
+    "name": "notify-broken-stdin",
+    "description": "壊れた標準入力は session_id が取れないので何も書かない",
+    "hook": "notify",
+    "stdin": "{broken json",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {}
+  },
+  {
+    "name": "post-tool-resolves-notification",
+    "description": "PostToolUse: Notification の pending を削除して Main へ戻る",
+    "hook": "post-tool",
+    "stdin": "{\"session_id\":\"sess-aaa\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "pre": {
+      "pending/test-session/sess-aaa.json": "{\"tab\":\"api-feature\",\"session\":\"test-session\",\"claude_session_id\":\"sess-aaa\",\"message\":\"Permission needed\",\"event\":\"Notification\",\"time\":\"09:00:00\",\"agent\":\"claude\"}\n",
+      "tasks/test-session/sess-aaa.json": "{\"tab\":\"api-feature\",\"session\":\"test-session\",\"claude_session_id\":\"sess-aaa\",\"updated_at\":\"2026-08-08T09:00:00+0900\",\"dir\":\"/tmp/myapp\",\"agent\":\"claude\"}\n"
+    }
+  },
+  {
+    "name": "post-tool-keeps-stop",
+    "description": "PostToolUse: Stop の pending には触れず、フォーカスも動かさない",
+    "hook": "post-tool",
+    "stdin": "{\"session_id\":\"sess-bbb\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "pre": {
+      "pending/test-session/sess-bbb.json": "{\"tab\":\"review-pr\",\"session\":\"test-session\",\"claude_session_id\":\"sess-bbb\",\"message\":\"Review done\",\"event\":\"Stop\",\"time\":\"09:00:00\",\"agent\":\"claude\"}\n"
+    }
+  },
+  {
+    "name": "post-tool-without-pending",
+    "description": "PostToolUse: pending が無ければ何もしない(フォーカスも動かさない)",
+    "hook": "post-tool",
+    "stdin": "{\"session_id\":\"sess-none\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "pre": {}
+  },
+  {
+    "name": "post-tool-with-corrupt-pending",
+    "description": "PostToolUse: 壊れた pending は event 空として扱われ、削除されない",
+    "hook": "post-tool",
+    "stdin": "{\"session_id\":\"sess-broken\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "pre": {
+      "pending/test-session/sess-broken.json": "{\"event\":"
+    }
+  },
+  {
+    "name": "resolve-stop-pending",
+    "description": "UserPromptSubmit: event を問わず pending を消し、レジストリを更新して Main へ戻る",
+    "hook": "resolve",
+    "stdin": "{\"session_id\":\"sess-bbb\",\"cwd\":\"/tmp/myapp\",\"transcript_path\":\"/tmp/t-bbb.jsonl\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "review-pr",
+      "TASK_TYPE": "review",
+      "TASK_AGENT": "claude"
+    },
+    "pre": {
+      "pending/test-session/sess-bbb.json": "{\"tab\":\"review-pr\",\"session\":\"test-session\",\"claude_session_id\":\"sess-bbb\",\"message\":\"Review done\",\"event\":\"Stop\",\"time\":\"09:00:00\",\"agent\":\"claude\"}\n"
+    }
+  },
+  {
+    "name": "resolve-waiting-pending",
+    "description": "UserPromptSubmit: Waiting の pending も消える(退避の解除)",
+    "hook": "resolve",
+    "stdin": "{\"session_id\":\"sess-wait\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {
+      "pending/test-session/sess-wait.json": "{\"tab\":\"api-feature\",\"session\":\"test-session\",\"claude_session_id\":\"sess-wait\",\"message\":\"waiting for review\",\"event\":\"Waiting\",\"time\":\"10:00:00\",\"agent\":\"claude\",\"prev_event\":\"Stop\"}\n"
+    }
+  },
+  {
+    "name": "resolve-without-pending",
+    "description": "UserPromptSubmit: pending が無くてもレジストリ更新と Main へのフォーカスは行う",
+    "hook": "resolve",
+    "stdin": "{\"session_id\":\"sess-none\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {}
+  },
+  {
+    "name": "resolve-outside-task-tab",
+    "description": "UserPromptSubmit: TASK_TAB_NAME が無ければレジストリには登録しない",
+    "hook": "resolve",
+    "stdin": "{\"session_id\":\"sess-bbb\",\"cwd\":\"/tmp/myapp\"}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "pre": {
+      "pending/test-session/sess-bbb.json": "{\"tab\":\"review-pr\",\"session\":\"test-session\",\"claude_session_id\":\"sess-bbb\",\"message\":\"Review done\",\"event\":\"Stop\",\"time\":\"09:00:00\",\"agent\":\"claude\"}\n"
+    }
+  },
+  {
+    "name": "resolve-no-session-id",
+    "description": "session_id が無ければ何もしない(フォーカスも動かさない)",
+    "hook": "resolve",
+    "stdin": "{}",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session",
+      "TASK_TAB_NAME": "api-feature"
+    },
+    "pre": {}
+  }
+]
