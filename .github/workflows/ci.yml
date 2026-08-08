@@ -1,0 +1,43 @@
+name: CI
+
+# ADR-0003 のガードレールを PR と main への push で実行する。
+# 実行するコマンドは Makefile 経由に統一し、ローカルと同一バージョンのツールを使う。
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# 同一ブランチで走り続けている古いジョブは打ち切る。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # 配布対象が macOS のため、検査もビルドも macOS ランナーで行う(ADR-0003)。
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt 差分ゼロ検査
+        run: make fmt-check
+
+      - name: golangci-lint
+        run: make lint
+
+      - name: go-arch-lint
+        run: make arch
+
+      - name: go test -race + カバレッジ閾値検査
+        run: make cover
+
+      - name: go build
+        run: make build

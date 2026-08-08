@@ -23,7 +23,7 @@ ADR-0003 の決定に従い、機能実装より先に「設計違反・品質�
 - [x] golangci-lint の違反検出を確認(許可外 import / domain からの許可ライブラリ import / 握り潰しエラー / `==` 比較 / `%v` ラップ / if-else 連鎖で fail を確認し、戻す。記録: `20260808-guardrail-evidence.md`)
 - [x] `.testcoverage.yml` を作成(全体 70%、`internal/domain`・`internal/app` は 90% の上書きルール。3 パターンの違反検出と空パッケージの扱いを `20260808-guardrail-evidence.md` に記録)
 - [x] ツールのバージョン固定方法を確定し適用(go.mod tool ディレクティブを検証したが、3 ツール同居で `go mod tidy` が失敗し `go` ディレクティブも 1.26 に上がるため不採用。Makefile + 固定バージョン `go run` を採用。検証結果は `20260808-guardrail-evidence.md`)
-- [ ] CI ワークフロー `.github/workflows/ci.yml` を作成(gofmt 差分ゼロ / golangci-lint / go-arch-lint / go test -race -cover + go-test-coverage / go build、macOS ランナー)
+- [x] CI ワークフロー `.github/workflows/ci.yml` を作成(gofmt 差分ゼロ / golangci-lint / go-arch-lint / go test -race -cover + go-test-coverage / go build、macOS ランナー)
 - [ ] `bump-label-check.yml`・`tag.yml`・`bump-version.sh` を claude-conductor から移植
 - [ ] `bump:major` / `bump:minor` / `bump:patch` ラベルを mdev-go リポジトリに作成
 - [ ] README に開発手順(ビルド・テスト・lint の実行方法)を追記
