@@ -213,3 +213,84 @@ domain の上書きルール外(cli)の未テストコードは全体閾値で�
   判定される。パッケージ単位にしたい場合は `.go` で終わらせないこと。
 - カバレッジプロファイルが古い(削除済みファイルを含む)と
   `could not find file [...]` で失敗する。`go test` の後に必ず実行すること。
+
+## 4. ツールバージョン固定方法の検証(go.mod tool ディレクティブ)
+
+ADR-0003 は「`go.mod` の tool ディレクティブ等でリポジトリに固定する」としているため、
+tool ディレクティブを第一候補として実際に検証した。結論として **tool ディレクティブは採用せず**、
+`Makefile` + バージョン固定 `go run <module>@<version>` を採用する。
+
+### 検証内容と結果
+
+| 組み合わせ | `go get -tool` | `go mod tidy` | 結果 |
+|------------|----------------|---------------|------|
+| golangci-lint v2.12.2 のみ | 成功 | 成功 | `go tool golangci-lint --version` 動作。`go` ディレクティブは `1.25.0` |
+| go-arch-lint v1.17.0 のみ | 成功 | 成功 | `go tool go-arch-lint check` 動作。`go` ディレクティブは `1.25.0` |
+| + go-test-coverage v2.19.0 | 成功 | 成功 | `go` ディレクティブが **`1.26` に引き上げられる** |
+| 3 ツールすべて | 成功 | **失敗** | ambiguous import で `go mod tidy` が exit 1 |
+
+### 不採用の決め手 1: 3 ツール同居で `go mod tidy` が失敗する
+
+```
+go: github.com/fe3dback/go-arch-lint imports
+	...
+	oss.terrastruct.com/d2/d2layouts/d2dagrelayout imports
+	cdr.dev/slog tested by
+	cdr.dev/slog.test imports
+	cdr.dev/slog/sloggers/slogstackdriver imports
+	google.golang.org/genproto/googleapis/logging/v2 imports
+	google.golang.org/genproto/googleapis/rpc/status: ambiguous import: found package google.golang.org/genproto/googleapis/rpc/status in multiple modules:
+	google.golang.org/genproto v0.0.0-20220519153652-3a47de7e79bd
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217
+(cloud.google.com/go/compute/metadata でも同種の ambiguous import が発生)
+TIDY=1
+```
+
+go-arch-lint が依存する `oss.terrastruct.com/d2` → `cdr.dev/slog` の古い
+`google.golang.org/genproto` と、golangci-lint 側が引き込む分割後の
+`google.golang.org/genproto/googleapis/rpc` が衝突する。`go mod tidy` が通らない状態は
+日常の依存追加(cobra / bubbletea を入れるフェーズ 1〜2)で確実に支障になる。
+
+### 不採用の決め手 2: `go` ディレクティブが 1.26 に引き上げられる
+
+go-test-coverage は v2.18.4 以降 `go 1.26` を要求する(v2.18.3 までは `go 1.24`)。
+tool ディレクティブに加えると本体の `go.mod` が `go 1.26` に書き換わり、
+ADR-0001/0002 で前提としている `go 1.25` を満たさなくなる。
+
+### 不採用の決め手 3: go.mod / go.sum の肥大化
+
+3 ツールを tool 依存にすると `go.mod` 220 行超・`go.sum` 926 行超まで膨らみ、
+本体の依存(cobra / bubbletea のみの予定)がレビューで見えなくなる。
+また `go tool golangci-lint` 実行時に `missing go.sum entry for module providing package
+github.com/fsnotify/fsnotify` が出るなど、go.sum の整合を別途取る必要があった。
+
+### 採用した代替手段
+
+`Makefile` にバージョンを変数として持ち、`go run <module>@<version>` で実行する。
+
+```make
+GOLANGCI_LINT_VERSION    := v2.12.2
+GO_ARCH_LINT_VERSION     := v1.17.0
+GO_TEST_COVERAGE_VERSION := v2.19.0
+```
+
+- `go run <module>@<version>` はカレントモジュールの `go.mod` を無視して解決するため、
+  本体の依存グラフを一切汚さない(検証後 `git checkout go.mod && rm go.sum` で
+  完全にクリーンな状態に戻ることを確認済み)
+- ローカルも CI も `make lint` / `make arch` / `make cover` を呼ぶため、バージョンは常に一致する
+- 初回はビルドが走るが、以降はビルドキャッシュが効く(`make check` 全体で約 4 秒)
+- 副作用として go-test-coverage v2.19.0 の実行時に
+  `requires go >= 1.26; switching to go1.26.5` が出て Go ツールチェーンが自動取得される。
+  これは `go run` 側の一時的な解決であり、本体の `go.mod`(`go 1.25`)には影響しない
+
+### `make check` の実行結果(全ガードレール緑)
+
+```
+gofmt: no diff
+golangci-lint run ./...            -> 0 issues.
+go-arch-lint check                 -> OK - No warnings found
+go test -race -covermode=atomic    -> ok  internal/domain  coverage: 100.0%
+go-test-coverage                   -> Total coverage threshold (70%) satisfied: PASS / 80.0% (8/10)
+go build -o bin/mdev ./cmd/mdev    -> 成功
+CHECK_EXIT=0
+```
