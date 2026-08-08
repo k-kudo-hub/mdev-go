@@ -31,7 +31,7 @@ linters:
         domain:
           list-mode: strict
           files:
-            - "**/internal/domain/**/*.go"
+            - "**/internal/domain/**"
           allow:
             - $gostd
             - github.com/k-kudo-hub/mdev-go/internal/domain
