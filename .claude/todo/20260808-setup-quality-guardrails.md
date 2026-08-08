@@ -1,0 +1,42 @@
+# 品質ガードレールのセットアップ(フェーズ1 最初のタスク)
+
+## 概要
+
+ADR-0003 の決定に従い、機能実装より先に「設計違反・品質低下を CI が落とす」状態を構築する。
+各ガードレールは**意図的な違反で fail することを確認してから**設定を確定する(ガードレール自体のテストファースト)。
+
+## 事前調査の結果
+
+- ローカルの Go: go1.25.5 darwin/arm64(go.mod は `go 1.25` とする。golangci-lint の Go 1.26 対応は v2.9.0 以降のため lint 側の制約はない)
+- カバレッジ層別閾値: [vladopajic/go-test-coverage](https://github.com/vladopajic/go-test-coverage) v2 が package 単位の閾値と正規表現による上書きルールをサポートしており、domain/app 90%・全体 70% を表現できる(GitHub Action あり)
+- bump ラベルのリリースフロー: claude-conductor の `.github/workflows/bump-label-check.yml`・`tag.yml`・`scripts/bump-version.sh` を移植する
+
+## TODO
+
+- [x] `.gitignore` を作成(バイナリ、cover.out、.worktree/)
+- [ ] `go.mod` を初期化(module `github.com/k-kudo-hub/mdev-go`、go 1.25)
+- [ ] ADR-0002 のパッケージ骨格を作成(`cmd/mdev` の main、`internal/{cli,tui,app,domain,infra}` の doc.go)
+- [ ] domain に最小の実装とテストを 1 組作成(検証パイプラインを通すための実体。例: config のデフォルト値かバージョン文字列の検証)
+- [ ] `.go-arch-lint.yml` を作成し、ADR-0002 の依存方向を定義
+- [ ] go-arch-lint の違反検出を確認(domain→infra の import を一時的に書いて fail を確認し、戻す)
+- [ ] `.golangci.yml` を作成(depguard 許可リスト = cobra / bubbletea / 標準ライブラリ、errcheck / errorlint / gocritic 有効)
+- [ ] golangci-lint の違反検出を確認(許可外 import と握り潰しエラーで fail を確認し、戻す)
+- [ ] `.testcoverage.yml` を作成(全体 70%、`internal/domain`・`internal/app` は 90% の上書きルール)
+- [ ] ツールのバージョン固定方法を確定し適用(go.mod tool ディレクティブを検証、不可なら別手段を ADR 追記)
+- [ ] CI ワークフロー `.github/workflows/ci.yml` を作成(gofmt 差分ゼロ / golangci-lint / go-arch-lint / go test -race -cover + go-test-coverage / go build、macOS ランナー)
+- [ ] `bump-label-check.yml`・`tag.yml`・`bump-version.sh` を claude-conductor から移植
+- [ ] `bump:major` / `bump:minor` / `bump:patch` ラベルを mdev-go リポジトリに作成
+- [ ] README に開発手順(ビルド・テスト・lint の実行方法)を追記
+
+## 完了条件
+
+- PR の CI で gofmt / golangci-lint / go-arch-lint / テスト+カバレッジ閾値 / ビルド がすべて実行され、緑になる
+- 各ガードレールが違反を実際に検出することを確認済み(確認手順と結果を PR 説明に記載)
+- ローカルでも CI と同一バージョンのツールで同じ検査を実行できる
+- bump ラベルなしの PR が bump-label-check で fail する
+
+## 備考
+
+- ブランチ保護(必須チェック指定)はガードレール一式がマージされ CI のジョブ名が確定してから設定する(このタスクの最後にユーザーへ確認)
+- golangci-lint のバージョンは 2026-05-06 時点の最新 v2.12.2 を基準にする
+- リンター・閾値の設定変更は今後 ADR 改訂を伴う(ADR-0003)

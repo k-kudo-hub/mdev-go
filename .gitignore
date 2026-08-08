@@ -1,0 +1,15 @@
+# ビルド成果物
+/mdev
+/bin/
+/dist/
+
+# テスト・カバレッジ
+cover.out
+coverage.out
+*.test
+
+# 作業用 worktree
+/.worktree/
+
+# OS
+.DS_Store
