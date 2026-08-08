@@ -1,0 +1,37 @@
+# golangci-lint v2 の設定(ADR-0003 のガードレール 2)。
+# バージョンは Makefile の GOLANGCI_LINT_VERSION で固定する。
+#
+# リンター・許可ライブラリの変更は ADR の改訂を伴う PR としてレビューする。
+version: "2"
+
+linters:
+  # standard = errcheck / govet / ineffassign / staticcheck / unused
+  default: standard
+  enable:
+    - depguard # 許可外ライブラリの import を禁止
+    - errcheck # エラーの握り潰しを検出(standard にも含まれるが明示する)
+    - errorlint # errors.Is/As を使わないエラー比較・%w の付け忘れを検出
+    - gocritic # 一般的なコードスメルを検出
+
+  settings:
+    depguard:
+      rules:
+        # 全パッケージ共通: ADR-0002 の採用ライブラリ表を許可リストとする。
+        all:
+          list-mode: strict
+          allow:
+            - $gostd
+            - github.com/k-kudo-hub/mdev-go
+            - github.com/spf13/cobra
+            - github.com/charmbracelet/bubbletea/v2
+            - github.com/charmbracelet/bubbles/v2
+            - golang.org/x
+
+        # domain は標準ライブラリと domain 自身以外に依存しない(ADR-0002)。
+        domain:
+          list-mode: strict
+          files:
+            - "**/internal/domain/**"
+          allow:
+            - $gostd
+            - github.com/k-kudo-hub/mdev-go/internal/domain
