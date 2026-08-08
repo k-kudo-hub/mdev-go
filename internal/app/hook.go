@@ -72,3 +72,40 @@ func (h *HookHandler) HandleNotify(raw []byte, env HookEnv) error {
 	}
 	return nil
 }
+
+// HandlePostTool は PostToolUse hook を処理する
+// (現行 pending-post-tool.sh 相当)。
+//
+// 許可要求(Notification)への応答はツール実行の再開として現れるため、
+// このタイミングで Notification の pending だけを解決する。Stop の pending は
+// タスクが done であることを表しており、ユーザーが次の指示を出すまで残す
+// (解決するのは HandleResolve)。
+//
+// レジストリには触れない。タスクの生死は変わらないためである。
+func (h *HookHandler) HandlePostTool(raw []byte, env HookEnv) error {
+	in := domain.ParseHookInput(raw)
+	if in.SessionID == "" {
+		return nil
+	}
+
+	session := domain.SessionName(env.ZellijSession)
+	if h.Pending.Event(session, in.SessionID) != domain.EventNotification {
+		return nil
+	}
+
+	if err := h.Pending.Delete(session, in.SessionID); err != nil {
+		return fmt.Errorf("pending の削除に失敗しました: %w", err)
+	}
+	return h.focusMain(env)
+}
+
+// focusMain は zellij セッション内であればダッシュボードへフォーカスを戻す。
+func (h *HookHandler) focusMain(env HookEnv) error {
+	if !env.InZellij() {
+		return nil
+	}
+	if err := h.Focuser.FocusTab(domain.MainTabName); err != nil {
+		return fmt.Errorf("タブ %q へのフォーカス移動に失敗しました: %w", domain.MainTabName, err)
+	}
+	return nil
+}
