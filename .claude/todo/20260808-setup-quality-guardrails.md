@@ -17,7 +17,7 @@ ADR-0003 の決定に従い、機能実装より先に「設計違反・品質�
 - [x] `go.mod` を初期化(module `github.com/k-kudo-hub/mdev-go`、go 1.25)
 - [x] ADR-0002 のパッケージ骨格を作成(`cmd/mdev` の main、`internal/{cli,tui,app,domain,infra}` の doc.go)
 - [x] domain に最小の実装とテストを 1 組作成(タスク名の重複採番 `UniqueTaskName`。claude-conductor の `ensure_unique_tab_name` を移植)
-- [ ] `.go-arch-lint.yml` を作成し、ADR-0002 の依存方向を定義
+- [x] `.go-arch-lint.yml` を作成し、ADR-0002 の依存方向を定義
 - [ ] go-arch-lint の違反検出を確認(domain→infra の import を一時的に書いて fail を確認し、戻す)
 - [ ] `.golangci.yml` を作成(depguard 許可リスト = cobra / bubbletea / 標準ライブラリ、errcheck / errorlint / gocritic 有効)
 - [ ] golangci-lint の違反検出を確認(許可外 import と握り潰しエラーで fail を確認し、戻す)

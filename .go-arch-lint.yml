@@ -1,0 +1,58 @@
+# ADR-0002 で定めた依存方向を機械的に強制する(ADR-0003 のガードレール 1)。
+#
+#   cli ─┐
+#        ├─→ app ─→ domain
+#   tui ─┘    ↑
+#   infra ────┘ (port の実装として)
+#   cmd/mdev ─→ 全パッケージ(組み立てのみ)
+#
+# この YAML の変更は ADR の改訂を伴う PR としてレビューする。
+version: 3
+
+allow:
+  # 外部ライブラリの許可リストは .golangci.yml の depguard が担当する。
+  # ここでは internal パッケージ間の依存方向のみを検証する。
+  depOnAnyVendor: true
+
+components:
+  main:   { in: cmd/mdev }
+  cli:    { in: internal/cli }
+  tui:    { in: internal/tui }
+  app:    { in: internal/app }
+  domain: { in: internal/domain }
+  infra:  { in: [ internal/infra, internal/infra/** ] }
+
+deps:
+  # main は DI の組み立てのみを行うため全パッケージを参照できる。
+  main:
+    anyProjectDeps: true
+
+  # cli / tui は入出力の変換のみ。app だけを呼ぶ(相互参照禁止)。
+  # 自コンポーネント参照は、外部テストパッケージ(package xxx_test)と
+  # 将来のサブパッケージのために許可する。
+  cli:
+    mayDependOn:
+      - cli
+      - app
+  tui:
+    mayDependOn:
+      - tui
+      - app
+
+  # app は port を定義し domain を使って処理を組み立てる。
+  app:
+    mayDependOn:
+      - app
+      - domain
+
+  # infra は app の port を実装し、domain の型を扱う。
+  infra:
+    mayDependOn:
+      - infra
+      - app
+      - domain
+
+  # domain は他のどの internal パッケージにも依存しない(自分自身のみ)。
+  domain:
+    mayDependOn:
+      - domain
