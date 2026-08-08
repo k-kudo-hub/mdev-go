@@ -294,3 +294,54 @@ go-test-coverage                   -> Total coverage threshold (70%) satisfied: 
 go build -o bin/mdev ./cmd/mdev    -> 成功
 CHECK_EXIT=0
 ```
+
+## 5. bump ラベルフロー(bump-label-check.yml / tag.yml / scripts/bump-version.sh)
+
+claude-conductor から移植した。移植にあたっての変更点は次の 3 点のみ。
+
+- `actions/checkout` を `v4` から `v7`(2026-08-08 時点の最新メジャー)に更新
+- `bump-label-check.yml` に `permissions: contents: read` を明示
+- `tag.yml` の `run` 内で `${{ steps.bump.outputs.level }}` を直接展開していた箇所を
+  `env: LEVEL:` 経由に変更(`run` へのスクリプト注入を避けるため)
+
+構文検証: `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7` が
+`.github/workflows/` の 3 ファイルすべてで exit 0(指摘なし)。
+
+### bump-label-check の判定ロジックをローカルで再現して確認
+
+ワークフロー内の jq 式をそのまま実行した結果:
+
+```
+LABELS=[]                   -> FAIL(exit1)
+LABELS=["bug"]              -> FAIL(exit1)
+LABELS=["bump:patch"]       -> PASS(exit0)
+LABELS=["bug","bump:major"] -> PASS(exit0)
+```
+
+bump ラベルが無い PR が確実に落ちることを確認した。
+
+### tag.yml の bump レベル決定を確認
+
+```
+["bump:patch"]              -> patch
+["bump:patch","bump:major"] -> major   (major > minor > patch の優先度)
+["bug"]                     -> <skip>  (タグ生成をスキップ)
+```
+
+### scripts/bump-version.sh の動作確認
+
+```
+bash scripts/bump-version.sh minor ""      -> v0.1.0
+bash scripts/bump-version.sh patch v1.2.3  -> v1.2.4
+bash scripts/bump-version.sh major 1.2.3   -> v2.0.0
+bash scripts/bump-version.sh foo v1.0.0    -> exit 1
+    bump-version.sh: invalid bump type: 'foo' (expected major|minor|patch)
+```
+
+### bump ラベルの作成
+
+```
+gh label create bump:major --color B60205 --description "..." -R k-kudo-hub/mdev-go
+gh label create bump:minor --color FBCA04 --description "..." -R k-kudo-hub/mdev-go
+gh label create bump:patch --color 0E8A16 --description "..." -R k-kudo-hub/mdev-go
+```

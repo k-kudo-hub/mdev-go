@@ -1,0 +1,60 @@
+name: Tag on merge
+
+# PR マージ時に bump:* ラベルへ応じた semver タグを自動生成する。
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+# 同時マージによるタグ算出の競合を避ける(直列化する)。
+concurrency:
+  group: tag-on-merge
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # タグと全履歴を取得するため
+          # 既定のマージref(refs/pull/N/merge)ではなくマージ後のmainを取得する。
+          # これによりタグがmainの実コミットを指し、git describe から到達可能になる。
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Determine bump level from PR labels
+        id: bump
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          level=""
+          # 優先度: major > minor > patch(複数付与時は上位を採用)
+          for l in major minor patch; do
+            if echo "$LABELS" | jq -e --arg n "bump:$l" 'index($n) != null' >/dev/null; then
+              level="$l"
+              break
+            fi
+          done
+          if [ -z "$level" ]; then
+            echo "No bump:* label found; skipping tag."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "level=$level" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.bump.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEVEL: ${{ steps.bump.outputs.level }}
+        run: |
+          current=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          next=$(bash scripts/bump-version.sh "$LEVEL" "$current")
+          echo "Bumping $current -> $next ($LEVEL)"
+          git tag "$next"
+          git push origin "$next"
+          gh release create "$next" --generate-notes --title "$next"

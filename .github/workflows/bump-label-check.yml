@@ -1,0 +1,25 @@
+name: Bump label check
+
+# PR には bump:major / bump:minor / bump:patch のいずれかを必須とする。
+# ラベルが無い PR はこのチェックを落とし、マージ時の自動タグ付けを保証する。
+on:
+  pull_request:
+    types: [opened, edited, labeled, unlabeled, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a bump:* label
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if echo "$LABELS" | jq -e 'map(select(. == "bump:major" or . == "bump:minor" or . == "bump:patch")) | length > 0' >/dev/null; then
+            echo "Found a bump:* label."
+          else
+            echo "::error::This PR must have one of: bump:major, bump:minor, bump:patch"
+            exit 1
+          fi
