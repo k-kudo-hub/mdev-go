@@ -1,6 +1,6 @@
 # ADR-0003: 内部品質を担保するガードレール
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-08
 
 ## Context

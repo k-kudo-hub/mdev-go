@@ -1,6 +1,6 @@
 # ADR-0001: Shell Script 版 mdev を Go でリライトする
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-08
 
 ## Context

@@ -1,6 +1,6 @@
 # ADR-0002: ports & adapters によるアーキテクチャ設計
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-08
 
 ## Context
