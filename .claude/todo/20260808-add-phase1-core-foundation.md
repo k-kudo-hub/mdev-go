@@ -45,7 +45,7 @@ ADR-0001 フェーズ 1 のうち、hook イベント処理系(`pending-notify.s
 
 ### cli(結線)
 
-- [ ] `mdev hook notify` / `mdev hook post-tool` / `mdev hook resolve` サブコマンドを cobra で実装(stdin JSON → app 呼び出し。テストは cli 薄皮の引数処理のみ)
+- [x] `mdev hook notify` / `mdev hook post-tool` / `mdev hook resolve` サブコマンドを cobra で実装(stdin JSON → app 呼び出し。テストは cli 薄皮の引数処理のみ)
 
 ### 互換性検証
 

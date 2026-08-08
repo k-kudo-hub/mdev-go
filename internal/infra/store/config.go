@@ -18,6 +18,18 @@ const (
 	defaultConfigFileName = "config.default.json"
 )
 
+// conductorHomeDirName は CONDUCTOR_HOME 未設定時のホーム直下のディレクトリ名。
+const conductorHomeDirName = ".claude-conductor"
+
+// ConductorHome は conductor の設置場所を返す。
+// 現行版の `${CONDUCTOR_HOME:-$HOME/.claude-conductor}` に対応する。
+func ConductorHome(home, envValue string) string {
+	if envValue != "" {
+		return envValue
+	}
+	return filepath.Join(home, conductorHomeDirName)
+}
+
 // ConfigPath は読み込む設定ファイルのパスを返す。
 //
 // 現行 task-lib.sh の load_config と同じく、config.json があればそれを、

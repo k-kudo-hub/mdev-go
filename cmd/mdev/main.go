@@ -7,11 +7,30 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/k-kudo-hub/mdev-go/internal/app"
+	"github.com/k-kudo-hub/mdev-go/internal/cli"
+	"github.com/k-kudo-hub/mdev-go/internal/infra"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/zellij"
 )
 
 func main() {
-	// フェーズ 1 のサブコマンド実装まではプレースホルダとして振る舞う。
-	if _, err := fmt.Fprintln(os.Stdout, "mdev: not implemented yet"); err != nil {
+	// pending は CONDUCTOR_HOME に依存せずホーム直下に固定する。hook は
+	// conductor の外にある Claude Code セッションでも発火するためである。
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "mdev: ホームディレクトリを特定できません:", err)
 		os.Exit(1)
 	}
+	conductorHome := store.ConductorHome(home, os.Getenv("CONDUCTOR_HOME"))
+
+	hooks := &app.HookHandler{
+		Pending:  store.NewPendingStore(store.PendingRoot(home)),
+		Registry: store.NewRegistryStore(store.RegistryRoot(conductorHome)),
+		Focuser:  zellij.NewFocuser(),
+		Clock:    infra.SystemClock{},
+	}
+
+	os.Exit(cli.Execute(cli.Deps{Hooks: hooks, Getenv: os.Getenv}))
 }

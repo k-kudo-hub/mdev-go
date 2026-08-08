@@ -19,6 +19,28 @@ func writeConfig(t *testing.T, conductorHome, name, content string) {
 	}
 }
 
+func TestConductorHome(t *testing.T) {
+	t.Parallel()
+
+	// 現行版の `${CONDUCTOR_HOME:-$HOME/.claude-conductor}`。
+	tests := []struct {
+		name     string
+		envValue string
+		want     string
+	}{
+		{name: "CONDUCTOR_HOME を優先", envValue: "/opt/conductor", want: "/opt/conductor"},
+		{name: "空ならホーム直下", envValue: "", want: "/Users/x/.claude-conductor"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := store.ConductorHome("/Users/x", tt.envValue); got != tt.want {
+				t.Errorf("ConductorHome() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigPathPrefersUserConfig(t *testing.T) {
 	t.Parallel()
 
