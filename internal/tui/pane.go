@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -108,3 +109,68 @@ type (
 		Open(app.NewsSnapshot, int)
 	}
 )
+
+// ペインの名前(`mdev pane <name>` の引数)。
+const (
+	NameDashboard = "dashboard"
+	NameWaiting   = "waiting"
+	NameDone      = "done"
+	NameNews      = "news"
+)
+
+// Panes は 4 つのペインをまとめて起動できるようにしたものである。
+//
+// internal/cli は internal/tui を参照できない(ADR-0002)ため、cli 側は
+// Run / Once だけを持つ interface としてこれを受け取り、実体の組み立ては
+// cmd/mdev が行う。
+type Panes struct {
+	Dashboard DashboardService
+	Waiting   WaitingService
+	Done      DoneService
+	News      NewsService
+	Env       app.PaneEnv
+}
+
+// model は名前に対応するモデルを返す。
+func (p Panes) model(name string) (tea.Model, error) {
+	switch name {
+	case NameDashboard:
+		return NewDashboardModel(p.Dashboard, p.Env), nil
+	case NameWaiting:
+		return NewWaitingModel(p.Waiting, p.Env), nil
+	case NameDone:
+		return NewDoneModel(p.Done), nil
+	case NameNews:
+		return NewNewsModel(p.News), nil
+	default:
+		return nil, fmt.Errorf("不明なペインです: %s", name)
+	}
+}
+
+// Run は名前のペインを対話モードで動かす。ペインが終了するまで戻らない。
+func (p Panes) Run(name string) error {
+	model, err := p.model(name)
+	if err != nil {
+		return err
+	}
+	if _, err := tea.NewProgram(model).Run(); err != nil {
+		return fmt.Errorf("ペイン %s の実行に失敗しました: %w", name, err)
+	}
+	return nil
+}
+
+// Once は名前のペインを 1 回だけ描画した文字列を返す。
+//
+// Bubble Tea のプログラムは起動しないため端末を必要としない。現行 Shell 版の
+// CONDUCTOR_*_ONCE と同じ経路で、ゴールデンテストもここを通る。
+func (p Panes) Once(name string) (string, error) {
+	model, err := p.model(name)
+	if err != nil {
+		return "", err
+	}
+	once, ok := model.(Once)
+	if !ok {
+		return "", fmt.Errorf("ペイン %s は単発描画に対応していません", name)
+	}
+	return once.Once()
+}

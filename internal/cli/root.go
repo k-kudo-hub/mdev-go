@@ -38,6 +38,8 @@ type Deps struct {
 	Record RecordService
 	// HookSettings は settings.json の hooks を切り替えるユースケース。
 	HookSettings HookSettingsService
+	// Panes はダッシュボード系ペインを動かすユースケース。
+	Panes PaneService
 	// Getenv は環境変数を読む。テストで差し替える。
 	Getenv func(string) string
 }
@@ -55,6 +57,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newHookCommand(deps))
 	cmd.AddCommand(newRecordCommand(deps))
 	cmd.AddCommand(newHooksCommand(deps))
+	cmd.AddCommand(newPaneCommand(deps))
 	return cmd
 }
 

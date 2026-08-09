@@ -11,8 +11,10 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/cli"
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/shell"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/zellij"
+	"github.com/k-kudo-hub/mdev-go/internal/tui"
 )
 
 func main() {
@@ -57,10 +59,43 @@ func main() {
 		Binary: store.NewMdevBinaryStore(conductorHome),
 	}
 
+	// ダッシュボード系 4 ペイン。pending はホーム直下、daily とニュースは
+	// CONDUCTOR_HOME 配下という置き場所の違いを PaneStore がそのまま持つ。
+	// upload-log / restore-task / fetch-news / restore-session / スクリーン検出は
+	// まだ Shell のままで、shell.Runner が env を引き継いで同期で呼ぶ。
+	paneStore := store.NewPaneStore(store.PendingRoot(home), conductorHome)
+	tabs := zellij.NewTabController()
+	runner := shell.NewRunner(conductorHome)
+
+	panes := tui.Panes{
+		Dashboard: &app.DashboardPane{
+			Pending:     paneStore,
+			Remover:     paneStore,
+			Registry:    store.NewRegistryStore(store.RegistryRoot(conductorHome)),
+			ScreenState: paneStore,
+			Tabs:        tabs,
+			Closer:      tabs,
+			Focuser:     zellij.NewFocuser(),
+			Config:      paneStore,
+			Recorder:    record,
+			Shell:       runner,
+		},
+		Waiting: &app.WaitingPane{Pending: paneStore},
+		Done:    &app.DonePane{Daily: paneStore, Shell: runner, Clock: infra.SystemClock{}},
+		News: &app.NewsPane{
+			News:   paneStore,
+			Shell:  runner,
+			Opener: shell.NewOpener(),
+			Clock:  infra.SystemClock{},
+		},
+		Env: app.PaneEnv{ZellijSession: os.Getenv("ZELLIJ_SESSION_NAME")},
+	}
+
 	os.Exit(cli.Execute(cli.Deps{
 		Hooks:        hooks,
 		Record:       record,
 		HookSettings: hookSettings,
+		Panes:        panes,
 		Getenv:       os.Getenv,
 	}))
 }
