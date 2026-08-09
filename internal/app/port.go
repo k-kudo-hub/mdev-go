@@ -65,3 +65,42 @@ func (e HookEnv) IsTaskTab() bool {
 func (e HookEnv) InZellij() bool {
 	return e.ZellijSession != ""
 }
+
+// PendingFinder は pending をタブ名で探す。
+//
+// record は「どのタスクタブが閉じられたか」しか知らないため、セッション ID を
+// 鍵にする PendingStore とは別の引き方が要る。ユースケースが必要とする操作
+// 単位で port を分けている(ADR-0002)。
+type PendingFinder interface {
+	// FindByTab は session の pending からタブ名が一致する 1 件を返す。
+	// 該当が無ければ found=false を返す。複数該当する場合にどれを返すかは
+	// 実装が決める(現行版はファイル名の辞書順で最初の 1 件)。
+	FindByTab(session, tab string) (pending domain.Pending, found bool, err error)
+}
+
+// TranscriptReader はエージェントの transcript ファイルを読む。
+type TranscriptReader interface {
+	// Read は path の内容を返す。ファイルが無い・読めない場合は found=false を
+	// 返す。現行版の `[ -f "$TRANSCRIPT_PATH" ]` と同じ扱いである。
+	Read(path string) (data []byte, found bool)
+}
+
+// DailyAppender は daily log へレコードを 1 行追記する。
+type DailyAppender interface {
+	// Append は session の date のファイルへ record を追記する。
+	// date は domain.DailyFileDateLayout で整形した文字列である。
+	Append(session, date string, record domain.DailyRecord) error
+}
+
+// PricingLoader は料金表を読む。
+//
+// 設定が読めない場合もエラーを返さない。現行版は pricing の取得に失敗しても
+// 空の単価表で処理を続け、料金の記録より作業ログの記録を優先するためである。
+type PricingLoader interface {
+	Load() domain.Pricing
+}
+
+// RecordEnv は record 実行時の環境変数のうち mdev が使うものである。
+type RecordEnv struct {
+	ZellijSession string // ZELLIJ_SESSION_NAME
+}
