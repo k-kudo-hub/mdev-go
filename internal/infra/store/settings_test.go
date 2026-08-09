@@ -177,6 +177,50 @@ func TestSettingsStoreBackupNamingAndContent(t *testing.T) {
 	}
 }
 
+func TestSettingsStoreBackupNameFollowsTargetFile(t *testing.T) {
+	t.Parallel()
+
+	// MDEV_SETTINGS_FILE で同じディレクトリ内のコピーを対象にできるため、
+	// バックアップ名は対象ファイル名から導く。固定名にすると、実ファイルの
+	// 復元が予行演習のバックアップを拾ってしまう。
+	dir := t.TempDir()
+	real := store.NewSettingsStore(filepath.Join(dir, "settings.json"), testSettingsClock)
+	copied := store.NewSettingsStore(filepath.Join(dir, "settings.copy.json"), testSettingsClock)
+
+	realBackup, err := real.Backup([]byte(`{"real":true}`))
+	if err != nil {
+		t.Fatalf("Backup() = %v", err)
+	}
+	copyBackup, err := copied.Backup([]byte(`{"copy":true}`))
+	if err != nil {
+		t.Fatalf("Backup() = %v", err)
+	}
+
+	if want := filepath.Join(dir, "settings.json.mdev-backup-20260809T133344Z"); realBackup != want {
+		t.Errorf("実ファイルのバックアップ = %q, want %q", realBackup, want)
+	}
+	if want := filepath.Join(dir, "settings.copy.json.mdev-backup-20260809T133344Z"); copyBackup != want {
+		t.Errorf("コピーのバックアップ = %q, want %q", copyBackup, want)
+	}
+
+	// LatestBackup も同じ導出で絞り込むため、互いのバックアップを拾わない。
+	_, data, found, err := real.LatestBackup()
+	if err != nil || !found {
+		t.Fatalf("LatestBackup() = %v, found=%v", err, found)
+	}
+	if string(data) != `{"real":true}` {
+		t.Errorf("実ファイルの最新バックアップ = %q, want 実ファイルの内容", data)
+	}
+
+	_, data, found, err = copied.LatestBackup()
+	if err != nil || !found {
+		t.Fatalf("LatestBackup() = %v, found=%v", err, found)
+	}
+	if string(data) != `{"copy":true}` {
+		t.Errorf("コピーの最新バックアップ = %q, want コピーの内容", data)
+	}
+}
+
 func TestSettingsStoreLatestBackupWithoutBackup(t *testing.T) {
 	t.Parallel()
 

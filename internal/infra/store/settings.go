@@ -20,10 +20,11 @@ const (
 	settingsFileName = "settings.json"
 )
 
-// settingsBackupPrefix は mdev が作るバックアップのファイル名の前置きである。
-// 前置きで自分の作ったバックアップだけを見分け、他ツールや利用者が置いた
-// settings.json.bak などには触れない。
-const settingsBackupPrefix = settingsFileName + ".mdev-backup-"
+// settingsBackupInfix は mdev が作るバックアップのファイル名で、
+// 対象ファイル名とタイムスタンプの間に入れる目印である。
+// この目印で自分の作ったバックアップだけを見分け、他ツールや利用者が置いた
+// settings.json.bak の類には触れない。
+const settingsBackupInfix = ".mdev-backup-"
 
 // settingsBackupTimeLayout はバックアップ名に使う UTC タイムスタンプの形式。
 // 辞書順と時系列が一致するため、最新のバックアップは名前の最大値で選べる。
@@ -76,17 +77,25 @@ func (s *SettingsStore) Read() ([]byte, error) {
 
 // Backup は data を settings.json と同じディレクトリへ退避し、そのパスを返す。
 //
-// ファイル名は settings.json.mdev-backup-<UTC タイムスタンプ(秒)> である。
+// ファイル名は <対象ファイル名>.mdev-backup-<UTC タイムスタンプ(秒)> である。
 // 同じ秒に 2 回作られた場合は上書きになるが、Switch は変更がある場合にしか
 // 退避しないため、同じ秒の 2 回目は「1 回目より新しい切り替え前の内容」であり、
 // 最新として上書きされるのが正しい。
 func (s *SettingsStore) Backup(data []byte) (string, error) {
-	name := settingsBackupPrefix + s.clock.Now().UTC().Format(settingsBackupTimeLayout)
+	name := s.backupPrefix() + s.clock.Now().UTC().Format(settingsBackupTimeLayout)
 	path := filepath.Join(filepath.Dir(s.path), name)
 	if err := writeFileAtomicMode(path, data, s.mode()); err != nil {
 		return "", fmt.Errorf("設定ファイルの退避に失敗しました: %w", err)
 	}
 	return path, nil
+}
+
+// backupPrefix はバックアップのファイル名の前置きを対象ファイル名から導く。
+//
+// 固定名にすると、MDEV_SETTINGS_FILE で同じディレクトリ内のコピーを対象に
+// 予行演習した場合に、実ファイルの復元がコピーのバックアップを拾ってしまう。
+func (s *SettingsStore) backupPrefix() string {
+	return filepath.Base(s.path) + settingsBackupInfix
 }
 
 // Write は settings.json を data で原子的に置き換える。
@@ -110,9 +119,10 @@ func (s *SettingsStore) LatestBackup() (string, []byte, bool, error) {
 		return "", nil, false, fmt.Errorf("ディレクトリ %s の一覧に失敗しました: %w", dir, err)
 	}
 
+	prefix := s.backupPrefix()
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), settingsBackupPrefix) {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
 			continue
 		}
 		names = append(names, e.Name())
