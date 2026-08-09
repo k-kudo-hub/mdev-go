@@ -56,7 +56,7 @@ Zellij レイアウトのペイン起動コマンドを差し替えるだけで 
 - [x] `mdev pane dashboard|waiting|done|news` サブコマンドを登録
 - [x] ゴールデンテスト: 現行 Shell 版の ONCE モード出力(同一 fixture: pending / daily / news / list-tabs スタブ)と `mdev pane <name> --once` の出力を比較
 - [x] 依存追加: **`charm.land/bubbletea/v2`**(v2 はモジュールパスが改称されており `github.com/charmbracelet/bubbletea/v2` では取得できない。depguard と ADR-0002 を訂正)。bubbles は不要だった
-- [ ] ユーザーテスト手順書 `docs/user-test-02-panes.md`(インストール済み `~/.claude-conductor/layouts/multi.kdl` のペイン起動コマンド差し替え手順・バックアップ・復元・確認チェックリスト)
+- [x] ユーザーテスト手順書 `docs/user-test-02-panes.md`(インストール済み `~/.claude-conductor/layouts/multi.kdl` のペイン起動コマンド差し替え手順・バックアップ・復元・確認チェックリスト)
 - [ ] `make check` 緑を確認
 
 ## 完了条件

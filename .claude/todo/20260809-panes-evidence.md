@@ -169,6 +169,8 @@ Go の `fmt` はルーン幅で詰めるため使えず、`padRightBytes` / `pad
 
 ## 6. Shell 版との意図的な差異
 
+### 表示に関わるもの
+
 - **message のバックスラッシュ解釈**: 現行は `echo -e "      $msg"` なので
   message 中の `\n` `\t` 等がエスケープとして解釈される。Go 版は解釈せず
   そのまま出す。hook が書く message は transcript の 1 行で、バックスラッシュ列を
@@ -176,6 +178,98 @@ Go の `fmt` はルーン幅で詰めるため使えず、`padRightBytes` / `pad
 - **pending の値が配列・オブジェクトのとき**: jq -r は複数行の整形済み JSON を
   出すが、Go 版は 1 行の compact JSON を返す。hook は必ず文字列として書くため
   到達しない経路。
+- **削除中の進行表示**: 現行は最終行を `\r` で上書きしていた
+  (`Uploading log...` / URL / `Upload failed. Deletion cancelled.`)。
+  Bubble Tea は画面全体を差分描画するため、本体の下に 1 行足す形にした。
+  文言は同じ。`--once` では通知が出ないのでゴールデンには影響しない。
+
+### 並び順
+
 - **glob の並び順**: 現行の `for f in "$PENDING_DIR"/*.json` はロケール依存の
-  照合順序で並ぶ。Go 版はバイト昇順で固定する。ゴールデン生成時は `LC_ALL=C` を
-  与えて両者を一致させる。
+  照合順序で並ぶ。Go 版は `os.ReadDir` のバイト昇順で固定する。pending の
+  ファイル名はエージェントのセッション ID(ASCII)なので実際には一致する。
+- **daily ファイルの連結順**: 現行は `find` の探索順(ディレクトリの並び)。
+  Go 版はセッション名の昇順に固定した。`sort_by(.completed_at)` は安定ソート
+  なので、**完了時刻が同着のエントリ同士**の並びだけが環境によって変わりうる。
+  決定的にするために固定した。
+
+### キー入力
+
+- **「無関係キーを捨てて残時間を待ち直す」方式が不要になった**。
+  現行 Dashboard は `read -t` の戻りが早すぎると再描画が連続し、スクリーン検出の
+  idle 確定が一瞬で成立してしまうため、無関係キーでは待ち直す作りだった
+  (dashboard-loop.sh:112-131 のコメント)。Bubble Tea では再描画のティックと
+  キー入力が別々のメッセージなので、キーが来ても勝手にポーリングが進むことは
+  なく、この仕組みは構造的に不要である。
+- **Ctrl+C でペインが終了する**。現行の Shell 版ペインは終了キーを持たず、
+  zellij がペインごと落とすまで回り続けた。Bubble Tea は端末を raw モードに
+  するため、Ctrl+C を拾わないと手動で止められなくなる。移行期の運用しやすさを
+  優先して受け付けることにした。
+
+### 到達しない経路の簡略化
+
+- **10 件目以降のキー選択**: 現行はいずれのペインも `[[ "$key" =~ [1-9] ]]` で
+  1 文字しか見ないため、番号は振られていても 10 件目以降はキーで選べない。
+  Go 版も同じ制限にした(ゴールデンの `dashboard-many` / `done-many` で
+  番号表示が 12 まで続くことを固定している)。
+
+## 7. Bubble Tea v2 で分かった制約と工夫
+
+- **`View()` が `tea.View` 構造体を返す**(v1 は `string`)。`tea.NewView(s)` で
+  包む。中身は `Content` フィールドで取り出せるため、テストから描画結果を
+  文字列として比較できる。
+- **`tea.KeyPressMsg` は `Key` の別名型**。テストからは
+  `tea.KeyPressMsg{Code: 'd', Text: "d"}` のように組み立てられ、`String()` が
+  `"d"` を返す。端末を用意せずにキー入力を流せる。
+- **`--once` は Bubble Tea を起動しない**。`tea.NewProgram(...).Run()` は端末を
+  要求するため、ゴールデンテストや CI からは通せない。モデルに `Once()` を
+  持たせ、`View()` と同じ文字列を組み立てて返す経路を分けた。
+- **2 打鍵目のタイムアウトは世代番号で管理する**。`tea.Tick` は取り消せないので、
+  待ち受けをやり直すたびに token を増やし、古いタイマーの発火は無視する。
+- **メッセージ型が非公開でもテストできる**。`Init()` やコマンドが返した
+  メッセージをそのまま次の `Update` へ渡す形にすれば、テストから型名を
+  書かずに状態を進められる。
+
+## 8. 依存方向(ADR-0002)で設計を変えた点
+
+当初は tui の `View()` が `domain.RenderDashboard` を直接呼ぶ構造にしたが、
+go-arch-lint が `Component tui shouldn't depend on internal/domain` を検出した。
+ADR-0002 は tui → app のみを許している。
+
+そこで**描画結果を app のスナップショットが運ぶ**構造へ変えた。
+
+- `app.DashboardSnapshot` / `DoneSnapshot` / `NewsSnapshot` が
+  `Text`(domain のレンダリング結果)と、番号キーの解決に要る
+  `Tabs []string` / `Count int` だけを公開する
+- domain の型(`PendingView` / `DoneRow` / `NewsItem`)は非公開フィールドに
+  閉じ込め、tui からは触れないようにする
+- tui 側もユースケースを `DashboardService` などの interface として定義した。
+  具象型 `*app.DashboardPane` に依存させると、tui のテストが app の port
+  (domain の型を受け渡しする)を実装せざるを得ず、テストファイル経由で
+  tui → domain の依存が生まれてしまうため
+
+結果として「View は domain のレンダリング関数に委譲する」という当初の狙いは
+保たれ(呼ぶのが app になっただけ)、依存方向の規約も守れている。
+
+## 9. ゴールデンテストの構成
+
+`cmd/mdev/testdata/golden-panes` に 23 ケース。全件で Shell 版の ONCE 出力と
+バイト単位で一致することを確認済み。
+
+| ペイン | ケース |
+|--------|--------|
+| dashboard | basic(Stop/Notification 混在・60 バイト切り)/ empty / broken-json / waiting-excluded / unknown-tab / many(12 件)/ missing-keys |
+| waiting | basic / empty / multiple / closed-tab |
+| done | basic(markers・全セッション横断)/ empty / broken-json(全滅)/ restored-excluded / multibyte-tab(桁ずれ)/ many(12 件) |
+| news | basic / empty / no-items / broken-json / missing-description(null・空・キー無し)/ many(7 件) |
+
+テストが `cmd/mdev` にあるのは、実行時と同じ依存グラフ(infra の実装まで)を
+組み立てる必要があるためである。全パッケージを参照してよいのは ADR-0002 で
+cmd/mdev だけと決まっている。
+
+日付の扱い: daily とニュースのファイル名は「今日」で決まり、Shell 版は `date` を
+直接呼ぶため差し替えられない。生成時の日付を `date.txt` に記録し、Go 側は
+同じ日付を返す時計を差し込んで突き合わせている。
+
+改竄検知の確認: `expected.txt` を書き換えるとテストが失敗することを実測した
+(比較が素通りしていないことの確認)。
