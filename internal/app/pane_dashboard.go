@@ -24,6 +24,23 @@ type TaskRecorder interface {
 	Execute(tab string, env RecordEnv) error
 }
 
+// DashboardSnapshot は 1 回ぶんの Dashboard の状態である。
+//
+// 画面に出す文字列は domain のレンダリング関数が組み立てたものをそのまま持つ。
+// tui は domain を参照できない(ADR-0002 の依存方向)ため、描画結果と、番号で
+// タブを引くための操作だけをこの型が渡す。一覧の中身は外へ出さない。
+type DashboardSnapshot struct {
+	// Text は画面に出す文字列。
+	Text string
+	// Tabs は表示順のタブ名。番号キーの解決に使う。
+	Tabs []string
+
+	// items は表示順の pending そのもの。ジャンプ時にどのファイルを消すか、
+	// エージェントの検出方式は何かを判断するために要る。tui へ渡さないよう
+	// 非公開にしている。
+	items []domain.PendingView
+}
+
 // DeletePreparation は削除フローの前半(記録とアップロード)の結果である。
 type DeletePreparation struct {
 	// Cancelled は upload-log.sh が失敗し、削除を中止すべきことを表す。
@@ -62,31 +79,46 @@ func (p *DashboardPane) Startup() {
 // 先頭でスクリーン検出を走らせてから pending を読む。順序が逆だと、その回に
 // 観測した状態が一覧に反映されず、screen 方式のエージェント(codex)のタスクが
 // 出てこなくなる。
-func (p *DashboardPane) Refresh(env PaneEnv) (domain.DashboardInput, error) {
+func (p *DashboardPane) Refresh(env PaneEnv) (DashboardSnapshot, error) {
 	session := env.Session()
 
 	p.Shell.ScreenDetectTick(session)
 
 	views, err := p.Pending.List(session)
 	if err != nil {
-		return domain.DashboardInput{}, fmt.Errorf("pending の読み取りに失敗しました: %w", err)
+		return DashboardSnapshot{}, fmt.Errorf("pending の読み取りに失敗しました: %w", err)
 	}
 
 	tabOrder := domain.ParseTabNames(p.Tabs.ListTabs())
-	return domain.DashboardInput{
-		Session: session,
-		Items:   domain.DashboardItems(tabOrder, views),
+	items := domain.DashboardItems(tabOrder, views)
+	tabs := make([]string, 0, len(items))
+	for _, item := range items {
+		tabs = append(tabs, item.Tab)
+	}
+	return DashboardSnapshot{
+		Text:  domain.RenderDashboard(domain.DashboardInput{Session: session, Items: items}),
+		Tabs:  tabs,
+		items: items,
 	}, nil
 }
 
-// Jump は item のタブへ移動する。
+// Jump は snapshot の number 番目(1 始まり)のタブへ移動する。
+// 範囲外の番号は何もしない(現行版も `$key -le $count` で弾いている)。
+func (p *DashboardPane) Jump(env PaneEnv, snapshot DashboardSnapshot, number int) error {
+	if number < 1 || number > len(snapshot.items) {
+		return nil
+	}
+	return p.jump(env, snapshot.items[number-1])
+}
+
+// jump は item のタブへ移動する。
 //
 // 移動したあと pending を消すのは「hooks も screen 検出も持たないエージェント」
 // のときだけである。claude は hooks が、screen 方式のエージェントはスクリーン
 // 検出が、それぞれ pending のライフサイクルを持っている。screen 方式の
 // Notification はターンが目に見えて再開するまで残るのが正しい状態なので、
 // ここで消しても次のポーリングで作り直されるだけである。
-func (p *DashboardPane) Jump(env PaneEnv, item domain.PendingView) error {
+func (p *DashboardPane) jump(env PaneEnv, item domain.PendingView) error {
 	if err := p.Focuser.FocusTab(item.Tab); err != nil {
 		return fmt.Errorf("タブへの移動に失敗しました: %w", err)
 	}

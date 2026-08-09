@@ -48,8 +48,8 @@ Zellij レイアウトのペイン起動コマンドを差し替えるだけで 
 
 ### tui(Bubble Tea v2)
 
-- [ ] 各ペインの Model(Update/View)のテストを作成(tick 2s・5s / キーイベント / 2 打鍵タイムアウト / 削除中の進行表示)→ 実装。View は domain のレンダリング関数へ委譲
-- [ ] `--once` モード(1 回描画して終了。現行の `CONDUCTOR_*_ONCE` 相当。restore-session / screen 検出の副作用条件も現行に合わせる)
+- [x] 各ペインの Model(Update/View)のテストを作成(tick 2s・5s / キーイベント / 2 打鍵タイムアウト / 削除中の進行表示)→ 実装。View は domain のレンダリング関数へ委譲
+- [x] `--once` モード(1 回描画して終了。現行の `CONDUCTOR_*_ONCE` 相当。restore-session / screen 検出の副作用条件も現行に合わせる)
 
 ### cli / 互換検証
 

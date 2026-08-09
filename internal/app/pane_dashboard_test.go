@@ -3,6 +3,7 @@ package app_test
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
@@ -84,22 +85,19 @@ func TestDashboardPaneRefresh(t *testing.T) {
 		{Name: "c.json", Tab: "beta", Event: "Waiting", Message: "pr review", Time: "10:02:00"},
 	}, "ID POS NAME\n1 x beta\n2 x alpha\n")
 
-	view, err := f.pane.Refresh(dashboardEnv)
+	snapshot, err := f.pane.Refresh(dashboardEnv)
 	if err != nil {
 		t.Fatalf("Refresh() = %v", err)
 	}
 
-	if view.Session != "s1" {
-		t.Errorf("Session = %q, want s1", view.Session)
-	}
 	// タブ順(beta, alpha)が優先され、Waiting は除かれる。
 	want := []string{"beta", "alpha"}
-	got := make([]string, 0, len(view.Items))
-	for _, item := range view.Items {
-		got = append(got, item.Tab)
+	if !reflect.DeepEqual(snapshot.Tabs, want) {
+		t.Errorf("表示順 = %v, want %v", snapshot.Tabs, want)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("表示順 = %v, want %v", got, want)
+	// 画面の文字列は domain のレンダリング結果そのものである。
+	if !strings.Contains(snapshot.Text, "Current Tasks") || !strings.Contains(snapshot.Text, "[s1]") {
+		t.Errorf("描画結果が入っていない: %q", snapshot.Text)
 	}
 }
 
@@ -125,12 +123,13 @@ func TestDashboardPaneRefreshUsesUnknownSessionWhenOutsideZellij(t *testing.T) {
 	t.Parallel()
 
 	f := newDashboardFixture(nil, "ID POS NAME\n")
-	view, err := f.pane.Refresh(app.PaneEnv{})
+	snapshot, err := f.pane.Refresh(app.PaneEnv{})
 	if err != nil {
 		t.Fatalf("Refresh() = %v", err)
 	}
-	if view.Session != domain.DefaultSessionName {
-		t.Errorf("Session = %q, want %q", view.Session, domain.DefaultSessionName)
+	// 見出しのセッション名が unknown に落ちる。
+	if !strings.Contains(snapshot.Text, "["+domain.DefaultSessionName+"]") {
+		t.Errorf("セッション名が %q になっていない: %q", domain.DefaultSessionName, snapshot.Text)
 	}
 }
 
@@ -194,10 +193,16 @@ func TestDashboardPaneJump(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			f := newDashboardFixture(nil, "")
+			// 一覧に 1 件だけ載った状態を作り、その 1 番目へジャンプする。
+			f := newDashboardFixture([]domain.PendingView{tt.item},
+				"ID POS NAME\n1 x "+tt.item.Tab+"\n")
 			f.config.config = screenConfig
 
-			if err := f.pane.Jump(dashboardEnv, tt.item); err != nil {
+			snapshot, err := f.pane.Refresh(dashboardEnv)
+			if err != nil {
+				t.Fatalf("Refresh() = %v", err)
+			}
+			if err := f.pane.Jump(dashboardEnv, snapshot, 1); err != nil {
 				t.Fatalf("Jump() = %v", err)
 			}
 

@@ -40,6 +40,17 @@ func ParseNews(data []byte) []NewsItem {
 	return items
 }
 
+// RenderNewsFetching はニュースを取り直している間の画面を組み立てる。
+//
+// 現行 news-loop.sh の reload_news() が出す 4 行に対応する。取得は同期で走るため、
+// 終わるまでこの画面のままになる。
+func RenderNewsFetching(date string) string {
+	return ansiBold + "  AI Tech News" + ansiReset + " " + ansiDim + "[" + date + "]" + ansiReset + "\n" +
+		divider(newsDividerWidth) +
+		"\n" +
+		"  " + ansiYellow + "⟳ Fetching news..." + ansiReset + "\n"
+}
+
 // RenderNews は News ペインの 1 画面分を組み立てる。
 //
 // date は見出しに出す日付(現行版の `date '+%Y-%m-%d'`)。
