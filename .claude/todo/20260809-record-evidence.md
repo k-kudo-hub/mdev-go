@@ -131,3 +131,62 @@ PRICING_JSON="${PRICING_JSON:-"{}"}"
 Go 版は `domain.Pricing.UnmarshalJSON` が配列を拒否するため空 pricing となり、
 **summary は生成される**(ハードコード既定単価で計算される)。この 1 点のみ差異が残る。
 再現には手書きの壊れた config が必要で、実運用上の経路が無いため許容する(「現行仕様との差異」に記載)。
+
+## 6. markers の正規表現(現行版の実測)
+
+`markers.sh`(scratchpad)で record-output.sh:149-207 の jq プログラムをそのまま実行し、判定を実測した。
+
+### merged: `gh\s+pr\s+merge`
+
+- 区切りは `\s+` なので `gh  pr   merge`・タブ・改行・CR・FF いずれも真
+- **アンカーが無いため部分一致**: `echo gh pr merge` も真
+- 大文字小文字は区別する: `GH PR MERGE` は偽
+- `ghprmerge`(区切り無し)は偽、`xghy pr merge` も偽
+- `mcp__github__merge_pull_request` は名前の完全一致で真。Bash 以外のツールでは command を見ない
+
+### doc: `\.(md|mdx|txt|rst|adoc)$`
+
+`a.md` `a.mdx` `a.txt` `a.rst` `a.adoc` が真。`a.mdd` `a.md.bak` `README.MD`(大文字) `amd` は偽。
+対象ツールは Write / Edit のみで、Read の file_path は見ない。
+
+### slack: `^mcp__slack`
+
+前方一致なので `mcp__slackx` も真。`mcp__slac` `xmcp__slack` は偽。
+
+### 型が違うときの現行版の挙動
+
+| ケース | 現行版 |
+|---|---|
+| Write/Edit の `input` が無い / null / 文字列 | doc = false(`.input? // {}` と `?` が吸収する) |
+| Write/Edit の `file_path` が数値 | **jq エラー** → summary null のフォールバック |
+| Bash の `command` が数値 | **jq エラー** → 同上 |
+| Read の `file_path` / `command` が数値 | 影響なし(その名前のツールは判定対象外) |
+
+Go 版はツール名で分岐してから file_path / command を取り出し、
+「対象ツールで文字列以外ならパース失敗」を再現する。
+
+### `\s` の実体は Unicode White_Space(要注意)
+
+jq(Oniguruma)の `\s` は ASCII 空白だけではない。コードポイントを総当たりした結果:
+
+```console
+$ jq -n -c -f ws2.jq
+[9,10,11,12,13,32,133,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288]
+```
+
+これは Unicode の White_Space プロパティそのものである(ZWSP U+200B は含まない)。
+一方 **Go の RE2 の `\s` は `[\t\n\f\r ]` だけ**で、垂直タブ U+000B すら含まない。
+
+```console
+$ go run vt.go
+"gh\vpr\vmerge" -> false     # jq は true
+```
+
+Go の `regexp` は `\p{White_Space}` を解釈できない(Categories と Scripts しか引けない)ため、
+**明示的な文字クラス**へ展開して一致させる:
+
+```
+gh[\t\n\v\f\r \x{0085}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}]+pr…
+```
+
+上の実測リストと同じ集合であることを Go のテストで固定する。
