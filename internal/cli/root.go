@@ -19,6 +19,8 @@ const (
 type Deps struct {
 	// Hooks は hook イベントを処理するユースケース。
 	Hooks HookService
+	// Record は作業サマリを daily log へ記録するユースケース。
+	Record RecordService
 	// Getenv は環境変数を読む。テストで差し替える。
 	Getenv func(string) string
 }
@@ -34,6 +36,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 		SilenceErrors: true,
 	}
 	cmd.AddCommand(newHookCommand(deps))
+	cmd.AddCommand(newRecordCommand(deps))
 	return cmd
 }
 
