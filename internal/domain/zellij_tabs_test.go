@@ -97,6 +97,15 @@ func TestResolveTabID(t *testing.T) {
 			tab:    "alpha",
 			want:   "1",
 		},
+		{
+			// 行頭がスペースの行は awk と切り出し方が違う(awk は行をそのまま
+			// 返し、この実装は空白列を 1 つ目の区切りとして数える)。どちらも
+			// タブ名と一致しないので空文字になり、誤ったタブは閉じない。
+			name:   "行頭がスペースの行は一致しない",
+			output: "ID POS NAME\n 1 x alpha\n",
+			tab:    "alpha",
+			want:   "",
+		},
 		{name: "出力が空なら空", output: "", tab: "alpha", want: ""},
 	}
 
