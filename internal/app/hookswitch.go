@@ -17,6 +17,8 @@ import (
 // 原子的に置き換える」の順で行い、退避に失敗したら書き換えない。
 type HookSwitcher struct {
 	Settings SettingsStore
+	// Binary は切り替え後の hooks が呼ぶ mdev の所在を調べる。
+	Binary MdevBinaryLocator
 }
 
 // HookCommandChange は置き換える hook コマンド 1 件である。
@@ -41,6 +43,13 @@ type SwitchHooksResult struct {
 	// BackupPath は作成したバックアップのパス。
 	// dry-run のときと変更が無いときは空になる。
 	BackupPath string
+	// MissingBinaryPath は切り替え後の hooks が呼ぶ mdev が見つからなかった
+	// 場合にそのパス。設置済みなら空になる。
+	//
+	// 切り替え自体は成功するため、エラーではなく警告として扱う。hook は
+	// 非ブロッキングなので会話は壊れないが、pending が書かれずダッシュボードが
+	// 無反応になる。
+	MissingBinaryPath string
 	// DryRun は書き込みを行わなかったことを表す。
 	DryRun bool
 }
@@ -74,6 +83,9 @@ type RestoreHooksResult struct {
 // dryRun が true のときは変更内容だけを返し、退避も書き込みも行わない。
 func (s *HookSwitcher) Switch(dryRun bool) (SwitchHooksResult, error) {
 	result := SwitchHooksResult{SettingsPath: s.Settings.Path(), DryRun: dryRun}
+	if path, exists := s.Binary.MdevBinary(); !exists {
+		result.MissingBinaryPath = path
+	}
 
 	current, err := s.Settings.Read()
 	if err != nil {

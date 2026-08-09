@@ -195,7 +195,21 @@ func testPricing(t *testing.T) domain.Pricing {
 }
 
 // hooks 切り替え用の fake。
-var _ app.SettingsStore = (*fakeSettingsStore)(nil)
+var (
+	_ app.SettingsStore     = (*fakeSettingsStore)(nil)
+	_ app.MdevBinaryLocator = fakeMdevBinary{}
+)
+
+// fakeMdevBinary は切り替え後の hooks が呼ぶ mdev の有無を模す。
+type fakeMdevBinary struct {
+	path   string
+	exists bool
+}
+
+func (b fakeMdevBinary) MdevBinary() (string, bool) { return b.path, b.exists }
+
+// testMdevBinaryPath は fake が返すバイナリのパスである。
+const testMdevBinaryPath = "/tmp/fake/.claude-conductor/bin/mdev"
 
 // fakeSettingsStore はメモリ上の settings.json を模す。
 // バックアップは作った順に積み、最後の 1 件を「最新」として返す。

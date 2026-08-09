@@ -38,6 +38,25 @@ func newSettingsFile(t *testing.T, content string) (*store.SettingsStore, string
 	return store.NewSettingsStore(path, testSettingsClock), path
 }
 
+// newSwitcher は infra の実装をつないだ HookSwitcher を返す。
+// 切り替え先のバイナリは、警告の有無を見ないテストのために設置済みにする。
+func newSwitcher(t *testing.T, settings *store.SettingsStore) *app.HookSwitcher {
+	t.Helper()
+
+	conductorHome := filepath.Join(t.TempDir(), ".claude-conductor")
+	if err := os.MkdirAll(filepath.Join(conductorHome, "bin"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() = %v", err)
+	}
+	binary := filepath.Join(conductorHome, "bin", "mdev")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // 実行可能ファイルを模す
+		t.Fatalf("WriteFile() = %v", err)
+	}
+	return &app.HookSwitcher{
+		Settings: settings,
+		Binary:   store.NewMdevBinaryStore(conductorHome),
+	}
+}
+
 func TestClaudeSettingsPath(t *testing.T) {
 	t.Parallel()
 
@@ -359,7 +378,7 @@ func TestHookSwitchRoundTripOnRealFiles(t *testing.T) {
 		t.Fatalf("ReadFile() = %v", err)
 	}
 	s, path := newSettingsFile(t, string(original))
-	switcher := &app.HookSwitcher{Settings: s}
+	switcher := newSwitcher(t, s)
 
 	switched, err := switcher.Switch(false)
 	if err != nil {
@@ -432,7 +451,7 @@ func TestHookRestoreKeepsEditsMadeAfterSwitch(t *testing.T) {
 		t.Fatalf("ReadFile() = %v", err)
 	}
 	s, path := newSettingsFile(t, string(original))
-	switcher := &app.HookSwitcher{Settings: s}
+	switcher := newSwitcher(t, s)
 
 	if _, err := switcher.Switch(false); err != nil {
 		t.Fatalf("Switch() = %v", err)
@@ -484,7 +503,7 @@ func TestHookRestoreFallsBackToBackupWhenSettingsMissing(t *testing.T) {
 		t.Fatalf("ReadFile() = %v", err)
 	}
 	s, path := newSettingsFile(t, string(original))
-	switcher := &app.HookSwitcher{Settings: s}
+	switcher := newSwitcher(t, s)
 
 	switched, err := switcher.Switch(false)
 	if err != nil {
@@ -518,7 +537,7 @@ func TestHookRestoreWithoutSettingsAndBackup(t *testing.T) {
 
 	// settings.json もバックアップも無い状態はエラーにせず報告する。
 	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
-	switcher := &app.HookSwitcher{Settings: store.NewSettingsStore(path, testSettingsClock)}
+	switcher := newSwitcher(t, store.NewSettingsStore(path, testSettingsClock))
 
 	got, err := switcher.Restore(false)
 	if err != nil {

@@ -316,6 +316,58 @@ func TestHooksReportsUseCaseErrors(t *testing.T) {
 	}
 }
 
+func TestHooksSwitchWarnsAboutMissingBinary(t *testing.T) {
+	t.Parallel()
+
+	// 切り替え自体は成功しているのでエラーにはしないが、無反応の原因に
+	// なるため対処方法まで伝える。dry-run でも出す。
+	for _, args := range [][]string{
+		{"hooks", "switch"},
+		{"hooks", "switch", "--dry-run"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			settings := &fakeHookSettingsService{switchResult: app.SwitchHooksResult{
+				SettingsPath:      "/home/x/.claude/settings.json",
+				Changes:           testChanges,
+				MissingBinaryPath: "/home/x/.claude-conductor/bin/mdev",
+				DryRun:            len(args) == 3,
+			}}
+
+			code, stdout, stderr := runCLIOut(t, newHooksDeps(settings), args...)
+			if code != exitOK {
+				t.Fatalf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
+			}
+			got := stdout + stderr
+			for _, want := range []string{
+				"警告",
+				"/home/x/.claude-conductor/bin/mdev",
+				"make install",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("出力に %q が無い:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestHooksSwitchWithoutWarningStaysQuiet(t *testing.T) {
+	t.Parallel()
+
+	settings := &fakeHookSettingsService{switchResult: app.SwitchHooksResult{
+		SettingsPath: "/home/x/.claude/settings.json",
+		Changes:      testChanges,
+		BackupPath:   "/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
+	}}
+
+	_, stdout, stderr := runCLIOut(t, newHooksDeps(settings), "hooks", "switch")
+	if got := stdout + stderr; strings.Contains(got, "警告") {
+		t.Errorf("不要な警告が出ている:\n%s", got)
+	}
+}
+
 func TestHooksSwitchReportsBackupPathOnWriteFailure(t *testing.T) {
 	t.Parallel()
 

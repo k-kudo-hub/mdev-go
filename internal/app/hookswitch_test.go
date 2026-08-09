@@ -18,8 +18,59 @@ const (
 	settingsAfter  = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"$C/bin/mdev hook notify"}]}]}}`
 )
 
+// newSwitcher は「切り替え先のバイナリが設置済み」の状態の switcher を返す。
+// バイナリの有無を見るテストだけが newSwitcherWithBinary を使う。
 func newSwitcher(store *fakeSettingsStore) *app.HookSwitcher {
-	return &app.HookSwitcher{Settings: store}
+	return newSwitcherWithBinary(store, fakeMdevBinary{path: testMdevBinaryPath, exists: true})
+}
+
+func newSwitcherWithBinary(store *fakeSettingsStore, binary fakeMdevBinary) *app.HookSwitcher {
+	return &app.HookSwitcher{Settings: store, Binary: binary}
+}
+
+func TestHookSwitcherSwitchWarnsWhenBinaryIsNotInstalled(t *testing.T) {
+	t.Parallel()
+
+	// hooks が指すことになる mdev が無いと、切り替えは成功するのに
+	// ダッシュボードだけが無反応になる。エラーにはしないが黙ってもいけない。
+	tests := []struct {
+		name    string
+		content string
+		dryRun  bool
+	}{
+		{name: "書き込みあり", content: settingsBefore},
+		{name: "dry-run", content: settingsBefore, dryRun: true},
+		{name: "既に切り替え済み", content: settingsAfter},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newFakeSettingsStore(tt.content)
+			binary := fakeMdevBinary{path: testMdevBinaryPath, exists: false}
+
+			got, err := newSwitcherWithBinary(store, binary).Switch(tt.dryRun)
+			if err != nil {
+				t.Fatalf("Switch() = %v", err)
+			}
+			if got.MissingBinaryPath != testMdevBinaryPath {
+				t.Errorf("MissingBinaryPath = %q, want %q", got.MissingBinaryPath, testMdevBinaryPath)
+			}
+		})
+	}
+}
+
+func TestHookSwitcherSwitchDoesNotWarnWhenBinaryExists(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeSettingsStore(settingsBefore)
+	got, err := newSwitcher(store).Switch(false)
+	if err != nil {
+		t.Fatalf("Switch() = %v", err)
+	}
+	if got.MissingBinaryPath != "" {
+		t.Errorf("MissingBinaryPath = %q, want 空", got.MissingBinaryPath)
+	}
 }
 
 func TestHookSwitcherSwitchWritesAfterBackup(t *testing.T) {

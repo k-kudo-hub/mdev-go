@@ -135,3 +135,15 @@ type SettingsStore interface {
 	// 1 つも無い場合は found=false を返す(エラーにはしない)。
 	LatestBackup() (path string, data []byte, found bool, err error)
 }
+
+// MdevBinaryLocator は切り替え後の hooks が呼ぶことになる mdev バイナリの
+// 所在を調べる。実装は internal/infra/store にある。
+//
+// hooks のコマンド文字列は `${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev`
+// という形のまま残す(mdev-test の worktree 隔離を効かせるため)ので、
+// 実際にどのファイルが呼ばれるかは hook 実行時の CONDUCTOR_HOME で決まる。
+// この port はその解決を担い、ユースケースは結果だけを受け取る。
+type MdevBinaryLocator interface {
+	// MdevBinary は hooks が呼ぶ mdev のパスと、それが実在するかを返す。
+	MdevBinary() (path string, exists bool)
+}

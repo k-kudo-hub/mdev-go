@@ -59,6 +59,7 @@ func newHooksSwitchCommand(deps Deps) *cobra.Command {
 				return err
 			}
 			printSwitchResult(cmd.OutOrStdout(), result)
+			printSwitchWarnings(cmd.ErrOrStderr(), result)
 			return nil
 		},
 	}
@@ -116,6 +117,20 @@ func printSwitchResult(w io.Writer, result app.SwitchHooksResult) {
 	}
 	_, _ = fmt.Fprintf(w, "バックアップ: %s\n", result.BackupPath)
 	_, _ = fmt.Fprintln(w, "hooks を mdev へ切り替えました。")
+}
+
+// printSwitchWarnings は切り替えは成功したが利用者が対処すべき事柄を書き出す。
+//
+// dry-run でも出す。実行してからでは遅い類の警告だからである。
+func printSwitchWarnings(w io.Writer, result app.SwitchHooksResult) {
+	if result.MissingBinaryPath == "" {
+		return
+	}
+	// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
+	_, _ = fmt.Fprintf(w, "\n警告: %s が見つかりません。\n", result.MissingBinaryPath)
+	_, _ = fmt.Fprintln(w, "  切り替え後の hooks はこのパスを呼びます。hook の失敗は会話を止めませんが、")
+	_, _ = fmt.Fprintln(w, "  pending が書かれずダッシュボードが反応しなくなります。")
+	_, _ = fmt.Fprintln(w, "  `make install` で配置してください。")
 }
 
 // printSwitchFailure は switch が失敗したときの後始末の手掛かりを書き出す。
