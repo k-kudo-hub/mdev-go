@@ -361,5 +361,50 @@
     "pending": {
       "test-session/sess-append.json": "{\"tab\": \"append-tab\", \"session\": \"test-session\", \"claude_session_id\": \"sess-append\", \"message\": \"later\"}\n"
     }
+  },
+  {
+    "name": "pricing-model-null",
+    "description": "レビュー指摘1: モデルエントリが null なら jq の // でフォールバック(sonnet も無ければハードコード既定)",
+    "tab": "null-model",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": null, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-nullm.json": "{\"tab\": \"null-model\", \"session\": \"test-session\", \"claude_session_id\": \"sess-nullm\", \"message\": \"Task complete\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/t.jsonl\"}\n"
+    },
+    "transcripts": {
+      "t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"go\"},\"cwd\":\"/tmp\",\"sessionId\":\"s\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-20T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-20T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "pricing-fast-null",
+    "description": "レビュー指摘2: fast_multiplier が null なら未設定と同じく既定の 6 が掛かる",
+    "tab": "fast-null",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"fast_multiplier\": null}}\n",
+    "pending": {
+      "test-session/sess-fastn.json": "{\"tab\": \"fast-null\", \"session\": \"test-session\", \"claude_session_id\": \"sess-fastn\", \"message\": \"Task complete\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/t.jsonl\"}\n"
+    },
+    "transcripts": {
+      "t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"go\"},\"cwd\":\"/tmp\",\"sessionId\":\"s\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-20T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000,\"speed\":\"fast\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-20T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "pricing-partial-entry",
+    "description": "レビュー指摘3: 単価エントリに必須キーが欠けると jq の掛け算エラーで Parse failed に落ちる",
+    "tab": "partial-price",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"output\": 25.0}}}\n",
+    "pending": {
+      "test-session/sess-part.json": "{\"tab\": \"partial-price\", \"session\": \"test-session\", \"claude_session_id\": \"sess-part\", \"message\": \"Task complete\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/t.jsonl\"}\n"
+    },
+    "transcripts": {
+      "t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"go\"},\"cwd\":\"/tmp\",\"sessionId\":\"s\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-20T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-20T10:00:01Z\"}\n"
+    }
   }
 ]

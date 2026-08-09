@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -76,14 +75,10 @@ func readPricing(path string) (domain.Pricing, bool) {
 
 // hasPricingValue は pricing キーに値があるかを返す。
 //
-// 現行版の `.pricing // empty` は jq の `//` を使っており、jq で偽になるのは
-// null と false だけである(空オブジェクト `{}` は真なのでフォールバックしない)。
+// 現行版の `.pricing // empty` は jq の `//` を使っており、判定は
+// domain.JSONTruthy(偽は null と false だけ。空オブジェクト `{}` は真)に委ねる。
 func hasPricingValue(raw json.RawMessage) bool {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return false
-	}
-	return !bytes.Equal(trimmed, []byte("null")) && !bytes.Equal(trimmed, []byte("false"))
+	return domain.JSONTruthy(raw)
 }
 
 // emptyPricing は単価が 1 件も無い状態を返す(現行版の `PRICING_JSON="{}"`)。

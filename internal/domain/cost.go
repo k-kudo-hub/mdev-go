@@ -74,13 +74,28 @@ func RoundCost(cost float64) float64 {
 	return math.Round(cost*tokensPerPriceUnit) / tokensPerPriceUnit
 }
 
+// claudeRequiredPricingKeys は claude の cost 式が素の参照で使うキーである。
+// jq(record-output.sh:164-170)ではこのどれかが null だと掛け算がエラーになり、
+// レコード全体が Parse failed に落ちる。
+var claudeRequiredPricingKeys = []string{
+	PricingKeyInput, PricingKeyOutput, PricingKeyCacheWrite5m,
+	PricingKeyCacheWrite1h, PricingKeyCacheHit,
+}
+
 // ClaudeCost は claude のセッションの利用料金(USD)を返す。
 //
 // 項ごとに「トークン数 × 単価 × 倍率 ÷ 100 万」を出してから足す。現行版
 // (record-output.sh:164-170)と演算の順序を揃えてあり、浮動小数点の丸め誤差の
 // 出方まで一致する。
-func ClaudeCost(transcript ClaudeTranscript, pricing Pricing) float64 {
+//
+// 選ばれた単価エントリに cost 式が使うキーが欠けている場合は ok=false を返す。
+// 現行版では `$in * $p.input` が「number and null cannot be multiplied」で落ち、
+// レコード全体が summary 無しの Parse failed になる(呼び出し側が再現する)。
+func ClaudeCost(transcript ClaudeTranscript, pricing Pricing) (float64, bool) {
 	model := pricing.ForClaude(transcript.Model)
+	if model.MissingAny(claudeRequiredPricingKeys...) {
+		return 0, false
+	}
 	multiplier := pricing.SpeedMultiplier(transcript.Speed)
 
 	cost := float64(transcript.TotalInputTokens)*model.Input*multiplier/tokensPerPriceUnit +
@@ -89,5 +104,5 @@ func ClaudeCost(transcript ClaudeTranscript, pricing Pricing) float64 {
 		float64(transcript.CacheWrite1hTokens)*model.CacheWrite1h*multiplier/tokensPerPriceUnit +
 		float64(transcript.CacheReadTokens)*model.CacheHit*multiplier/tokensPerPriceUnit
 
-	return RoundCost(cost)
+	return RoundCost(cost), true
 }

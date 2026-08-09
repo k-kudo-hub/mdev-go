@@ -326,3 +326,38 @@ daily のファイル名と `completed_at` の日付が一致するまで生成�
    Go 版は追記するときだけ作る。ゴールデンテストはファイルの集合で比較するため差は出ない。
 3. **pending ディレクトリを読めない場合**: 現行版は glob が何も返さず黙って exit 0 するが、
    Go 版はエラーを返す。原因の分かる失敗を握り潰さないためである。
+
+## 9. 追記(/code-review の指摘対応)
+
+PR #3 の CI 緑後に実施した /code-review(検証つき)で 7 件の指摘を受けた。対応は次の通り。
+
+### 修正した(CONFIRMED 4 件)
+
+1. **モデルエントリ null でゼロ単価が登録される** — jq の `//` は null を偽としてフォールバック
+   する(実測: `{"m":null}["m"] // 既定` → 既定)。`Pricing.UnmarshalJSON` で null / false の
+   エントリを読み飛ばすよう修正。
+2. **`fast_multiplier: null` が「明示的な 0」扱いになる** — jq の `null // 6` は 6(実測)。
+   null / false は未設定と同じ扱いに修正。
+3. **部分的な単価エントリでコスト 0 の完全な summary が出る** — 現行版は
+   `number and null cannot be multiplied`(実測 exit 5)で Parse failed に落ちる。
+   `ModelPricing.Missing` で数値として存在しないキーを記録し、cost 式が素の参照で使うキー
+   (claude: input/output/cache_write_5m/cache_write_1h/cache_hit、codex: input/output のみ。
+   codex の cache_hit/cache_write は jq 側に `// 0` があるため 0 扱い)が欠けていたら
+   Parse failed レコードに落とすよう修正。オブジェクトでない truthy な単価
+   (jq では `$p.input` のインデックスエラー)も全キー欠落として同経路に落ちる。
+4. **jq truthy 判定の二重実装** — `domain.JSONTruthy` として公開し、
+   `store.hasPricingValue` を委譲に変更。
+
+ゴールデンケース 3 件(pricing-model-null / pricing-fast-null / pricing-partial-entry)を追加し、
+現行 Shell 版の実出力(0.018 / 0.18 / summary null)と Go 版の一致を固定した(計 29 ケース)。
+
+### 記録して見送った(PLAUSIBLE 2 件 + 軽微 1 件)
+
+- **FindByTab が非文字列フィールドの pending をスキップする**(シェル版はフィールド個別読みで
+  記録する)— pending の writer は現状すべて mdev 自身で全フィールド文字列のため実トリガー無し。
+  外部 writer が現れた時点で寛容パースを検討する。
+- **トークン数の非整数(1e3 等)で Parse failed になる**(jq は float で summary を出す)—
+  既知の CLI は整数のみ出力するため見送り。
+- **pending ディレクトリ読み取り不能時に exit 1**(シェル版は glob 空マッチで exit 0)—
+  現行の呼び出し元は終了コードを無視している。実環境組み込みタスクで hooks/record の
+  終了コード方針を決める際に扱う。

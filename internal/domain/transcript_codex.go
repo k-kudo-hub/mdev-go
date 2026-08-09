@@ -226,23 +226,34 @@ func CodexMarkers(tools []CodexToolCall) DailyMarkers {
 	return markers
 }
 
+// codexRequiredPricingKeys は codex の cost 式が素の参照で使うキーである。
+// jq(record-output.sh:82-89)では input / output だけが素の参照で、
+// cache_hit / cache_write には `// 0` が付いている(欠けても 0 で計算が進む)。
+var codexRequiredPricingKeys = []string{PricingKeyInput, PricingKeyOutput}
+
 // CodexCost は codex のセッションの利用料金(USD)を返す。
 //
-// 単価が分からないモデルでは ok=false を返す。claude と違って別のモデルの
-// 単価へフォールバックしないためで、呼び出し側は cost を null にする。
+// 戻り値は (cost, priced, ok)。単価が分からないモデルでは priced=false
+// (claude と違いフォールバックせず、呼び出し側が cost を null にする)。
+// 単価エントリはあるが input / output が欠けている場合は ok=false で、現行版は
+// null との掛け算エラーでレコード全体が Parse failed に落ちる。cache_hit /
+// cache_write の欠落は jq の `// 0` と同じくゼロ値のまま計算する。
 //
-// 現行版(record-output.sh:82-89)は 4 項を足してから 100 万で割る。claude 側
-// (項ごとに割る)と式の形が違うため、丸め誤差の出方まで揃えて写している。
-func CodexCost(transcript CodexTranscript, pricing Pricing) (float64, bool) {
-	model, ok := pricing.ForCodex(transcript.Model)
-	if !ok {
-		return 0, false
+// 現行版は 4 項を足してから 100 万で割る。claude 側(項ごとに割る)と式の形が
+// 違うため、丸め誤差の出方まで揃えて写している。
+func CodexCost(transcript CodexTranscript, pricing Pricing) (float64, bool, bool) {
+	model, found := pricing.ForCodex(transcript.Model)
+	if !found {
+		return 0, false, true
+	}
+	if model.MissingAny(codexRequiredPricingKeys...) {
+		return 0, false, false
 	}
 	cost := (float64(transcript.TotalInputTokens)*model.Input +
 		float64(transcript.TotalOutputTokens)*model.Output +
 		float64(transcript.CacheReadTokens)*model.CacheHit +
 		float64(transcript.CacheWriteTokens)*model.CacheWrite) / tokensPerPriceUnit
-	return RoundCost(cost), true
+	return RoundCost(cost), true, true
 }
 
 // jsonObject は raw をオブジェクトとして読む。

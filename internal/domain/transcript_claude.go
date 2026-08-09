@@ -260,14 +260,9 @@ func jsonString(raw json.RawMessage) (string, bool) {
 	return value, true
 }
 
-// jsonTruthy は jq の真偽判定に合わせる。偽になるのは null と false だけで、
-// 空文字も 0 も真である(実測: `"" // "fb"` は "" を返す)。
+// jsonTruthy は JSONTruthy の旧名。パッケージ内の呼び出しを保つ別名である。
 func jsonTruthy(raw json.RawMessage) bool {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return false
-	}
-	return !bytes.Equal(trimmed, []byte("null")) && !bytes.Equal(trimmed, []byte("false"))
+	return JSONTruthy(raw)
 }
 
 // intOrZero は欠けているトークン数を 0 として扱う(現行版の `// 0` と `add`)。

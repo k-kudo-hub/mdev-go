@@ -31,9 +31,13 @@ func TestConfigUnmarshalPricing(t *testing.T) {
 		t.Fatalf("Unmarshal() = %v", err)
 	}
 
+	// claude 系は cache_write を、gpt 系は cache_write_5m/1h を持たないため、
+	// それぞれの欠落が Missing に記録される(cost 式が使わないキーなら無害)。
 	wantModels := map[string]domain.ModelPricing{
-		"claude-opus-4-7": {Input: 5.0, Output: 25.0, CacheWrite5m: 6.25, CacheWrite1h: 10.0, CacheHit: 0.5},
-		"gpt-5.6-sol":     {Input: 5.0, Output: 30.0, CacheWrite: 6.25, CacheHit: 0.5},
+		"claude-opus-4-7": {Input: 5.0, Output: 25.0, CacheWrite5m: 6.25, CacheWrite1h: 10.0, CacheHit: 0.5,
+			Missing: map[string]bool{domain.PricingKeyCacheWrite: true}},
+		"gpt-5.6-sol": {Input: 5.0, Output: 30.0, CacheWrite: 6.25, CacheHit: 0.5,
+			Missing: map[string]bool{domain.PricingKeyCacheWrite5m: true, domain.PricingKeyCacheWrite1h: true}},
 	}
 	if !reflect.DeepEqual(cfg.Pricing.Models, wantModels) {
 		t.Errorf("Models = %+v, want %+v", cfg.Pricing.Models, wantModels)
@@ -42,6 +46,22 @@ func TestConfigUnmarshalPricing(t *testing.T) {
 		t.Errorf("FastMultiplier = %v (has=%v), want 6 (has=true)",
 			cfg.Pricing.FastMultiplier, cfg.Pricing.HasFastMultiplier)
 	}
+}
+
+// missingExcept は指定キー以外のすべての単価キーを欠落として持つ集合を返す。
+func missingExcept(present ...string) map[string]bool {
+	keys := []string{
+		domain.PricingKeyInput, domain.PricingKeyOutput, domain.PricingKeyCacheWrite5m,
+		domain.PricingKeyCacheWrite1h, domain.PricingKeyCacheWrite, domain.PricingKeyCacheHit,
+	}
+	missing := map[string]bool{}
+	for _, key := range keys {
+		missing[key] = true
+	}
+	for _, key := range present {
+		delete(missing, key)
+	}
+	return missing
 }
 
 func TestConfigUnmarshalPricingEdgeCases(t *testing.T) {
@@ -64,14 +84,35 @@ func TestConfigUnmarshalPricingEdgeCases(t *testing.T) {
 			// 既定値の適用は利用側の責務なので、ここでは 0 のままにする。
 			name:               "fast_multiplier が無ければ 0",
 			raw:                `{"pricing":{"m":{"input":1}}}`,
-			wantModels:         map[string]domain.ModelPricing{"m": {Input: 1}},
+			wantModels:         map[string]domain.ModelPricing{"m": {Input: 1, Missing: missingExcept(domain.PricingKeyInput)}},
 			wantFastMultiplier: 0,
 		},
 		{
-			name:               "モデルとして読めない値は読み飛ばす",
-			raw:                `{"pricing":{"m":{"input":1},"junk":"文字列"}}`,
-			wantModels:         map[string]domain.ModelPricing{"m": {Input: 1}},
+			// jq では文字列エントリも truthy なので選ばれ、`$p.input` の
+			// インデックスエラーで Parse failed に落ちる。全キー欠落として保持する。
+			name: "オブジェクトでない値は全キー欠落のエントリになる",
+			raw:  `{"pricing":{"m":{"input":1},"junk":"文字列"}}`,
+			wantModels: map[string]domain.ModelPricing{
+				"m":    {Input: 1, Missing: missingExcept(domain.PricingKeyInput)},
+				"junk": {Missing: missingExcept()},
+			},
 			wantFastMultiplier: 0,
+		},
+		{
+			// jq の `//` は null / false を偽とするため、エントリごと読み飛ばす
+			// (モデルはフォールバックへ落ちる)。
+			name:               "null や false のエントリは読み飛ばす",
+			raw:                `{"pricing":{"m":null,"n":false}}`,
+			wantModels:         map[string]domain.ModelPricing{},
+			wantFastMultiplier: 0,
+		},
+		{
+			// jq の `null // 6` は 6 を返すため、null は未設定と同じ扱いにする。
+			name:               "fast_multiplier の null は未設定と同じ",
+			raw:                `{"pricing":{"fast_multiplier":null}}`,
+			wantModels:         map[string]domain.ModelPricing{},
+			wantFastMultiplier: 0,
+			wantHasMultiplier:  false,
 		},
 		{
 			name:               "fast_multiplier が数値でなければ 0 のまま",

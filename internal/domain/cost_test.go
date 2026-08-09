@@ -3,6 +3,7 @@ package domain_test
 import (
 	"encoding/json"
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -40,8 +41,11 @@ func parsePricing(t *testing.T, raw string) domain.Pricing {
 func TestPricingForClaudeFallsBackInThreeSteps(t *testing.T) {
 	t.Parallel()
 
-	sonnet := domain.ModelPricing{Input: 3, Output: 15, CacheWrite5m: 3.75, CacheWrite1h: 6, CacheHit: 0.3}
-	opus := domain.ModelPricing{Input: 5, Output: 25, CacheWrite5m: 6.25, CacheWrite1h: 10, CacheHit: 0.5}
+	// defaultPricing の claude エントリは cache_write キーを持たないため、
+	// パース結果には Missing が付く(claude の cost 式は cache_write を使わない)。
+	missingCacheWrite := map[string]bool{domain.PricingKeyCacheWrite: true}
+	sonnet := domain.ModelPricing{Input: 3, Output: 15, CacheWrite5m: 3.75, CacheWrite1h: 6, CacheHit: 0.3, Missing: missingCacheWrite}
+	opus := domain.ModelPricing{Input: 5, Output: 25, CacheWrite5m: 6.25, CacheWrite1h: 10, CacheHit: 0.5, Missing: missingCacheWrite}
 
 	tests := []struct {
 		name    string
@@ -86,7 +90,7 @@ func TestPricingForClaudeFallsBackInThreeSteps(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := tt.pricing.ForClaude(tt.model); got != tt.want {
+			if got := tt.pricing.ForClaude(tt.model); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ForClaude(%q) = %+v, want %+v", tt.model, got, tt.want)
 			}
 		})
@@ -98,7 +102,7 @@ func TestDefaultClaudePricingMatchesShell(t *testing.T) {
 
 	// record-output.sh:162 のハードコード既定値。
 	want := domain.ModelPricing{Input: 3, Output: 15, CacheWrite5m: 3.75, CacheWrite1h: 6, CacheHit: 0.3}
-	if domain.DefaultClaudePricing != want {
+	if !reflect.DeepEqual(domain.DefaultClaudePricing, want) {
 		t.Errorf("DefaultClaudePricing = %+v, want %+v", domain.DefaultClaudePricing, want)
 	}
 }
@@ -112,8 +116,9 @@ func TestPricingForCodexDoesNotFallBack(t *testing.T) {
 	if !ok {
 		t.Fatal("ForCodex(gpt-5.6-sol) ok = false, want true")
 	}
-	want := domain.ModelPricing{Input: 5, Output: 30, CacheWrite: 6.25, CacheHit: 0.5}
-	if got != want {
+	want := domain.ModelPricing{Input: 5, Output: 30, CacheWrite: 6.25, CacheHit: 0.5,
+		Missing: map[string]bool{domain.PricingKeyCacheWrite5m: true, domain.PricingKeyCacheWrite1h: true}}
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ForCodex() = %+v, want %+v", got, want)
 	}
 
@@ -265,10 +270,74 @@ func TestClaudeCost(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := domain.ClaudeCost(tt.transcript, tt.pricing); got != tt.want {
+			got, ok := domain.ClaudeCost(tt.transcript, tt.pricing)
+			if !ok {
+				t.Fatal("ClaudeCost() ok = false, want true")
+			}
+			if got != tt.want {
 				t.Errorf("ClaudeCost() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClaudeCostFailsOnIncompletePricingEntry(t *testing.T) {
+	t.Parallel()
+
+	// 選ばれたエントリに cost 式の必須キーが欠けていると、現行版は
+	// `number and null cannot be multiplied` で落ち Parse failed になる(実測)。
+	transcript := domain.ClaudeTranscript{
+		Model: "claude-opus-4-6", Speed: "standard",
+		TotalInputTokens: 1000, TotalOutputTokens: 1000,
+	}
+
+	// モデル自体のエントリが部分的。
+	if _, ok := domain.ClaudeCost(transcript, parsePricing(t, `{"claude-opus-4-6":{"output":25}}`)); ok {
+		t.Error("ClaudeCost(部分エントリ) ok = true, want false")
+	}
+	// フォールバック先の sonnet が部分的でも同じく落ちる。
+	if _, ok := domain.ClaudeCost(transcript, parsePricing(t, `{"claude-sonnet-4-6":{"input":3}}`)); ok {
+		t.Error("ClaudeCost(部分 sonnet フォールバック) ok = true, want false")
+	}
+	// オブジェクトでない単価は jq では `$p.input` のインデックスエラーになる。
+	if _, ok := domain.ClaudeCost(transcript, parsePricing(t, `{"claude-opus-4-6":5}`)); ok {
+		t.Error("ClaudeCost(非オブジェクト) ok = true, want false")
+	}
+}
+
+func TestPricingSkipsNullAndFalseEntries(t *testing.T) {
+	t.Parallel()
+
+	// jq の `//` は null / false を偽とするため、null のエントリは選ばれず
+	// フォールバックが進む(実測: `{"m":null}["m"] // 既定` は既定を返す)。
+	transcript := domain.ClaudeTranscript{
+		Model: "claude-opus-4-6", Speed: "standard",
+		TotalInputTokens: 1000, TotalOutputTokens: 1000,
+	}
+	got, ok := domain.ClaudeCost(transcript, parsePricing(t, `{"claude-opus-4-6":null}`))
+	if !ok {
+		t.Fatal("ClaudeCost() ok = false, want true")
+	}
+	// null エントリ → sonnet も無し → ハードコード既定(sonnet 相当)で計算される。
+	if got != 0.018 {
+		t.Errorf("ClaudeCost() = %v, want 0.018(既定単価へのフォールバック)", got)
+	}
+
+	if _, found := parsePricing(t, `{"m":false}`).ForCodex("m"); found {
+		t.Error("ForCodex(false エントリ) found = true, want false")
+	}
+}
+
+func TestSpeedMultiplierTreatsNullAsAbsent(t *testing.T) {
+	t.Parallel()
+
+	// jq の `null // 6` は 6 を返す(実測)。null の fast_multiplier は未設定と同じ。
+	pricing := parsePricing(t, `{"fast_multiplier":null}`)
+	if got := pricing.SpeedMultiplier(domain.FastSpeed); got != domain.DefaultFastMultiplier {
+		t.Errorf("SpeedMultiplier(fast) = %v, want %v", got, domain.DefaultFastMultiplier)
+	}
+	if pricing.HasFastMultiplier {
+		t.Error("HasFastMultiplier = true, want false")
 	}
 }
 
@@ -290,7 +359,11 @@ func TestClaudeCostUsesSameArithmeticOrderAsShell(t *testing.T) {
 			float64(24680)*10.0*6/1000000 +
 			float64(456789)*0.5*6/1000000)
 
-	if got := domain.ClaudeCost(tr, pricing); got != want {
+	got, ok := domain.ClaudeCost(tr, pricing)
+	if !ok {
+		t.Fatal("ClaudeCost() ok = false, want true")
+	}
+	if got != want {
 		t.Errorf("ClaudeCost() = %v, want %v (差 %v)", got, want, math.Abs(got-want))
 	}
 }

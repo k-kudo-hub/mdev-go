@@ -46,7 +46,12 @@ func buildClaudeDailyRecord(source DailySource, transcript []byte, pricing Prici
 		return fallbackDailyRecord(source, ParseFailedMessage)
 	}
 
-	cost := ClaudeCost(parsed, pricing)
+	// 単価エントリに必須キーが欠けている場合、現行版は jq の掛け算エラーで
+	// レコード全体が Parse failed に落ちる(summary だけでなく markers も出ない)。
+	cost, ok := ClaudeCost(parsed, pricing)
+	if !ok {
+		return fallbackDailyRecord(source, ParseFailedMessage)
+	}
 	record := baseDailyRecord(source, source.Message)
 	record.Summary = &DailySummary{
 		TotalTurns:         parsed.TotalTurns,
@@ -72,6 +77,13 @@ func buildCodexDailyRecord(source DailySource, transcript []byte, pricing Pricin
 		return fallbackDailyRecord(source, ParseFailedMessage)
 	}
 
+	// 単価表に input / output が欠けたエントリがあると、現行版は jq の
+	// 掛け算エラーでレコード全体が Parse failed に落ちる。
+	cost, priced, ok := CodexCost(parsed, pricing)
+	if !ok {
+		return fallbackDailyRecord(source, ParseFailedMessage)
+	}
+
 	record := baseDailyRecord(source, source.Message)
 	summary := &DailySummary{
 		TotalTurns:        parsed.TotalTurns,
@@ -85,7 +97,7 @@ func buildCodexDailyRecord(source DailySource, transcript []byte, pricing Pricin
 		CacheWriteTokens:  &parsed.CacheWriteTokens,
 	}
 	// 単価が分からないモデルでは cost を null のままにする。
-	if cost, ok := CodexCost(parsed, pricing); ok {
+	if priced {
 		summary.TotalCostUSD = &cost
 	}
 	record.Summary = summary

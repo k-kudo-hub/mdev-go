@@ -17,13 +17,19 @@ var emptyPricing = domain.Pricing{Models: map[string]domain.ModelPricing{}}
 func TestLoadPricingFallsBackPerKey(t *testing.T) {
 	t.Parallel()
 
+	// fixture のエントリは input しか持たないため、残りのキーが Missing に載る。
+	missingExceptInput := map[string]bool{
+		domain.PricingKeyOutput: true, domain.PricingKeyCacheWrite5m: true,
+		domain.PricingKeyCacheWrite1h: true, domain.PricingKeyCacheWrite: true,
+		domain.PricingKeyCacheHit: true,
+	}
 	userOnly := domain.Pricing{
-		Models:            map[string]domain.ModelPricing{"only-in-user": {Input: 1}},
+		Models:            map[string]domain.ModelPricing{"only-in-user": {Input: 1, Missing: missingExceptInput}},
 		FastMultiplier:    0,
 		HasFastMultiplier: false,
 	}
 	defaultOnly := domain.Pricing{
-		Models:            map[string]domain.ModelPricing{"only-in-default": {Input: 9}},
+		Models:            map[string]domain.ModelPricing{"only-in-default": {Input: 9, Missing: missingExceptInput}},
 		FastMultiplier:    6,
 		HasFastMultiplier: true,
 	}

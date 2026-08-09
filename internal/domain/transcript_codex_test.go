@@ -259,22 +259,49 @@ func TestCodexCost(t *testing.T) {
 
 	// test.sh セクション 26i:
 	// 1M*$5 + 0.1M*$30 + 0.5M*$0.5 + 0.2M*$6.25 = 5 + 3 + 0.25 + 1.25 = 9.5
-	cost, ok := domain.CodexCost(transcript, pricing)
-	if !ok {
-		t.Fatal("CodexCost() ok = false, want true")
+	cost, priced, ok := domain.CodexCost(transcript, pricing)
+	if !ok || !priced {
+		t.Fatalf("CodexCost() priced = %v, ok = %v, want ともに true", priced, ok)
 	}
 	if cost != 9.5 {
 		t.Errorf("CodexCost() = %v, want 9.5", cost)
 	}
 
-	// 価格の分からないモデルは claude の単価を借りず ok=false になる。
+	// 価格の分からないモデルは claude の単価を借りず priced=false になる(cost null)。
 	transcript.Model = "gpt-unknown-model"
-	if _, ok := domain.CodexCost(transcript, pricing); ok {
-		t.Error("CodexCost(未知モデル) ok = true, want false")
+	if _, priced, ok := domain.CodexCost(transcript, pricing); priced || !ok {
+		t.Errorf("CodexCost(未知モデル) priced = %v, ok = %v, want false, true", priced, ok)
 	}
 	transcript.Model = domain.UnknownModel
-	if _, ok := domain.CodexCost(transcript, pricing); ok {
-		t.Error("CodexCost(unknown) ok = true, want false")
+	if _, priced, ok := domain.CodexCost(transcript, pricing); priced || !ok {
+		t.Errorf("CodexCost(unknown) priced = %v, ok = %v, want false, true", priced, ok)
+	}
+}
+
+func TestCodexCostFailsOnMissingRequiredKeys(t *testing.T) {
+	t.Parallel()
+
+	transcript, ok := domain.ParseCodexTranscript([]byte(codexRollout))
+	if !ok {
+		t.Fatal("ParseCodexTranscript() ok = false")
+	}
+
+	// jq では input / output だけが素の参照で、欠けると掛け算エラーになり
+	// Parse failed に落ちる(record-output.sh:84-85)。
+	pricing := parsePricing(t, `{"gpt-5.6-sol":{"output":30}}`)
+	if _, _, ok := domain.CodexCost(transcript, pricing); ok {
+		t.Error("CodexCost(input 欠落) ok = true, want false")
+	}
+
+	// cache_hit / cache_write は `// 0` 付きなので、欠けても 0 で計算が進む。
+	pricing = parsePricing(t, `{"gpt-5.6-sol":{"input":5,"output":30}}`)
+	cost, priced, ok := domain.CodexCost(transcript, pricing)
+	if !ok || !priced {
+		t.Fatalf("CodexCost(cache 系欠落) priced = %v, ok = %v, want ともに true", priced, ok)
+	}
+	// 1M*$5 + 0.1M*$30 = 8.0(cache 2 項は 0 扱い)
+	if cost != 8.0 {
+		t.Errorf("CodexCost() = %v, want 8.0", cost)
 	}
 }
 
