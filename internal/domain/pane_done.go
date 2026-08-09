@@ -290,7 +290,7 @@ func doneRowTurns(raw json.RawMessage) (string, error) {
 	if !JSONTruthy(value) {
 		return "-", nil
 	}
-	return jqToString(value), nil
+	return jqRawString(value), nil
 }
 
 // doneRowCost は `(.summary.total_cost_usd // null | if . != null then ... else "-" end)` 相当。
@@ -388,36 +388,15 @@ func jqIndex(raw json.RawMessage, key string) (json.RawMessage, error) {
 
 // jqJoinString は join("\t") に渡された値の文字列表現を返す。
 // join は null を空文字として扱う。
+//
+// null を除いた後の文字列化は `tostring` と同じで、jq -r が 1 つの値を出す
+// ときの表記(= jqRawString)に一致する。
 func jqJoinString(raw json.RawMessage) string {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return ""
 	}
-	return jqToString(raw)
-}
-
-// jqToString は tostring 相当の文字列化を行う。
-func jqToString(raw json.RawMessage) string {
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return ""
-	}
-	switch v := value.(type) {
-	case nil:
-		return JQNullText
-	case string:
-		return v
-	case bool:
-		return strconv.FormatBool(v)
-	case float64:
-		return formatJQNumber(v)
-	default:
-		compact := &bytes.Buffer{}
-		if err := json.Compact(compact, raw); err != nil {
-			return ""
-		}
-		return compact.String()
-	}
+	return jqRawString(raw)
 }
 
 // formatDoneCost は現行版の jq 式が作る金額表記を返す。
