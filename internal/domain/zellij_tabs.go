@@ -32,10 +32,15 @@ func ParseTabNames(output string) []string {
 //	NR>1 { line=$0; sub(/^[^ ]+ +[^ ]+ +/, "", line); if (line == name) print $1 }
 //
 // 「先頭 2 列を落とした残り」をタブ名として比較するため、スペースを含む名前も
-// 正しく解決できる。該当が無ければ空文字を返す。複数行が一致した場合は現行の
-// コマンド置換と同じく改行で連結した文字列になる。
+// 正しく解決できる。該当が無ければ空文字を返す。
+//
+// 同じ名前のタブが複数ある場合は**先頭の一致だけ**を返す(意図的な差異)。
+// 現行版はコマンド置換の結果が改行で連結された "1\n3" のような文字列になり、
+// `zellij action close-tab` がそれを id として解釈できずタブが閉じ残る。
+// pending とレジストリは先に消えているので、画面から消えたのにタブだけが
+// 残るという最も分かりにくい壊れ方をする。先頭だけを返せば少なくとも 1 つは
+// 閉じられ、残りは次の削除操作で閉じられる。
 func ResolveTabID(output, tab string) string {
-	ids := []string{}
 	for _, line := range tabLinesAfterHeader(output) {
 		if stripTwoColumns(line) != tab {
 			continue
@@ -44,9 +49,9 @@ func ResolveTabID(output, tab string) string {
 		if len(fields) == 0 {
 			continue
 		}
-		ids = append(ids, fields[0])
+		return fields[0]
 	}
-	return strings.Join(ids, "\n")
+	return ""
 }
 
 // tabLinesAfterHeader は見出しの 1 行目を除いた行を返す。

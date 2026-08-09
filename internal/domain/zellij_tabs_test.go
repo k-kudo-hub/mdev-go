@@ -87,6 +87,16 @@ func TestResolveTabID(t *testing.T) {
 			tab:    "NAME",
 			want:   "",
 		},
+		{
+			// 現行版はコマンド置換の結果が改行で連結された "1\n3" になり、
+			// close-tab がその id を解釈できずタブが閉じ残る(pending と
+			// レジストリだけが消える)。Go 版は先頭の一致だけを返して
+			// 少なくとも 1 つは閉じられるようにする(意図的な差異)。
+			name:   "複数一致は先頭の id だけを返す",
+			output: "ID POS NAME\n1 x alpha\n2 x beta\n3 x alpha\n",
+			tab:    "alpha",
+			want:   "1",
+		},
 		{name: "出力が空なら空", output: "", tab: "alpha", want: ""},
 	}
 
