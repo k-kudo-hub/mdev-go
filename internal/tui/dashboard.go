@@ -105,21 +105,29 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case dashboardRefreshedMsg:
+		if m.awaiting {
+			// 待ち受けに入る前に発行した読み直しが着弾した。ここで一覧を
+			// 差し替えると押した番号が別のタブを指すため、捨てる。
+			return m, nil
+		}
 		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.snapshot, m.err = msg.snapshot, msg.err
 		return m, nil
 
 	case tickMsg:
-		if m.busy {
-			// 削除の途中は再描画しない。現行版もキー処理が終わるまで
-			// 次のポーリングへ進まない。
+		if m.busy || m.awaiting {
+			// 削除の途中と 2 打鍵目の待ち受け中は読み直さない。現行版は
+			// `read -t 3` がループを止めるため、この間は表示も番号の対応も
+			// 動かない。同じ意味になるようポーリングだけを空回りさせる。
 			return m, tickCmd(DashboardInterval)
 		}
 		return m, tea.Batch(m.refreshCmd(), tickCmd(DashboardInterval))
 
 	case promptExpiredMsg:
 		if msg.token == m.token {
+			// 凍結を解いて、止めていた間の変化に表示を追いつかせる。
 			m.awaiting = false
+			return m, m.refreshCmd()
 		}
 		return m, nil
 
@@ -160,14 +168,16 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	}
 
 	if m.awaiting {
+		// 凍結を解く。削除へ進まない分岐では、止めていた間の変化に表示を
+		// 追いつかせるため読み直す。
 		m.awaiting = false
 		number, ok := keyIndex(key)
 		if !ok {
-			return m, nil
+			return m, m.refreshCmd()
 		}
 		if number > len(m.snapshot.Tabs) {
 			// 範囲外の番号は何もしない(現行版も同じ)。
-			return m, nil
+			return m, m.refreshCmd()
 		}
 		tab := m.snapshot.Tabs[number-1]
 		m.busy, m.notice = true, uploadingLabel

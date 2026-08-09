@@ -54,16 +54,28 @@ func (m DoneModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case doneRefreshedMsg:
+		if m.awaiting {
+			// 待ち受けに入る前に発行した集計が着弾した。ここで一覧を
+			// 差し替えると押した番号が別の行を指すため、捨てる。
+			return m, nil
+		}
 		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.snapshot = msg.snapshot
 		return m, nil
 
 	case tickMsg:
+		if m.awaiting {
+			// 2 打鍵目の待ち受け中は集計し直さない。現行版は `read -t 3` が
+			// ループを止めるため、この間は表示も番号の対応も動かない。
+			return m, tickCmd(DoneInterval)
+		}
 		return m, tea.Batch(m.refreshCmd(), tickCmd(DoneInterval))
 
 	case promptExpiredMsg:
 		if msg.token == m.token {
+			// 凍結を解いて、止めていた間の変化に表示を追いつかせる。
 			m.awaiting = false
+			return m, m.refreshCmd()
 		}
 		return m, nil
 	}
@@ -77,10 +89,12 @@ func (m DoneModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	}
 
 	if m.awaiting {
+		// 凍結を解く。restore へ進まない分岐では、止めていた間の変化に
+		// 表示を追いつかせるため集計し直す。
 		m.awaiting = false
 		number, ok := keyIndex(key)
 		if !ok || number > m.snapshot.Count {
-			return m, nil
+			return m, m.refreshCmd()
 		}
 		snapshot := m.snapshot
 		return m, func() tea.Msg {

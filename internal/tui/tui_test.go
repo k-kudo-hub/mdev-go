@@ -26,8 +26,11 @@ var errUpload = errors.New("upload に失敗した")
 
 type stubDashboard struct {
 	snapshot app.DashboardSnapshot
-	prep     app.DeletePreparation
-	prepErr  error
+	// next を入れると、以降の Refresh はこちらを返す(ポーリングで一覧が
+	// 入れ替わった状況を作るために使う)。
+	next    *app.DashboardSnapshot
+	prep    app.DeletePreparation
+	prepErr error
 
 	calls []string
 }
@@ -38,6 +41,9 @@ func (s *stubDashboard) Startup() { s.calls = append(s.calls, "startup") }
 
 func (s *stubDashboard) Refresh(app.PaneEnv) (app.DashboardSnapshot, error) {
 	s.calls = append(s.calls, "refresh")
+	if s.next != nil {
+		return *s.next, nil
+	}
 	return s.snapshot, nil
 }
 
@@ -66,14 +72,27 @@ func (s *stubWaiting) Refresh(app.PaneEnv) (string, error) { return s.text, nil 
 
 type stubDone struct {
 	snapshot app.DoneSnapshot
+	// next を入れると、以降の Refresh はこちらを返す。
+	next *app.DoneSnapshot
+
 	restored []int
+	// restoredFrom は restore に渡されたスナップショットの表示内容。
+	// どの世代の一覧を使ったかを見るために記録する。
+	restoredFrom []string
 }
 
 var _ tui.DoneService = (*stubDone)(nil)
 
-func (s *stubDone) Refresh() app.DoneSnapshot { return s.snapshot }
-func (s *stubDone) Restore(_ app.DoneSnapshot, number int) {
+func (s *stubDone) Refresh() app.DoneSnapshot {
+	if s.next != nil {
+		return *s.next
+	}
+	return s.snapshot
+}
+
+func (s *stubDone) Restore(snapshot app.DoneSnapshot, number int) {
 	s.restored = append(s.restored, number)
+	s.restoredFrom = append(s.restoredFrom, snapshot.Text)
 }
 
 type stubNews struct {
@@ -317,6 +336,67 @@ func TestDashboardModelDeletePromptAndTimeout(t *testing.T) {
 	}
 }
 
+func TestDashboardModelFreezesTabsWhileAwaiting(t *testing.T) {
+	t.Parallel()
+
+	// 2 打鍵目を待っている間に一覧が入れ替わると、押した番号が別のタブを
+	// 指してしまい、消すつもりのないタブを消してしまう。現行 Shell 版は
+	// `read -t 3` がループを止めるためこの隙間が無い。待ち受け中は表示も
+	// 番号の対応も凍結する。
+	service := &stubDashboard{snapshot: app.DashboardSnapshot{
+		Text: "元の画面", Tabs: []string{"alpha", "beta"},
+	}}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	// ポーリングが一覧を入れ替えた状況の refreshedMsg を作る。メッセージ型は
+	// 非公開なので、同じ経路(別のモデルの Init)から取り出す。
+	service.next = &app.DashboardSnapshot{Text: "入れ替わった画面", Tabs: []string{"gamma"}}
+	inflight := exec(t, tui.NewDashboardModel(service, testEnv).Init())
+
+	// d を押した後に、発行済みの読み直しが着弾する。
+	prompted, _ := loaded.Update(key('d'))
+	stale, _ := prompted.Update(inflight)
+
+	// 表示は待ち受けに入ったときのままである。
+	if !strings.Contains(content(stale), "元の画面") {
+		t.Errorf("待ち受け中に表示が入れ替わっている: %q", content(stale))
+	}
+	if strings.Contains(content(stale), "入れ替わった画面") {
+		t.Errorf("待ち受け中に表示が入れ替わっている: %q", content(stale))
+	}
+
+	// 1 番は待ち受けに入ったときの 1 番(alpha)のままでなければならない。
+	if _, _ = run(t, stale, key('1')); contains(service.calls, "prepare gamma") {
+		t.Fatalf("入れ替わった一覧の側を消している: %v", service.calls)
+	}
+	if !contains(service.calls, "prepare alpha") {
+		t.Errorf("凍結した一覧の 1 番を消していない: %v", service.calls)
+	}
+}
+
+func TestDashboardModelResumesPollingAfterPromptTimeout(t *testing.T) {
+	t.Parallel()
+
+	// 待ち受けが時間切れになったら、凍結していた表示を追いつかせる。
+	service := &stubDashboard{snapshot: app.DashboardSnapshot{
+		Text: "元の画面", Tabs: []string{"alpha"},
+	}}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	prompted, timeoutMsg := run(t, loaded, key('d'))
+	service.next = &app.DashboardSnapshot{Text: "新しい画面"}
+
+	expired, refreshMsg := run(t, prompted, timeoutMsg)
+	if refreshMsg == nil {
+		t.Fatal("時間切れの後に読み直していない")
+	}
+	if caught, _ := expired.Update(refreshMsg); !strings.Contains(content(caught), "新しい画面") {
+		t.Errorf("時間切れの後に表示が追いついていない: %q", content(caught))
+	}
+}
+
 func TestDashboardModelDeleteRunsPrepareThenCommit(t *testing.T) {
 	t.Parallel()
 
@@ -454,6 +534,35 @@ func TestDoneModelRestore(t *testing.T) {
 	// 番号で restore が呼ばれる。
 	if _, _ = run(t, prompted, key('2')); len(service.restored) != 1 || service.restored[0] != 2 {
 		t.Errorf("restore の番号 = %v, want [2]", service.restored)
+	}
+}
+
+func TestDoneModelFreezesRowsWhileAwaiting(t *testing.T) {
+	t.Parallel()
+
+	// Dashboard と同じく、2 打鍵目を待っている間に一覧が入れ替わると
+	// 押した番号が別の行を指してしまう。待ち受け中は凍結する。
+	service := &stubDone{snapshot: app.DoneSnapshot{Text: "元の完了画面", Count: 3}}
+	m := tui.NewDoneModel(service)
+	loaded := load(t, m)
+
+	service.next = &app.DoneSnapshot{Text: "入れ替わった完了画面", Count: 1}
+	inflight := exec(t, tui.NewDoneModel(service).Init())
+
+	prompted, _ := loaded.Update(key('r'))
+	stale, _ := prompted.Update(inflight)
+
+	if !strings.Contains(content(stale), "元の完了画面") {
+		t.Errorf("待ち受け中に表示が入れ替わっている: %q", content(stale))
+	}
+
+	// 3 番は凍結した一覧(3 件)の 3 番である。入れ替わった一覧(1 件)を
+	// 使うと範囲外になり、restore が呼ばれない。
+	if _, _ = run(t, stale, key('3')); len(service.restored) != 1 || service.restored[0] != 3 {
+		t.Fatalf("restore の番号 = %v, want [3]", service.restored)
+	}
+	if service.restoredFrom[0] != "元の完了画面" {
+		t.Errorf("restore に渡した一覧 = %q, want 元の完了画面", service.restoredFrom[0])
 	}
 }
 
