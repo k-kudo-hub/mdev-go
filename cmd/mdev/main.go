@@ -25,12 +25,24 @@ func main() {
 	}
 	conductorHome := store.ConductorHome(home, os.Getenv("CONDUCTOR_HOME"))
 
+	pending := store.NewPendingStore(store.PendingRoot(home))
+
 	hooks := &app.HookHandler{
-		Pending:  store.NewPendingStore(store.PendingRoot(home)),
+		Pending:  pending,
 		Registry: store.NewRegistryStore(store.RegistryRoot(conductorHome)),
 		Focuser:  zellij.NewFocuser(),
 		Clock:    infra.SystemClock{},
 	}
 
-	os.Exit(cli.Execute(cli.Deps{Hooks: hooks, Getenv: os.Getenv}))
+	// ロックを取れなかったことは stderr に警告するだけで処理は続ける
+	// (fail-open)。record は hook 経路と同じく会話を止めてはならない。
+	record := &app.RecordOutput{
+		Pending:    pending,
+		Transcript: store.NewTranscriptStore(),
+		Daily:      store.NewDailyStore(store.DailyRoot(conductorHome), os.Stderr),
+		Pricing:    store.NewPricingStore(conductorHome),
+		Clock:      infra.SystemClock{},
+	}
+
+	os.Exit(cli.Execute(cli.Deps{Hooks: hooks, Record: record, Getenv: os.Getenv}))
 }

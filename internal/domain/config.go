@@ -10,6 +10,22 @@ type Config struct {
 	Pricing Pricing `json:"pricing"`
 }
 
+// 単価表のキー名。ModelPricing.Missing と cost 計算の必須キー判定で使う。
+const (
+	PricingKeyInput        = "input"
+	PricingKeyOutput       = "output"
+	PricingKeyCacheWrite5m = "cache_write_5m"
+	PricingKeyCacheWrite1h = "cache_write_1h"
+	PricingKeyCacheWrite   = "cache_write"
+	PricingKeyCacheHit     = "cache_hit"
+)
+
+// pricingKeys は単価表の全キー。
+var pricingKeys = []string{
+	PricingKeyInput, PricingKeyOutput, PricingKeyCacheWrite5m,
+	PricingKeyCacheWrite1h, PricingKeyCacheWrite, PricingKeyCacheHit,
+}
+
 // ModelPricing は 1 モデルあたりの 100 万トークンあたり単価(USD)である。
 //
 // claude 系は cache_write_5m / cache_write_1h に分かれ、gpt 系は cache_write に
@@ -21,6 +37,71 @@ type ModelPricing struct {
 	CacheWrite1h float64 `json:"cache_write_1h"`
 	CacheWrite   float64 `json:"cache_write"`
 	CacheHit     float64 `json:"cache_hit"`
+
+	// Missing は JSON に数値として存在しなかったキーの集合である。
+	//
+	// jq では欠けたキーの参照が null になり、cost の式で素の掛け算に使われると
+	// エラー(Parse failed 落ち)、`// 0` 付きなら 0 になる。どちらへ転ぶかは
+	// 使う側の式で決まるため、ここでは欠落の事実だけを持つ。コードから
+	// リテラルで組んだ値(テスト・DefaultClaudePricing)は nil = 欠落なし。
+	Missing map[string]bool `json:"-"`
+}
+
+// MissingAny は keys のうち 1 つでも Missing に含まれるかを返す。
+func (m ModelPricing) MissingAny(keys ...string) bool {
+	for _, key := range keys {
+		if m.Missing[key] {
+			return true
+		}
+	}
+	return false
+}
+
+// UnmarshalJSON は単価エントリを jq の参照セマンティクスに合わせて読む。
+//
+// オブジェクトでない値(数値・文字列・配列)は jq では `$p.input` の時点で
+// インデックスエラーになるため、全キー欠落として表す。オブジェクトの場合、
+// 数値でないキー(欠落・null・型違い)を Missing に記録する。error は返さない。
+func (m *ModelPricing) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		missing := make(map[string]bool, len(pricingKeys))
+		for _, key := range pricingKeys {
+			missing[key] = true
+		}
+		*m = ModelPricing{Missing: missing}
+		return nil
+	}
+
+	// 全キーが揃っている通常のエントリでは Missing を nil に保つ。
+	// リテラルで組んだ値(Missing nil)と reflect.DeepEqual で等しくなる。
+	*m = ModelPricing{}
+	missing := map[string]bool{}
+	for _, key := range pricingKeys {
+		var value float64
+		if rawValue, ok := raw[key]; !ok || json.Unmarshal(rawValue, &value) != nil {
+			missing[key] = true
+			continue
+		}
+		switch key {
+		case PricingKeyInput:
+			m.Input = value
+		case PricingKeyOutput:
+			m.Output = value
+		case PricingKeyCacheWrite5m:
+			m.CacheWrite5m = value
+		case PricingKeyCacheWrite1h:
+			m.CacheWrite1h = value
+		case PricingKeyCacheWrite:
+			m.CacheWrite = value
+		case PricingKeyCacheHit:
+			m.CacheHit = value
+		}
+	}
+	if len(missing) > 0 {
+		m.Missing = missing
+	}
+	return nil
 }
 
 // Pricing は設定の pricing セクションである。
@@ -32,12 +113,22 @@ type Pricing struct {
 	// Models はモデル名から単価への対応。
 	Models map[string]ModelPricing
 	// FastMultiplier は速い応答(speed が "fast")のときに単価へ掛ける倍率。
-	// 設定に無い場合は 0 になるため、既定値の適用は利用側で行う。
+	// 設定に無い場合は 0 になるため、既定値の適用は利用側(SpeedMultiplier)で行う。
 	FastMultiplier float64
+	// HasFastMultiplier は設定に fast_multiplier が数値として書いてあったかを表す。
+	//
+	// 現行版の `$pricing.fast_multiplier // 6` は jq の `//` を使っており、jq では
+	// 0 が真なので「明示的な 0」と「未設定」で結果が変わる(前者は 0、後者は 6)。
+	// FastMultiplier だけではこの 2 つを区別できないため別に持つ。
+	HasFastMultiplier bool
 }
 
 // UnmarshalJSON は pricing セクションを Models と FastMultiplier に振り分ける。
-// モデルの値として解釈できないキーは読み飛ばす。
+//
+// jq の `//` は null と false だけを偽とするため、値が null / false のエントリは
+// 「無いもの」として読み飛ばす(モデルはフォールバックへ、fast_multiplier は
+// 既定値 6 へ落ちる)。それ以外の値は ModelPricing.UnmarshalJSON が jq の参照
+// セマンティクスで受け止める。
 func (p *Pricing) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -46,18 +137,22 @@ func (p *Pricing) UnmarshalJSON(data []byte) error {
 
 	p.Models = make(map[string]ModelPricing, len(raw))
 	p.FastMultiplier = 0
+	p.HasFastMultiplier = false
 	for key, value := range raw {
+		if !JSONTruthy(value) {
+			continue
+		}
 		if key == pricingFastMultiplierKey {
 			var multiplier float64
 			if err := json.Unmarshal(value, &multiplier); err == nil {
 				p.FastMultiplier = multiplier
+				p.HasFastMultiplier = true
 			}
 			continue
 		}
 		var model ModelPricing
-		if err := json.Unmarshal(value, &model); err != nil {
-			continue
-		}
+		// ModelPricing.UnmarshalJSON は error を返さない。
+		_ = json.Unmarshal(value, &model)
 		p.Models[key] = model
 	}
 	return nil

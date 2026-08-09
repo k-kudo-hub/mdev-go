@@ -1,0 +1,410 @@
+[
+  {
+    "name": "claude-full",
+    "description": "claude 正常系: 全項目そろった pending と transcript(test.sh セクション 20)",
+    "tab": "record-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-rec.json": "{\"tab\": \"record-test\", \"session\": \"test-session\", \"claude_session_id\": \"sess-rec\", \"message\": \"Task complete\", \"event\": \"Stop\", \"time\": \"10:00:05\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/mock-transcript.jsonl\", \"dir\": \"/tmp/myapp\", \"task_type\": \"dev\"}\n"
+    },
+    "transcripts": {
+      "mock-transcript.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"},\"cwd\":\"/tmp/myapp\",\"sessionId\":\"sess-rec\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-18T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":50}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-18T10:00:01Z\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"fix the bug\"},\"cwd\":\"/tmp/myapp\",\"sessionId\":\"sess-rec\",\"uuid\":\"u2\",\"timestamp\":\"2026-04-18T10:00:02Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/app.ts\"}},{\"type\":\"tool_use\",\"name\":\"Write\",\"input\":{\"file_path\":\"/tmp/README.md\"}}],\"usage\":{\"input_tokens\":200,\"output_tokens\":100}},\"uuid\":\"a2\",\"timestamp\":\"2026-04-18T10:00:03Z\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"send to slack\"},\"cwd\":\"/tmp/myapp\",\"sessionId\":\"sess-rec\",\"uuid\":\"u3\",\"timestamp\":\"2026-04-18T10:00:04Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"tool_use\",\"name\":\"mcp__slack__send_message\",\"input\":{\"channel\":\"general\",\"text\":\"done\"}}],\"usage\":{\"input_tokens\":150,\"output_tokens\":75}},\"uuid\":\"a3\",\"timestamp\":\"2026-04-18T10:00:05Z\"}\n"
+    }
+  },
+  {
+    "name": "claude-cache-cost",
+    "description": "claude: キャッシュトークン込みの料金計算(test.sh セクション 26a)",
+    "tab": "cost-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-cost.json": "{\"tab\": \"cost-test\", \"session\": \"test-session\", \"claude_session_id\": \"sess-cost\", \"message\": \"Cost test\", \"event\": \"Stop\", \"time\": \"10:00:03\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/cost.jsonl\"}\n"
+    },
+    "transcripts": {
+      "cost.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"},\"cwd\":\"/tmp\",\"sessionId\":\"sess-cost\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-19T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"usage\":{\"input_tokens\":100,\"output_tokens\":500,\"cache_read_input_tokens\":10000,\"cache_creation_input_tokens\":5000,\"cache_creation\":{\"ephemeral_5m_input_tokens\":2000,\"ephemeral_1h_input_tokens\":3000},\"speed\":\"standard\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-19T10:00:01Z\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"more\"},\"cwd\":\"/tmp\",\"sessionId\":\"sess-cost\",\"uuid\":\"u2\",\"timestamp\":\"2026-04-19T10:00:02Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":300,\"cache_read_input_tokens\":15000,\"cache_creation_input_tokens\":1000,\"cache_creation\":{\"ephemeral_5m_input_tokens\":1000,\"ephemeral_1h_input_tokens\":0},\"speed\":\"standard\"}},\"uuid\":\"a2\",\"timestamp\":\"2026-04-19T10:00:03Z\"}\n"
+    }
+  },
+  {
+    "name": "claude-fast-multiplier",
+    "description": "claude: speed=fast で fast_multiplier が掛かる(test.sh セクション 26b)",
+    "tab": "fast-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-fast.json": "{\"tab\": \"fast-test\", \"session\": \"test-session\", \"claude_session_id\": \"sess-fast\", \"message\": \"Fast mode test\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/fast.jsonl\"}\n"
+    },
+    "transcripts": {
+      "fast.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"},\"cwd\":\"/tmp\",\"sessionId\":\"sess-fast\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-19T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"speed\":\"fast\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-19T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "claude-sonnet",
+    "description": "claude: sonnet の単価(test.sh セクション 26c)",
+    "tab": "sonnet-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-sonnet.json": "{\"tab\": \"sonnet-test\", \"session\": \"test-session\", \"claude_session_id\": \"sess-sonnet\", \"message\": \"Sonnet test\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/sonnet.jsonl\"}\n"
+    },
+    "transcripts": {
+      "sonnet.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"},\"cwd\":\"/tmp\",\"sessionId\":\"sess-fast\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-19T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"speed\":\"standard\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-19T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "pricing-fallback-sonnet",
+    "description": "pricing 1 段目: 未知モデルは claude-sonnet-4-6 の単価へ落ちる",
+    "tab": "fallback-sonnet",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-fb1.json": "{\"tab\": \"fallback-sonnet\", \"session\": \"test-session\", \"claude_session_id\": \"sess-fb1\", \"message\": \"fallback\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/unknown.jsonl\"}\n"
+    },
+    "transcripts": {
+      "unknown.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"},\"cwd\":\"/tmp\",\"sessionId\":\"sess-fast\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-19T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-9-9\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"speed\":\"standard\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-19T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "pricing-fallback-hardcoded",
+    "description": "pricing 2 段目: sonnet も無ければハードコードの既定単価を使う",
+    "tab": "fallback-hardcoded",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config": "{\"pricing\": {\"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}}}\n",
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-fb2.json": "{\"tab\": \"fallback-hardcoded\", \"session\": \"test-session\", \"claude_session_id\": \"sess-fb2\", \"message\": \"fallback\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/unknown.jsonl\"}\n"
+    },
+    "transcripts": {
+      "unknown.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"},\"cwd\":\"/tmp\",\"sessionId\":\"sess-fast\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-19T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-9-9\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"speed\":\"standard\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-19T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "pricing-no-config",
+    "description": "pricing 3 段目: 設定ファイルが 1 つも無くても既定単価で計算する",
+    "tab": "no-config",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "pending": {
+      "test-session/sess-fb3.json": "{\"tab\": \"no-config\", \"session\": \"test-session\", \"claude_session_id\": \"sess-fb3\", \"message\": \"no config\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/unknown.jsonl\"}\n"
+    },
+    "transcripts": {
+      "unknown.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"},\"cwd\":\"/tmp\",\"sessionId\":\"sess-fast\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-19T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-9-9\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"speed\":\"standard\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-19T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "pricing-broken-user-config",
+    "description": "壊れた config.json は config.default.json の pricing へフォールバックする",
+    "tab": "broken-config",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config": "{\"pricing\":{ this is not json\n",
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-fb4.json": "{\"tab\": \"broken-config\", \"session\": \"test-session\", \"claude_session_id\": \"sess-fb4\", \"message\": \"broken config\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/fast.jsonl\"}\n"
+    },
+    "transcripts": {
+      "fast.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"},\"cwd\":\"/tmp\",\"sessionId\":\"sess-fast\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-19T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"speed\":\"fast\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-19T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "claude-merge-mcp",
+    "description": "markers.merged: MCP のマージツール(test.sh セクション 23)",
+    "tab": "merge-mcp-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-merge-mcp.json": "{\"tab\": \"merge-mcp-test\", \"session\": \"test-session\", \"claude_session_id\": \"sess-merge-mcp\", \"message\": \"PR merged\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/merge-mcp.jsonl\"}\n"
+    },
+    "transcripts": {
+      "merge-mcp.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"merge the PR\"},\"cwd\":\"/tmp/myapp\",\"sessionId\":\"sess-merge-mcp\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-18T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"tool_use\",\"name\":\"mcp__github__merge_pull_request\",\"input\":{\"owner\":\"org\",\"repo\":\"app\",\"pullNumber\":42}}],\"usage\":{\"input_tokens\":100,\"output_tokens\":50}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-18T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "claude-merge-bash",
+    "description": "markers.merged: Bash の gh pr merge(test.sh セクション 24)",
+    "tab": "merge-bash-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-merge-bash.json": "{\"tab\": \"merge-bash-test\", \"session\": \"test-session\", \"claude_session_id\": \"sess-merge-bash\", \"message\": \"PR merged via CLI\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/merge-bash.jsonl\"}\n"
+    },
+    "transcripts": {
+      "merge-bash.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"merge it\"},\"cwd\":\"/tmp/myapp\",\"sessionId\":\"sess-merge-bash\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-18T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"gh pr merge 42 --squash\"}}],\"usage\":{\"input_tokens\":100,\"output_tokens\":50}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-18T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "claude-no-merge",
+    "description": "markers: マージが無ければ false のまま(test.sh セクション 25)",
+    "tab": "no-merge-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-no-merge.json": "{\"tab\": \"no-merge-test\", \"session\": \"test-session\", \"claude_session_id\": \"sess-no-merge\", \"message\": \"Bug fixed\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/no-merge.jsonl\"}\n"
+    },
+    "transcripts": {
+      "no-merge.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"fix bug\"},\"cwd\":\"/tmp/myapp\",\"sessionId\":\"sess-no-merge\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-18T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/tmp/app.ts\"}}],\"usage\":{\"input_tokens\":100,\"output_tokens\":50}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-18T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "codex-full",
+    "description": "codex 正常系: rollout の集計と gpt の単価(test.sh セクション 26i)",
+    "tab": "cx-parse-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/thread-cx2.json": "{\"tab\": \"cx-parse-test\", \"session\": \"test-session\", \"claude_session_id\": \"thread-cx2\", \"message\": \"merged\", \"event\": \"Stop\", \"time\": \"20:44:13\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/codex-rollout.jsonl\", \"dir\": \"/tmp/myapp\", \"task_type\": \"dev\", \"agent\": \"codex\"}\n"
+    },
+    "transcripts": {
+      "codex-rollout.jsonl": "{\"timestamp\":\"2026-08-07T20:44:09.850Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-cx2\",\"cwd\":\"/tmp/myapp\",\"cli_version\":\"0.147.0\",\"source\":\"exec\"}}\n{\"timestamp\":\"2026-08-07T20:44:09.851Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\",\"approval_policy\":\"never\"}}\n{\"timestamp\":\"2026-08-07T20:44:09.900Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"fix the bug\"}}\n{\"timestamp\":\"2026-08-07T20:44:10.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"id\":\"c1\",\"status\":\"completed\",\"call_id\":\"call1\",\"name\":\"exec\",\"input\":\"const r = await tools.exec_command({\\\"cmd\\\":\\\"npm test\\\"});\"}}\n{\"timestamp\":\"2026-08-07T20:44:10.100Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"call1\",\"output\":\"ok\"}}\n{\"timestamp\":\"2026-08-07T20:44:10.200Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n{\"timestamp\":\"2026-08-07T20:44:11.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"now merge it\"}}\n{\"timestamp\":\"2026-08-07T20:44:12.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"id\":\"c2\",\"status\":\"completed\",\"call_id\":\"call2\",\"name\":\"exec\",\"input\":\"const r = await tools.exec_command({\\\"cmd\\\":\\\"gh pr merge 12 --squash\\\"});\"}}\n{\"timestamp\":\"2026-08-07T20:44:13.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1500000,\"cached_input_tokens\":500000,\"cache_write_input_tokens\":200000,\"output_tokens\":100000,\"reasoning_output_tokens\":0,\"total_tokens\":1600000}}}}\n{\"timestamp\":\"2026-08-07T20:44:13.100Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"merged\"}}\n"
+    }
+  },
+  {
+    "name": "codex-unknown-model",
+    "description": "codex: 単価の分からないモデルは cost が null(test.sh セクション 26i 後半)",
+    "tab": "cx-unknown-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/thread-cx3.json": "{\"tab\": \"cx-unknown-test\", \"session\": \"test-session\", \"claude_session_id\": \"thread-cx3\", \"message\": \"done\", \"event\": \"Stop\", \"time\": \"20:45:00\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/codex-unknown.jsonl\", \"agent\": \"codex\"}\n"
+    },
+    "transcripts": {
+      "codex-unknown.jsonl": "{\"timestamp\":\"2026-08-07T20:44:09.850Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-cx2\",\"cwd\":\"/tmp/myapp\",\"cli_version\":\"0.147.0\",\"source\":\"exec\"}}\n{\"timestamp\":\"2026-08-07T20:44:09.851Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-unknown-model\",\"approval_policy\":\"never\"}}\n{\"timestamp\":\"2026-08-07T20:44:09.900Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"fix the bug\"}}\n{\"timestamp\":\"2026-08-07T20:44:10.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"id\":\"c1\",\"status\":\"completed\",\"call_id\":\"call1\",\"name\":\"exec\",\"input\":\"const r = await tools.exec_command({\\\"cmd\\\":\\\"npm test\\\"});\"}}\n{\"timestamp\":\"2026-08-07T20:44:10.100Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"call1\",\"output\":\"ok\"}}\n{\"timestamp\":\"2026-08-07T20:44:10.200Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n{\"timestamp\":\"2026-08-07T20:44:11.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"now merge it\"}}\n{\"timestamp\":\"2026-08-07T20:44:12.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"id\":\"c2\",\"status\":\"completed\",\"call_id\":\"call2\",\"name\":\"exec\",\"input\":\"const r = await tools.exec_command({\\\"cmd\\\":\\\"gh pr merge 12 --squash\\\"});\"}}\n{\"timestamp\":\"2026-08-07T20:44:13.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1500000,\"cached_input_tokens\":500000,\"cache_write_input_tokens\":200000,\"output_tokens\":100000,\"reasoning_output_tokens\":0,\"total_tokens\":1600000}}}}\n{\"timestamp\":\"2026-08-07T20:44:13.100Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"merged\"}}\n"
+    }
+  },
+  {
+    "name": "claude-parse-failure",
+    "description": "フォールバック 2 段目: transcript を解析できない(summary は null)",
+    "tab": "parse-fail",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-broken.json": "{\"tab\": \"parse-fail\", \"session\": \"test-session\", \"claude_session_id\": \"sess-broken\", \"message\": \"Broken transcript\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/broken.jsonl\"}\n"
+    },
+    "transcripts": {
+      "broken.jsonl": "{\"type\":\"user\"}\nnot json at all\n"
+    }
+  },
+  {
+    "name": "claude-parse-failure-empty-message",
+    "description": "解析失敗で message が空なら既定文言 Parse failed を入れる",
+    "tab": "parse-fail-empty",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-broken2.json": "{\"tab\": \"parse-fail-empty\", \"session\": \"test-session\", \"claude_session_id\": \"sess-broken2\", \"message\": \"\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/broken.jsonl\"}\n"
+    },
+    "transcripts": {
+      "broken.jsonl": "[1,2]\n"
+    }
+  },
+  {
+    "name": "codex-parse-failure",
+    "description": "codex の解析失敗でも agent は残る",
+    "tab": "cx-broken",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/thread-cx4.json": "{\"tab\": \"cx-broken\", \"session\": \"test-session\", \"claude_session_id\": \"thread-cx4\", \"message\": \"\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/broken.jsonl\", \"agent\": \"codex\"}\n"
+    },
+    "transcripts": {
+      "broken.jsonl": "not json\n"
+    }
+  },
+  {
+    "name": "no-transcript",
+    "description": "フォールバック 3 段目: transcript_path が無い(test.sh セクション 21)",
+    "tab": "no-transcript",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-notranscript.json": "{\"tab\": \"no-transcript\", \"session\": \"test-session\", \"claude_session_id\": \"sess-notranscript\", \"message\": \"Quick task\", \"event\": \"Stop\", \"time\": \"11:00:00\"}\n"
+    }
+  },
+  {
+    "name": "no-transcript-empty-message",
+    "description": "transcript 無しで message が空なら既定文言 No summary available",
+    "tab": "no-transcript-empty",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-nt2.json": "{\"tab\": \"no-transcript-empty\", \"session\": \"test-session\", \"claude_session_id\": \"sess-nt2\", \"message\": \"\", \"event\": \"Stop\", \"time\": \"11:00:00\"}\n"
+    }
+  },
+  {
+    "name": "transcript-file-missing",
+    "description": "transcript_path はあるがファイルが無い場合も 3 段目へ落ちる",
+    "tab": "gone-transcript",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-gone.json": "{\"tab\": \"gone-transcript\", \"session\": \"test-session\", \"claude_session_id\": \"sess-gone\", \"message\": \"gone\", \"event\": \"Stop\", \"time\": \"11:00:00\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/does-not-exist.jsonl\"}\n"
+    }
+  },
+  {
+    "name": "agent-carried",
+    "description": "transcript が無くても agent は daily に残る(test.sh セクション 25b)",
+    "tab": "agent-rec-test",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-agent-rec.json": "{\"tab\": \"agent-rec-test\", \"session\": \"test-session\", \"claude_session_id\": \"sess-agent-rec\", \"message\": \"done\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"agent\": \"codex\"}\n"
+    }
+  },
+  {
+    "name": "minimal-pending",
+    "description": "tab だけの pending。空の任意フィールドはキーごと省略される",
+    "tab": "minimal",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-min.json": "{\"tab\": \"minimal\"}\n"
+    }
+  },
+  {
+    "name": "duplicate-tab-picks-first",
+    "description": "同じタブの pending が複数あればファイル名の昇順で最初の 1 件を採る",
+    "tab": "dup-tab",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/c-third.json": "{\"tab\": \"dup-tab\", \"claude_session_id\": \"c\", \"message\": \"third\"}\n",
+      "test-session/a-first.json": "{\"tab\": \"dup-tab\", \"claude_session_id\": \"a\", \"message\": \"first\"}\n",
+      "test-session/b-second.json": "{\"tab\": \"dup-tab\", \"claude_session_id\": \"b\", \"message\": \"second\"}\n"
+    }
+  },
+  {
+    "name": "broken-pending-skipped",
+    "description": "壊れた pending は読み飛ばして次の候補を見る",
+    "tab": "dup-tab",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/a-broken.json": "{\"tab\":\"dup-tab\",\n",
+      "test-session/b-good.json": "{\"tab\": \"dup-tab\", \"claude_session_id\": \"b\", \"message\": \"good\"}\n"
+    }
+  },
+  {
+    "name": "no-pending",
+    "description": "該当する pending が無ければ何も書かない(test.sh セクション 22)",
+    "tab": "nonexistent-tab",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-other.json": "{\"tab\": \"other-tab\", \"message\": \"x\"}\n"
+    }
+  },
+  {
+    "name": "outside-zellij",
+    "description": "ZELLIJ_SESSION_NAME が無ければ unknown セッションに記録する",
+    "tab": "solo-tab",
+    "env": {},
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "unknown/sess-solo.json": "{\"tab\": \"solo-tab\", \"session\": \"unknown\", \"claude_session_id\": \"sess-solo\", \"message\": \"solo\"}\n"
+    }
+  },
+  {
+    "name": "existing-daily-appended",
+    "description": "既存の daily ファイルがあれば末尾に追記する(既存行は保つ)",
+    "tab": "append-tab",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"claude-sonnet-4-6\": {\"input\": 3.0, \"output\": 15.0, \"cache_write_5m\": 3.75, \"cache_write_1h\": 6.0, \"cache_hit\": 0.3}, \"claude-haiku-4-5\": {\"input\": 1.0, \"output\": 5.0, \"cache_write_5m\": 1.25, \"cache_write_1h\": 2.0, \"cache_hit\": 0.1}, \"gpt-5.6-sol\": {\"input\": 5.0, \"output\": 30.0, \"cache_write\": 6.25, \"cache_hit\": 0.5}, \"fast_multiplier\": 6}}\n",
+    "existing_daily": "{\"tab\":\"earlier\",\"session\":\"test-session\",\"completed_at\":\"2026-01-01T00:00:00+0900\",\"message\":\"before\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false}}\n",
+    "pending": {
+      "test-session/sess-append.json": "{\"tab\": \"append-tab\", \"session\": \"test-session\", \"claude_session_id\": \"sess-append\", \"message\": \"later\"}\n"
+    }
+  },
+  {
+    "name": "pricing-model-null",
+    "description": "レビュー指摘1: モデルエントリが null なら jq の // でフォールバック(sonnet も無ければハードコード既定)",
+    "tab": "null-model",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": null, \"fast_multiplier\": 6}}\n",
+    "pending": {
+      "test-session/sess-nullm.json": "{\"tab\": \"null-model\", \"session\": \"test-session\", \"claude_session_id\": \"sess-nullm\", \"message\": \"Task complete\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/t.jsonl\"}\n"
+    },
+    "transcripts": {
+      "t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"go\"},\"cwd\":\"/tmp\",\"sessionId\":\"s\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-20T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-20T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "pricing-fast-null",
+    "description": "レビュー指摘2: fast_multiplier が null なら未設定と同じく既定の 6 が掛かる",
+    "tab": "fast-null",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"input\": 5.0, \"output\": 25.0, \"cache_write_5m\": 6.25, \"cache_write_1h\": 10.0, \"cache_hit\": 0.5}, \"fast_multiplier\": null}}\n",
+    "pending": {
+      "test-session/sess-fastn.json": "{\"tab\": \"fast-null\", \"session\": \"test-session\", \"claude_session_id\": \"sess-fastn\", \"message\": \"Task complete\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/t.jsonl\"}\n"
+    },
+    "transcripts": {
+      "t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"go\"},\"cwd\":\"/tmp\",\"sessionId\":\"s\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-20T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000,\"speed\":\"fast\"}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-20T10:00:01Z\"}\n"
+    }
+  },
+  {
+    "name": "pricing-partial-entry",
+    "description": "レビュー指摘3: 単価エントリに必須キーが欠けると jq の掛け算エラーで Parse failed に落ちる",
+    "tab": "partial-price",
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "config_default": "{\"pricing\": {\"claude-opus-4-6\": {\"output\": 25.0}}}\n",
+    "pending": {
+      "test-session/sess-part.json": "{\"tab\": \"partial-price\", \"session\": \"test-session\", \"claude_session_id\": \"sess-part\", \"message\": \"Task complete\", \"event\": \"Stop\", \"time\": \"10:00:01\", \"transcript_path\": \"{{TRANSCRIPT_DIR}}/t.jsonl\"}\n"
+    },
+    "transcripts": {
+      "t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"go\"},\"cwd\":\"/tmp\",\"sessionId\":\"s\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-20T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-20T10:00:01Z\"}\n"
+    }
+  }
+]
