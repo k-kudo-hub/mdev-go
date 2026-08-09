@@ -61,8 +61,14 @@ func (m WaitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case waitingRefreshedMsg:
+		if msg.err != nil {
+			// 直前の一覧を残したままエラーだけを足す。空文字で上書きすると
+			// 何も出ていない画面になり、何が起きたのか分からなくなる。
+			m.err = msg.err
+			return m, nil
+		}
 		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
-		m.text, m.err = msg.text, msg.err
+		m.text, m.err = msg.text, nil
 		return m, nil
 
 	case tickMsg:
@@ -81,5 +87,9 @@ func (m WaitingModel) refreshCmd() tea.Cmd {
 
 // View は画面を返す。
 func (m WaitingModel) View() tea.View {
-	return tea.NewView(m.text)
+	out := m.text
+	if m.err != nil {
+		out += "  " + errorLine(m.err) + "\n"
+	}
+	return tea.NewView(out)
 }

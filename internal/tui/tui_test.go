@@ -22,15 +22,20 @@ import (
 // errUpload は upload-log.sh が非 0 で終わった状況を表す。
 var errUpload = errors.New("upload に失敗した")
 
+// errRefresh は一覧の読み直しが失敗した状況を表す。
+var errRefresh = errors.New("pending の読み取りに失敗した")
+
 // ---- Dashboard のスタブ ---------------------------------------------------
 
 type stubDashboard struct {
 	snapshot app.DashboardSnapshot
 	// next を入れると、以降の Refresh はこちらを返す(ポーリングで一覧が
 	// 入れ替わった状況を作るために使う)。
-	next    *app.DashboardSnapshot
-	prep    app.DeletePreparation
-	prepErr error
+	next *app.DashboardSnapshot
+	// refreshErr を入れると Refresh が失敗する(ゼロ値と一緒に返る)。
+	refreshErr error
+	prep       app.DeletePreparation
+	prepErr    error
 
 	calls []string
 }
@@ -41,6 +46,9 @@ func (s *stubDashboard) Startup() { s.calls = append(s.calls, "startup") }
 
 func (s *stubDashboard) Refresh(app.PaneEnv) (app.DashboardSnapshot, error) {
 	s.calls = append(s.calls, "refresh")
+	if s.refreshErr != nil {
+		return app.DashboardSnapshot{}, s.refreshErr
+	}
 	if s.next != nil {
 		return *s.next, nil
 	}
@@ -64,11 +72,20 @@ func (s *stubDashboard) CommitDelete(_ app.PaneEnv, tab string) error {
 
 // ---- Waiting / Done / News のスタブ ---------------------------------------
 
-type stubWaiting struct{ text string }
+type stubWaiting struct {
+	text string
+	// err を入れると Refresh が失敗する(空文字と一緒に返る)。
+	err error
+}
 
 var _ tui.WaitingService = (*stubWaiting)(nil)
 
-func (s *stubWaiting) Refresh(app.PaneEnv) (string, error) { return s.text, nil }
+func (s *stubWaiting) Refresh(app.PaneEnv) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.text, nil
+}
 
 type stubDone struct {
 	snapshot app.DoneSnapshot
@@ -465,8 +482,67 @@ func TestDashboardModelDeleteSurfacesPrepareError(t *testing.T) {
 
 	prompted, _ := loaded.Update(key('d'))
 	after, prepared := run(t, prompted, key('1'))
-	if _, _ = after.Update(prepared); contains(service.calls, "commit alpha") {
+	shown, _ := after.Update(prepared)
+
+	if contains(service.calls, "commit alpha") {
 		t.Errorf("エラーなのに削除している: %v", service.calls)
+	}
+	// 何も消さないことを黙って行うと、押した本人には何が起きたのか分からない。
+	// 中止の表示(Cancelled)と同じく理由を画面に出す。
+	if !strings.Contains(content(shown), errUpload.Error()) {
+		t.Errorf("失敗の理由が表示されていない: %q", content(shown))
+	}
+}
+
+// ---- エラーの表示 ---------------------------------------------------------
+
+// Refresh の失敗を握り潰すと、一覧がゼロ値で上書きされて無言の白画面になる。
+// 直前の内容を残したまま、理由を 1 行足す。
+
+func TestDashboardModelKeepsLastSnapshotOnRefreshError(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDashboard{snapshot: app.DashboardSnapshot{
+		Text: "元の画面", Tabs: []string{"alpha"},
+	}}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	// 次の読み直しが失敗する。
+	service.refreshErr = errRefresh
+	failed, _ := loaded.Update(exec(t, tui.NewDashboardModel(service, testEnv).Init()))
+
+	if !strings.Contains(content(failed), "元の画面") {
+		t.Errorf("直前の一覧が消えている: %q", content(failed))
+	}
+	if !strings.Contains(content(failed), errRefresh.Error()) {
+		t.Errorf("エラーが表示されていない: %q", content(failed))
+	}
+
+	// 読み直しに成功したらエラー行は消える。
+	service.refreshErr = nil
+	service.next = &app.DashboardSnapshot{Text: "新しい画面"}
+	recovered, _ := failed.Update(exec(t, tui.NewDashboardModel(service, testEnv).Init()))
+	if strings.Contains(content(recovered), errRefresh.Error()) {
+		t.Errorf("復帰したのにエラーが残っている: %q", content(recovered))
+	}
+}
+
+func TestWaitingModelKeepsLastTextOnRefreshError(t *testing.T) {
+	t.Parallel()
+
+	service := &stubWaiting{text: "待ち画面"}
+	m := tui.NewWaitingModel(service, testEnv)
+	loaded := load(t, m)
+
+	service.err = errRefresh
+	failed, _ := loaded.Update(exec(t, tui.NewWaitingModel(service, testEnv).Init()))
+
+	if !strings.Contains(content(failed), "待ち画面") {
+		t.Errorf("直前の一覧が消えている: %q", content(failed))
+	}
+	if !strings.Contains(content(failed), errRefresh.Error()) {
+		t.Errorf("エラーが表示されていない: %q", content(failed))
 	}
 }
 

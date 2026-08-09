@@ -110,8 +110,14 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 差し替えると押した番号が別のタブを指すため、捨てる。
 			return m, nil
 		}
+		if msg.err != nil {
+			// 直前の一覧を残したままエラーだけを足す。ゼロ値で上書きすると
+			// 何も出ていない画面になり、何が起きたのか分からなくなる。
+			m.err = msg.err
+			return m, nil
+		}
 		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
-		m.snapshot, m.err = msg.snapshot, msg.err
+		m.snapshot, m.err = msg.snapshot, nil
 		return m, nil
 
 	case tickMsg:
@@ -141,10 +147,13 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case deleteFinishedMsg:
-		m.busy, m.notice = false, ""
 		if msg.err != nil {
-			m.err = msg.err
+			// 片付けの途中で失敗した。理由を出してから通常の表示へ戻る。
+			m.notice = errorLine(msg.err)
+			m.token++
+			return m, noticeCmd(m.token)
 		}
+		m.busy, m.notice = false, ""
 		return m, m.refreshCmd()
 
 	case noticeExpiredMsg:
@@ -213,8 +222,11 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 // handlePrepared は record と upload-log が終わった後の分岐を決める。
 func (m DashboardModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.busy, m.notice, m.err = false, "", msg.err
-		return m, m.refreshCmd()
+		// 記録かアップロードの手前で失敗した。何も消していないので、
+		// 中止(Cancelled)と同じく理由を出してから元に戻る。
+		m.notice = errorLine(msg.err)
+		m.token++
+		return m, noticeCmd(m.token)
 	}
 
 	if msg.prep.Cancelled {
@@ -270,6 +282,9 @@ func (m DashboardModel) body() string {
 		out += "  " + m.notice + "\n"
 	case m.awaiting:
 		out += "  " + deletePrompt + "\n"
+	}
+	if m.err != nil {
+		out += "  " + errorLine(m.err) + "\n"
 	}
 	return out
 }

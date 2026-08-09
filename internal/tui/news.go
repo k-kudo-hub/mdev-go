@@ -15,6 +15,10 @@ type (
 )
 
 // NewsModel は News ペインの Bubble Tea モデルである。
+//
+// DoneModel と同じくエラー行を持たない。ニュースは読めたファイルだけで
+// 組み立て、fetch-news.sh とブラウザ起動の終了コードは現行版と同じく
+// 見ないため、画面に出すべきエラーが発生しない。
 type NewsModel struct {
 	pane NewsService
 

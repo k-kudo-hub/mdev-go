@@ -13,6 +13,10 @@ const restorePrompt = "\033[0;33m\033[1mRestore number...\033[0m"
 type doneRefreshedMsg struct{ snapshot app.DoneSnapshot }
 
 // DoneModel は Done ペインの Bubble Tea モデルである。
+//
+// Dashboard / Waiting と違いエラー行を持たない。集計は読めた daily log だけで
+// 組み立て、restore-task.sh の終了コードは現行版と同じく見ないため、画面に
+// 出すべきエラーがそもそも発生しない。
 type DoneModel struct {
 	pane DoneService
 
