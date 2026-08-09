@@ -32,6 +32,13 @@ type PendingView struct {
 	Message string
 	Time    string
 	Agent   string
+
+	// AgentOrDefault は `jq -r '.agent // "claude"'` の結果である。
+	//
+	// Agent(`jq -r '.agent'`)とは欠損時の値が違い、キーが無い場合と null の
+	// 場合に "claude" になる。ジャンプ時に pending を消すかどうかの判定は
+	// こちらを使う(現行 dashboard-loop.sh:186)。
+	AgentOrDefault string
 }
 
 // ParsePendingView は pending ファイルの中身を現行版の jq と同じ規則で読む。
@@ -58,6 +65,10 @@ func ParsePendingView(name string, data []byte) PendingView {
 	view.Message = jqRawString(raw["message"])
 	view.Time = jqRawString(raw["time"])
 	view.Agent = jqRawString(raw["agent"])
+	view.AgentOrDefault = DefaultAgent
+	if JSONTruthy(raw["agent"]) {
+		view.AgentOrDefault = view.Agent
+	}
 	return view
 }
 

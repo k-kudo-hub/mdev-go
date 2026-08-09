@@ -30,6 +30,7 @@ func TestParsePendingView(t *testing.T) {
 			want: domain.PendingView{
 				Name: "p.json", Tab: "alpha", Event: "Stop",
 				Message: "done", Time: "10:00:00", Agent: "codex",
+				AgentOrDefault: "codex",
 			},
 		},
 		{
@@ -39,6 +40,8 @@ func TestParsePendingView(t *testing.T) {
 			want: domain.PendingView{
 				Name: "p.json", Tab: "alpha", Event: "null",
 				Message: "null", Time: "null", Agent: "null",
+				// .agent // "claude" なので、キーが無ければ claude になる。
+				AgentOrDefault: "claude",
 			},
 		},
 		{
@@ -65,6 +68,7 @@ func TestParsePendingView(t *testing.T) {
 			want: domain.PendingView{
 				Name: "p.json", Tab: "123", Event: "true",
 				Message: "null", Time: "1.5", Agent: "claude",
+				AgentOrDefault: "claude",
 			},
 		},
 		{
