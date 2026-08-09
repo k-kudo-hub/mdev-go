@@ -38,8 +38,9 @@ func TestConfigUnmarshalPricing(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Pricing.Models, wantModels) {
 		t.Errorf("Models = %+v, want %+v", cfg.Pricing.Models, wantModels)
 	}
-	if cfg.Pricing.FastMultiplier != 6 {
-		t.Errorf("FastMultiplier = %v, want 6", cfg.Pricing.FastMultiplier)
+	if cfg.Pricing.FastMultiplier != 6 || !cfg.Pricing.HasFastMultiplier {
+		t.Errorf("FastMultiplier = %v (has=%v), want 6 (has=true)",
+			cfg.Pricing.FastMultiplier, cfg.Pricing.HasFastMultiplier)
 	}
 }
 
@@ -51,6 +52,7 @@ func TestConfigUnmarshalPricingEdgeCases(t *testing.T) {
 		raw                string
 		wantModels         map[string]domain.ModelPricing
 		wantFastMultiplier float64
+		wantHasMultiplier  bool
 	}{
 		{
 			name:               "pricing が空オブジェクト",
@@ -77,6 +79,15 @@ func TestConfigUnmarshalPricingEdgeCases(t *testing.T) {
 			wantModels:         map[string]domain.ModelPricing{},
 			wantFastMultiplier: 0,
 		},
+		{
+			// jq の `//` は 0 を真として扱うため、明示的な 0 は既定値 6 に
+			// 置き換わらない。未設定との区別を HasFastMultiplier が持つ。
+			name:               "fast_multiplier の明示的な 0 は未設定と区別する",
+			raw:                `{"pricing":{"fast_multiplier":0}}`,
+			wantModels:         map[string]domain.ModelPricing{},
+			wantFastMultiplier: 0,
+			wantHasMultiplier:  true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,6 +101,9 @@ func TestConfigUnmarshalPricingEdgeCases(t *testing.T) {
 			}
 			if cfg.Pricing.FastMultiplier != tt.wantFastMultiplier {
 				t.Errorf("FastMultiplier = %v, want %v", cfg.Pricing.FastMultiplier, tt.wantFastMultiplier)
+			}
+			if cfg.Pricing.HasFastMultiplier != tt.wantHasMultiplier {
+				t.Errorf("HasFastMultiplier = %v, want %v", cfg.Pricing.HasFastMultiplier, tt.wantHasMultiplier)
 			}
 		})
 	}

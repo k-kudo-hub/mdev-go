@@ -32,8 +32,14 @@ type Pricing struct {
 	// Models はモデル名から単価への対応。
 	Models map[string]ModelPricing
 	// FastMultiplier は速い応答(speed が "fast")のときに単価へ掛ける倍率。
-	// 設定に無い場合は 0 になるため、既定値の適用は利用側で行う。
+	// 設定に無い場合は 0 になるため、既定値の適用は利用側(SpeedMultiplier)で行う。
 	FastMultiplier float64
+	// HasFastMultiplier は設定に fast_multiplier が数値として書いてあったかを表す。
+	//
+	// 現行版の `$pricing.fast_multiplier // 6` は jq の `//` を使っており、jq では
+	// 0 が真なので「明示的な 0」と「未設定」で結果が変わる(前者は 0、後者は 6)。
+	// FastMultiplier だけではこの 2 つを区別できないため別に持つ。
+	HasFastMultiplier bool
 }
 
 // UnmarshalJSON は pricing セクションを Models と FastMultiplier に振り分ける。
@@ -46,11 +52,13 @@ func (p *Pricing) UnmarshalJSON(data []byte) error {
 
 	p.Models = make(map[string]ModelPricing, len(raw))
 	p.FastMultiplier = 0
+	p.HasFastMultiplier = false
 	for key, value := range raw {
 		if key == pricingFastMultiplierKey {
 			var multiplier float64
 			if err := json.Unmarshal(value, &multiplier); err == nil {
 				p.FastMultiplier = multiplier
+				p.HasFastMultiplier = true
 			}
 			continue
 		}
