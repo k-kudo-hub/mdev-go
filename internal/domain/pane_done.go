@@ -404,7 +404,7 @@ func jqToString(raw json.RawMessage) string {
 	}
 	switch v := value.(type) {
 	case nil:
-		return jqNull
+		return JQNullText
 	case string:
 		return v
 	case bool:

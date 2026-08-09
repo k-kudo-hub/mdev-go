@@ -10,12 +10,13 @@ import (
 // 現行版の `jq -r '.message' | head -c 60` に対応する(文字数ではない)。
 const PaneMessageLimit = 60
 
-// jqNull は jq -r が null を出力するときの文字列。
+// JQNullText は jq -r が null を出力するときの文字列。
 //
 // pending のキーが欠けていた場合、現行版は `jq -r '.message'` の出力である
 // "null" をそのまま画面に出す。壊れた JSON では jq 自体が失敗して空文字になる
 // ため、両者は区別しなければならない(空文字はタブ名の一致判定から外れる)。
-const jqNull = "null"
+// ニュースの URL のように「"null" なら何もしない」判定にも使う。
+const JQNullText = "null"
 
 // PendingView は pending ファイル 1 件を、現行版の jq が読み出した文字列の
 // 組として表す。
@@ -79,15 +80,15 @@ func ParsePendingView(name string, data []byte) PendingView {
 func jqRawString(raw json.RawMessage) string {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
-		return jqNull
+		return JQNullText
 	}
 	var value any
 	if err := json.Unmarshal(trimmed, &value); err != nil {
-		return jqNull
+		return JQNullText
 	}
 	switch v := value.(type) {
 	case nil:
-		return jqNull
+		return JQNullText
 	case string:
 		return v
 	case bool:
@@ -98,7 +99,7 @@ func jqRawString(raw json.RawMessage) string {
 		// 配列・オブジェクトは jq が compact JSON を出す。
 		compact := &bytes.Buffer{}
 		if err := json.Compact(compact, trimmed); err != nil {
-			return jqNull
+			return JQNullText
 		}
 		return compact.String()
 	}

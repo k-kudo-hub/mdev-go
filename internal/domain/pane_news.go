@@ -62,7 +62,7 @@ func RenderNews(date string, items []NewsItem) string {
 	for i, item := range items {
 		b.WriteString("  " + ansiYellow + strconv.Itoa(i+1) + "." + ansiReset + " " +
 			ansiBold + item.Title + ansiReset + "\n")
-		if item.Description != "" && item.Description != jqNull {
+		if item.Description != "" && item.Description != JQNullText {
 			b.WriteString("     " + ansiDim + item.Description + ansiReset + "\n")
 		}
 		b.WriteString("\n")
