@@ -83,14 +83,22 @@ func (r *Runner) RestoreSession() {
 	_, _ = r.run(r.env, "bash", r.script("restore-session.sh"))
 }
 
+// screenDetectScript はスクリーン検出を 1 回走らせる bash の本文である。
+//
+// パスもセッション名も位置パラメータで受け取り、本文には一切埋め込まない。
+// fmt の %q は Go の文字列リテラルの引用であって shell のエスケープではない
+// ため、`$` やバッククォートを含む CONDUCTOR_HOME を埋め込むと bash が
+// コマンド置換として実行してしまう(source 先のパスも別物に化ける)。
+const screenDetectScript = `. "$1"; screen_detect_tick "$2"`
+
 // ScreenDetectTick はスクリーン検出を 1 回走らせる。
 //
 // screen-detect-lib.sh は関数を定義するだけのライブラリなので、source して
 // から関数を呼ぶ。省略すると screen 方式のエージェント(codex)のタスクが
 // ダッシュボードに出てこない。
 func (r *Runner) ScreenDetectTick(session string) {
-	script := fmt.Sprintf(". %q; screen_detect_tick \"$1\"", r.script("screen-detect-lib.sh"))
-	_, _ = r.run(r.env, "bash", "-c", script, "_", session)
+	// bash -c の第 1 引数は $0 になるので、$1 の手前に置き場所が要る。
+	_, _ = r.run(r.env, "bash", "-c", screenDetectScript, "_", r.script("screen-detect-lib.sh"), session)
 }
 
 // runCommand は外部コマンドを実行して標準出力を返す。

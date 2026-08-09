@@ -2,6 +2,8 @@ package shell
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -143,13 +145,52 @@ func TestRunnerScreenDetectTickSourcesLibrary(t *testing.T) {
 	if args[0] != "-c" {
 		t.Fatalf("bash -c で呼んでいない: %v", args)
 	}
-	if !strings.Contains(args[1], "/ch/scripts/screen-detect-lib.sh") ||
-		!strings.Contains(args[1], "screen_detect_tick") {
-		t.Errorf("source と関数呼び出しが揃っていない: %q", args[1])
+	if !strings.Contains(args[1], "screen_detect_tick") {
+		t.Errorf("関数を呼んでいない: %q", args[1])
 	}
-	// セッション名は位置パラメータとして渡す(スクリプト本文へ埋め込まない)。
-	if want := []string{"_", "s1"}; !reflect.DeepEqual(args[2:], want) {
+	// パスもセッション名も位置パラメータで渡す。本文へ埋め込むと、値に含まれる
+	// `$` やバッククォートを bash が展開してしまう。
+	if strings.Contains(args[1], "/ch/scripts/screen-detect-lib.sh") {
+		t.Errorf("パスを本文へ埋め込んでいる: %q", args[1])
+	}
+	want := []string{"_", "/ch/scripts/screen-detect-lib.sh", "s1"}
+	if !reflect.DeepEqual(args[2:], want) {
 		t.Errorf("位置パラメータ = %v, want %v", args[2:], want)
+	}
+}
+
+func TestRunnerScreenDetectTickDoesNotExpandConductorHome(t *testing.T) {
+	// 実際の bash で確かめる。os.Chdir を伴うため並列化しない。
+	root := t.TempDir()
+	t.Chdir(root)
+
+	// `$(...)` とバッククォートを含む CONDUCTOR_HOME。fmt の %q は shell の
+	// エスケープではないので、スクリプト本文へ埋め込むと bash がこれを
+	// コマンド置換として実行し、source 先のパスも別物に化ける。
+	home := filepath.Join(root, "h $(touch pwned) `touch pwned`")
+	scripts := filepath.Join(home, "scripts")
+	if err := os.MkdirAll(scripts, 0o755); err != nil {
+		t.Fatalf("ディレクトリの作成に失敗: %v", err)
+	}
+
+	// 呼ばれたことと引数を記録するだけのライブラリを置く。
+	called := filepath.Join(root, "called")
+	lib := "screen_detect_tick() { printf '%s' \"$1\" > \"" + called + "\"; }\n"
+	if err := os.WriteFile(filepath.Join(scripts, "screen-detect-lib.sh"), []byte(lib), 0o600); err != nil {
+		t.Fatalf("ライブラリの配置に失敗: %v", err)
+	}
+
+	NewRunner(home).ScreenDetectTick("s1")
+
+	if _, err := os.Stat(filepath.Join(root, "pwned")); err == nil {
+		t.Error("CONDUCTOR_HOME に含まれる文字列がコマンドとして実行された")
+	}
+	got, err := os.ReadFile(called)
+	if err != nil {
+		t.Fatalf("screen_detect_tick が呼ばれていない: %v", err)
+	}
+	if string(got) != "s1" {
+		t.Errorf("渡されたセッション名 = %q, want s1", got)
 	}
 }
 
