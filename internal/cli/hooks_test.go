@@ -69,6 +69,21 @@ var testChanges = []app.HookCommandChange{
 	},
 }
 
+// testRestoreChanges は restore の表示の確認に使う置換 2 件である。
+// restore は switch の逆向きなので before / after が入れ替わる。
+var testRestoreChanges = []app.HookCommandChange{
+	{
+		Event:  "Notification",
+		Before: "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify",
+		After:  "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh",
+	},
+	{
+		Event:  "PostToolUse",
+		Before: "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook post-tool",
+		After:  "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-post-tool.sh",
+	},
+}
+
 func TestHooksSwitchShowsChangesAndBackup(t *testing.T) {
 	t.Parallel()
 
@@ -157,47 +172,78 @@ func TestHooksRestoreReportsStates(t *testing.T) {
 		wantAbsent []string
 	}{
 		{
-			name: "復元した",
+			name: "元へ戻した",
 			result: app.RestoreHooksResult{
 				SettingsPath: "/home/x/.claude/settings.json",
-				BackupPath:   "/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
-				Found:        true,
-				Changed:      true,
+				Changes:      testRestoreChanges,
 			},
-			args:    []string{"hooks", "restore"},
-			wantOut: []string{"settings.json.mdev-backup-20260809T133344Z", "復元しました"},
+			args: []string{"hooks", "restore"},
+			// switch と対称に、戻す内容の before / after が読み取れること。
+			wantOut: []string{
+				"Notification",
+				testRestoreChanges[0].Before,
+				testRestoreChanges[0].After,
+				"戻しました",
+			},
+			// 通常の復元はバックアップを使わない。触れてはならない。
+			wantAbsent: []string{"バックアップ"},
 		},
 		{
-			name: "バックアップが無い",
+			name: "既にスクリプトを指している",
 			result: app.RestoreHooksResult{
 				SettingsPath: "/home/x/.claude/settings.json",
-			},
-			args:       []string{"hooks", "restore"},
-			wantOut:    []string{"バックアップ", "ありません"},
-			wantAbsent: []string{"復元しました"},
-		},
-		{
-			name: "既に一致している",
-			result: app.RestoreHooksResult{
-				SettingsPath: "/home/x/.claude/settings.json",
-				BackupPath:   "/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
-				Found:        true,
 			},
 			args:       []string{"hooks", "restore"},
 			wantOut:    []string{"変更はありません"},
-			wantAbsent: []string{"復元しました"},
+			wantAbsent: []string{"戻しました", "バックアップ"},
 		},
 		{
 			name: "dry-run",
 			result: app.RestoreHooksResult{
 				SettingsPath: "/home/x/.claude/settings.json",
-				BackupPath:   "/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
-				Found:        true,
-				Changed:      true,
+				Changes:      testRestoreChanges,
 				DryRun:       true,
 			},
 			args:       []string{"hooks", "restore", "--dry-run"},
-			wantOut:    []string{"--dry-run"},
+			wantOut:    []string{"--dry-run", testRestoreChanges[0].After},
+			wantAbsent: []string{"戻しました"},
+		},
+		{
+			name: "settings.json が無くバックアップから復元した",
+			result: app.RestoreHooksResult{
+				SettingsPath:       "/home/x/.claude/settings.json",
+				SettingsMissing:    true,
+				BackupPath:         "/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
+				RestoredFromBackup: true,
+			},
+			args: []string{"hooks", "restore"},
+			wantOut: []string{
+				"settings.json がありません",
+				"settings.json.mdev-backup-20260809T133344Z",
+				"復元しました",
+			},
+		},
+		{
+			name: "settings.json もバックアップも無い",
+			result: app.RestoreHooksResult{
+				SettingsPath:    "/home/x/.claude/settings.json",
+				SettingsMissing: true,
+			},
+			args:       []string{"hooks", "restore"},
+			wantOut:    []string{"settings.json がありません", "復元できません"},
+			wantAbsent: []string{"復元しました"},
+		},
+		{
+			name: "settings.json が無い状態の dry-run",
+			result: app.RestoreHooksResult{
+				SettingsPath:       "/home/x/.claude/settings.json",
+				SettingsMissing:    true,
+				BackupPath:         "/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
+				RestoredFromBackup: true,
+				DryRun:             true,
+			},
+			args:       []string{"hooks", "restore", "--dry-run"},
+			wantOut:    []string{"--dry-run", "settings.json.mdev-backup-20260809T133344Z"},
 			wantAbsent: []string{"復元しました"},
 		},
 	}

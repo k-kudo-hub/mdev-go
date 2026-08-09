@@ -116,8 +116,12 @@ type SettingsStore interface {
 	Path() string
 
 	// Read は settings.json の内容をそのまま返す。
+	//
 	// ファイルが無い場合はエラーを返す。存在しない設定ファイルを
-	// 切り替えの対象にすることはできないためである。
+	// 切り替えの対象にすることはできないためである。ただし復元は
+	// 「設定ファイルごと失った」状態を扱えなければならないため、
+	// その場合のエラーは errors.Is(err, fs.ErrNotExist) が真になる
+	// ものでなければならない(実装は os のエラーを %w で包む)。
 	Read() ([]byte, error)
 
 	// Backup は data を settings.json と同じディレクトリへ退避し、

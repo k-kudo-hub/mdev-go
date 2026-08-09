@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"errors"
+	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -182,80 +184,79 @@ func TestHookSwitcherSwitchDoesNotWriteWhenBackupFails(t *testing.T) {
 	}
 }
 
-func TestHookSwitcherRestoreWritesLatestBackup(t *testing.T) {
+func TestHookSwitcherRestoreRewritesInPlace(t *testing.T) {
 	t.Parallel()
 
 	store := newFakeSettingsStore(settingsBefore)
 	switcher := newSwitcher(store)
 	if _, err := switcher.Switch(false); err != nil {
 		t.Fatalf("Switch() = %v", err)
-	}
-
-	got, err := switcher.Restore(false)
-	if err != nil {
-		t.Fatalf("Restore() = %v", err)
-	}
-	if !got.Found {
-		t.Error("Found = false, want true")
-	}
-	if !got.Changed {
-		t.Error("Changed = false, want true")
-	}
-	if got.BackupPath == "" {
-		t.Error("BackupPath が空")
-	}
-	if store.content != settingsBefore {
-		t.Errorf("復元後の内容 = %q, want %q", store.content, settingsBefore)
-	}
-}
-
-func TestHookSwitcherRestoreWithoutBackupReportsState(t *testing.T) {
-	t.Parallel()
-
-	// switch を一度も実行していない状態での restore はエラーにしない。
-	store := newFakeSettingsStore(settingsBefore)
-	got, err := newSwitcher(store).Restore(false)
-	if err != nil {
-		t.Fatalf("Restore() = %v", err)
-	}
-	if got.Found {
-		t.Error("Found = true, want false")
-	}
-	if got.Changed {
-		t.Error("Changed = true, want false")
-	}
-	if store.content != settingsBefore {
-		t.Errorf("内容が変わった = %q", store.content)
-	}
-}
-
-func TestHookSwitcherRestoreTwiceReportsNoChange(t *testing.T) {
-	t.Parallel()
-
-	store := newFakeSettingsStore(settingsBefore)
-	switcher := newSwitcher(store)
-	if _, err := switcher.Switch(false); err != nil {
-		t.Fatalf("Switch() = %v", err)
-	}
-	if _, err := switcher.Restore(false); err != nil {
-		t.Fatalf("1 回目の Restore() = %v", err)
 	}
 
 	store.calls = nil
 	got, err := switcher.Restore(false)
 	if err != nil {
-		t.Fatalf("2 回目の Restore() = %v", err)
+		t.Fatalf("Restore() = %v", err)
 	}
-	if !got.Found {
-		t.Error("Found = false, want true(バックアップは残っている)")
+	if len(got.Changes) != 1 || got.Changes[0].Event != "Stop" {
+		t.Errorf("Changes = %+v, want Stop の 1 件", got.Changes)
 	}
-	if got.Changed {
-		t.Error("Changed = true, want false(既に一致している)")
+	if got.SettingsMissing || got.RestoredFromBackup || got.BackupPath != "" {
+		t.Errorf("結果 = %+v, want バックアップを使っていない", got)
 	}
-	for _, call := range store.calls {
-		if call == "Write" {
-			t.Errorf("呼び出し = %v, want Write を含まない", store.calls)
-		}
+	if store.content != settingsBefore {
+		t.Errorf("復元後の内容 = %q, want %q", store.content, settingsBefore)
+	}
+	// 現在の内容を逆向きに書き換えるだけなので、バックアップは読まない。
+	if want := []string{"Read", "Write"}; !equalStrings(store.calls, want) {
+		t.Errorf("呼び出し = %v, want %v", store.calls, want)
+	}
+}
+
+func TestHookSwitcherRestoreKeepsEditsMadeAfterSwitch(t *testing.T) {
+	t.Parallel()
+
+	// 切り替え後に Claude Code 自身が settings.json へ書いた変更
+	// (permissions.allow の追加が典型)を消してはならない。
+	// バックアップの全文を書き戻す実装ではこれが黙って失われる。
+	const edited = `{"permissions":{"allow":["Bash(ls:*)"]},` +
+		`"hooks":{"Stop":[{"hooks":[{"type":"command","command":"$C/bin/mdev hook notify"}]}]}}`
+	const want = `{"permissions":{"allow":["Bash(ls:*)"]},` +
+		`"hooks":{"Stop":[{"hooks":[{"type":"command","command":"$C/scripts/pending-notify.sh"}]}]}}`
+
+	store := newFakeSettingsStore(settingsBefore)
+	switcher := newSwitcher(store)
+	if _, err := switcher.Switch(false); err != nil {
+		t.Fatalf("Switch() = %v", err)
+	}
+	store.content = edited
+
+	if _, err := switcher.Restore(false); err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if store.content != want {
+		t.Errorf("復元後 = %q\nwant %q", store.content, want)
+	}
+}
+
+func TestHookSwitcherRestoreWithoutChangesIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	// 既にスクリプトを指している状態での restore はエラーにせず、
+	// 何も書き込まない(冪等)。
+	store := newFakeSettingsStore(settingsBefore)
+	got, err := newSwitcher(store).Restore(false)
+	if err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if len(got.Changes) != 0 {
+		t.Errorf("Changes = %+v, want 空", got.Changes)
+	}
+	if want := []string{"Read"}; !equalStrings(store.calls, want) {
+		t.Errorf("呼び出し = %v, want %v", store.calls, want)
+	}
+	if store.content != settingsBefore {
+		t.Errorf("内容が変わった = %q", store.content)
 	}
 }
 
@@ -272,11 +273,99 @@ func TestHookSwitcherRestoreDryRunDoesNotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore() = %v", err)
 	}
-	if !got.DryRun || !got.Changed {
-		t.Errorf("結果 = %+v, want DryRun と Changed が true", got)
+	if !got.DryRun || len(got.Changes) != 1 {
+		t.Errorf("結果 = %+v, want DryRun=true と Changes 1 件", got)
 	}
 	if store.content != settingsAfter {
 		t.Errorf("内容が変わった = %q, want %q", store.content, settingsAfter)
+	}
+}
+
+// notExistErr は settings.json が存在しないときに SettingsStore.Read が返す
+// エラーを模す。実装は os.ReadFile のエラーを %w で包むため fs.ErrNotExist が
+// 取り出せる(port の契約)。
+func notExistErr() error {
+	return fmt.Errorf("設定ファイル /tmp/fake/.claude/settings.json の読み取りに失敗しました: %w", fs.ErrNotExist)
+}
+
+func TestHookSwitcherRestoreFallsBackToBackupWhenSettingsMissing(t *testing.T) {
+	t.Parallel()
+
+	// settings.json ごと失った状態が復元の主目的シナリオである。
+	// このときだけバックアップの全文で書き戻す。
+	store := newFakeSettingsStore(settingsBefore)
+	if _, err := newSwitcher(store).Switch(false); err != nil {
+		t.Fatalf("Switch() = %v", err)
+	}
+	store.readErr = notExistErr()
+	store.calls = nil
+
+	got, err := newSwitcher(store).Restore(false)
+	if err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if !got.SettingsMissing || !got.RestoredFromBackup {
+		t.Errorf("結果 = %+v, want SettingsMissing と RestoredFromBackup が true", got)
+	}
+	if got.BackupPath != store.backupPaths[0] {
+		t.Errorf("BackupPath = %q, want %q", got.BackupPath, store.backupPaths[0])
+	}
+	if len(got.Changes) != 0 {
+		t.Errorf("Changes = %+v, want 空(全文復元なので差分は出さない)", got.Changes)
+	}
+	if store.content != settingsBefore {
+		t.Errorf("復元後の内容 = %q, want %q", store.content, settingsBefore)
+	}
+	if want := []string{"Read", "LatestBackup", "Write"}; !equalStrings(store.calls, want) {
+		t.Errorf("呼び出し = %v, want %v", store.calls, want)
+	}
+}
+
+func TestHookSwitcherRestoreWithoutSettingsAndBackupReportsState(t *testing.T) {
+	t.Parallel()
+
+	// settings.json もバックアップも無い状態はエラーではなく報告すべき状態である。
+	store := newFakeSettingsStore(settingsBefore)
+	store.readErr = notExistErr()
+
+	got, err := newSwitcher(store).Restore(false)
+	if err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if !got.SettingsMissing {
+		t.Error("SettingsMissing = false, want true")
+	}
+	if got.RestoredFromBackup || got.BackupPath != "" {
+		t.Errorf("結果 = %+v, want 復元していない", got)
+	}
+	for _, call := range store.calls {
+		if call == "Write" {
+			t.Errorf("呼び出し = %v, want Write を含まない", store.calls)
+		}
+	}
+}
+
+func TestHookSwitcherRestoreDryRunDoesNotWriteBackupFallback(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeSettingsStore(settingsBefore)
+	if _, err := newSwitcher(store).Switch(false); err != nil {
+		t.Fatalf("Switch() = %v", err)
+	}
+	store.readErr = notExistErr()
+	store.calls = nil
+
+	got, err := newSwitcher(store).Restore(true)
+	if err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if !got.DryRun || !got.RestoredFromBackup {
+		t.Errorf("結果 = %+v, want DryRun と RestoredFromBackup が true", got)
+	}
+	for _, call := range store.calls {
+		if call == "Write" {
+			t.Errorf("呼び出し = %v, want Write を含まない", store.calls)
+		}
 	}
 }
 
@@ -289,19 +378,35 @@ func TestHookSwitcherRestoreReportsErrors(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "バックアップの探索に失敗",
-			prepare: func(s *fakeSettingsStore) { s.latestErr = errors.New("一覧できない") },
-			want:    "一覧できない",
-		},
-		{
-			name:    "settings.json が読めない",
+			name:    "settings.json が読めない(不存在ではない)",
 			prepare: func(s *fakeSettingsStore) { s.readErr = errors.New("読めない") },
 			want:    "読めない",
+		},
+		{
+			name:    "settings.json が壊れている",
+			prepare: func(s *fakeSettingsStore) { s.content = `{"hooks":` },
+			want:    "JSON",
 		},
 		{
 			name:    "書き込みに失敗",
 			prepare: func(s *fakeSettingsStore) { s.writeErr = errors.New("書けない") },
 			want:    "書けない",
+		},
+		{
+			name: "バックアップの探索に失敗",
+			prepare: func(s *fakeSettingsStore) {
+				s.readErr = notExistErr()
+				s.latestErr = errors.New("一覧できない")
+			},
+			want: "一覧できない",
+		},
+		{
+			name: "バックアップの書き戻しに失敗",
+			prepare: func(s *fakeSettingsStore) {
+				s.readErr = notExistErr()
+				s.writeErr = errors.New("書けない")
+			},
+			want: "書けない",
 		},
 	}
 	for _, tt := range tests {
@@ -326,7 +431,8 @@ func TestHookSwitcherRestoreReportsErrors(t *testing.T) {
 func TestHookSwitcherRoundTripRestoresOriginalBytes(t *testing.T) {
 	t.Parallel()
 
-	// キー順とインデントを含めて元のバイト列に戻ること。
+	// キー順とインデントを含めて元のバイト列に戻ること
+	// (バックアップを介さず、逆向きの置換だけで戻る)。
 	const original = "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"command\": \"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
 
 	store := newFakeSettingsStore(original)

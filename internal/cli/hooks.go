@@ -69,10 +69,12 @@ func newHooksSwitchCommand(deps Deps) *cobra.Command {
 func newHooksRestoreCommand(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restore",
-		Short: "最新のバックアップから settings.json を復元する",
-		Long: "`mdev hooks switch` が作った最新のバックアップで settings.json を\n" +
-			"置き換える。バックアップが無い場合と既に一致している場合は\n" +
-			"何もせず、その状態を報告する。",
+		Short: "hooks を conductor のスクリプトへ戻す",
+		Long: "`mdev hook` の呼び出しを conductor のスクリプト呼び出しへ戻す。\n" +
+			"switch と逆向きの差し替えなので、切り替え後に settings.json へ\n" +
+			"加わった hooks 以外の変更(permissions など)はそのまま残る。\n" +
+			"settings.json ごと失われている場合に限り、`mdev hooks switch` が\n" +
+			"作った最新のバックアップで書き戻す。",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dryRun, err := cmd.Flags().GetBool(dryRunFlag)
@@ -105,12 +107,7 @@ func printSwitchResult(w io.Writer, result app.SwitchHooksResult) {
 		_, _ = fmt.Fprintln(w, "hooks は既に mdev を指しています。変更はありません。")
 		return
 	}
-
-	_, _ = fmt.Fprintf(w, "\n置き換える hook コマンド(%d 件):\n", len(result.Changes))
-	for _, c := range result.Changes {
-		_, _ = fmt.Fprintf(w, "  [%s]\n    - %s\n    + %s\n", c.Event, c.Before, c.After)
-	}
-	_, _ = fmt.Fprintln(w)
+	printChanges(w, "置き換える hook コマンド", result.Changes)
 
 	if result.DryRun {
 		_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
@@ -121,23 +118,49 @@ func printSwitchResult(w io.Writer, result app.SwitchHooksResult) {
 }
 
 // printRestoreResult は restore の結果を人が読める形で書き出す。
+// 通常の復元は switch と対称に、置き換える内容の一覧を出す。
 func printRestoreResult(w io.Writer, result app.RestoreHooksResult) {
 	_, _ = fmt.Fprintf(w, "settings.json: %s\n", result.SettingsPath)
 
-	if !result.Found {
-		_, _ = fmt.Fprintln(w, "mdev が作ったバックアップがありません。"+
-			"`mdev hooks switch` を実行していないか、既に手作業で片付けられています。")
+	if result.SettingsMissing {
+		printBackupFallback(w, result)
 		return
 	}
-	_, _ = fmt.Fprintf(w, "バックアップ: %s\n", result.BackupPath)
 
-	if !result.Changed {
-		_, _ = fmt.Fprintln(w, "settings.json はバックアップと同じ内容です。変更はありません。")
+	if len(result.Changes) == 0 {
+		_, _ = fmt.Fprintln(w, "hooks は既に conductor のスクリプトを指しています。変更はありません。")
 		return
 	}
+	printChanges(w, "元へ戻す hook コマンド", result.Changes)
+
 	if result.DryRun {
 		_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
 		return
 	}
-	_, _ = fmt.Fprintln(w, "settings.json をバックアップの内容へ復元しました。")
+	_, _ = fmt.Fprintln(w, "hooks を conductor のスクリプトへ戻しました。")
+}
+
+// printBackupFallback は settings.json が無いときの復元結果を書き出す。
+func printBackupFallback(w io.Writer, result app.RestoreHooksResult) {
+	if !result.RestoredFromBackup {
+		_, _ = fmt.Fprintln(w, "settings.json がありません。"+
+			"mdev が作ったバックアップも見つからないため復元できません。")
+		return
+	}
+	_, _ = fmt.Fprintf(w, "settings.json がありません。バックアップ: %s\n", result.BackupPath)
+
+	if result.DryRun {
+		_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
+		return
+	}
+	_, _ = fmt.Fprintln(w, "バックアップの内容で settings.json を復元しました。")
+}
+
+// printChanges は置換の一覧を before / after の形で書き出す。
+func printChanges(w io.Writer, title string, changes []app.HookCommandChange) {
+	_, _ = fmt.Fprintf(w, "\n%s(%d 件):\n", title, len(changes))
+	for _, c := range changes {
+		_, _ = fmt.Fprintf(w, "  [%s]\n    - %s\n    + %s\n", c.Event, c.Before, c.After)
+	}
+	_, _ = fmt.Fprintln(w)
 }

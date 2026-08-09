@@ -1,6 +1,8 @@
 package store_test
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +74,31 @@ func TestSettingsStoreReadFailsWhenAbsent(t *testing.T) {
 	// どのファイルが無いのか分からないと利用者が直せない。
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("エラー = %v, want パスを含む", err)
+	}
+	// restore は「設定ファイルごと失った」状態をバックアップからの復元へ
+	// 振り分けるため、不存在を他の読み取り失敗と区別できなければならない。
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("エラー = %v, want fs.ErrNotExist として判別できる", err)
+	}
+}
+
+func TestSettingsStoreReadFailureOtherThanAbsenceIsNotNotExist(t *testing.T) {
+	t.Parallel()
+
+	// 権限で読めない場合まで「ファイルが無い」に倒すと、復元が
+	// 意図せずバックアップの全文書き戻しへ落ちてしまう。
+	s, path := newSettingsFile(t, `{"a":1}`)
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("Chmod() = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	_, err := s.Read()
+	if err == nil {
+		t.Fatal("Read() = nil, want エラー")
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("エラー = %v, want fs.ErrNotExist ではない", err)
 	}
 }
 
@@ -289,8 +316,8 @@ func TestHookSwitchRoundTripOnRealFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore() = %v", err)
 	}
-	if !restored.Found || !restored.Changed {
-		t.Errorf("Restore() = %+v, want Found と Changed が true", restored)
+	if len(restored.Changes) != 4 || restored.RestoredFromBackup {
+		t.Errorf("Restore() = %+v, want 4 件の逆置換(バックアップ不使用)", restored)
 	}
 	final, err := os.ReadFile(path) //nolint:gosec // テストの一時ファイル
 	if err != nil {
@@ -305,8 +332,116 @@ func TestHookSwitchRoundTripOnRealFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("2 回目の Restore() = %v", err)
 	}
-	if !twice.Found || twice.Changed {
-		t.Errorf("2 回目の Restore() = %+v, want Found=true / Changed=false", twice)
+	if len(twice.Changes) != 0 {
+		t.Errorf("2 回目の Restore() = %+v, want 変更なし", twice)
+	}
+}
+
+// TestHookRestoreKeepsEditsMadeAfterSwitch は、切り替え後に settings.json へ
+// 加わった hooks 以外の変更が復元で失われないことを実ファイルで確認する。
+// バックアップの全文を書き戻す実装ではこれが黙って消える。
+func TestHookRestoreKeepsEditsMadeAfterSwitch(t *testing.T) {
+	t.Parallel()
+
+	original, err := os.ReadFile(filepath.Join("testdata", "settings-conductor-merged.json"))
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+	s, path := newSettingsFile(t, string(original))
+	switcher := &app.HookSwitcher{Settings: s}
+
+	if _, err := switcher.Switch(false); err != nil {
+		t.Fatalf("Switch() = %v", err)
+	}
+
+	// Claude Code 自身が permissions.allow を足した状況を模す。
+	switched, err := os.ReadFile(path) //nolint:gosec // テストの一時ファイル
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+	edited := strings.Replace(string(switched), `"Bash(git:*)"`, `"Bash(git:*)",
+      "Bash(rg:*)"`, 1)
+	if edited == string(switched) {
+		t.Fatal("テストの前提が崩れている: permissions に Bash(git:*) が無い")
+	}
+	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+		t.Fatalf("WriteFile() = %v", err)
+	}
+
+	if _, err := switcher.Restore(false); err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	final, err := os.ReadFile(path) //nolint:gosec // テストの一時ファイル
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+	if !strings.Contains(string(final), `"Bash(rg:*)"`) {
+		t.Errorf("切り替え後の変更が失われた:\n%s", final)
+	}
+	if strings.Contains(string(final), "/bin/mdev") {
+		t.Errorf("hooks が戻っていない:\n%s", final)
+	}
+	// hooks の 4 箇所だけが元へ戻り、他は編集後のままであること。
+	want := strings.Replace(string(original), `"Bash(git:*)"`, `"Bash(git:*)",
+      "Bash(rg:*)"`, 1)
+	if string(final) != want {
+		t.Errorf("復元結果が期待と異なる:\n--- got ---\n%s\n--- want ---\n%s", final, want)
+	}
+}
+
+// TestHookRestoreFallsBackToBackupWhenSettingsMissing は settings.json ごと
+// 失った状態からの復元を実ファイルで確認する。この経路でだけバックアップの
+// 全文を書き戻す。
+func TestHookRestoreFallsBackToBackupWhenSettingsMissing(t *testing.T) {
+	t.Parallel()
+
+	original, err := os.ReadFile(filepath.Join("testdata", "settings-conductor-merged.json"))
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+	s, path := newSettingsFile(t, string(original))
+	switcher := &app.HookSwitcher{Settings: s}
+
+	switched, err := switcher.Switch(false)
+	if err != nil {
+		t.Fatalf("Switch() = %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("Remove() = %v", err)
+	}
+
+	restored, err := switcher.Restore(false)
+	if err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if !restored.SettingsMissing || !restored.RestoredFromBackup {
+		t.Fatalf("Restore() = %+v, want SettingsMissing と RestoredFromBackup が true", restored)
+	}
+	if restored.BackupPath != switched.BackupPath {
+		t.Errorf("BackupPath = %q, want %q", restored.BackupPath, switched.BackupPath)
+	}
+	final, err := os.ReadFile(path) //nolint:gosec // テストの一時ファイル
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+	if string(final) != string(original) {
+		t.Errorf("復元後の settings.json が元と異なる:\n%s", final)
+	}
+}
+
+func TestHookRestoreWithoutSettingsAndBackup(t *testing.T) {
+	t.Parallel()
+
+	// settings.json もバックアップも無い状態はエラーにせず報告する。
+	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+	switcher := &app.HookSwitcher{Settings: store.NewSettingsStore(path, testSettingsClock)}
+
+	got, err := switcher.Restore(false)
+	if err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if !got.SettingsMissing || got.RestoredFromBackup {
+		t.Errorf("Restore() = %+v, want SettingsMissing のみ true", got)
 	}
 }
 

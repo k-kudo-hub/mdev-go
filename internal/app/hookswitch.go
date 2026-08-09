@@ -1,8 +1,9 @@
 package app
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
@@ -23,7 +24,7 @@ type HookSwitcher struct {
 // 中身は domain.HookCommandChange と同じだが、cli / tui は app にしか
 // 依存できない(ADR-0002)ため、境界に出す型は app が持つ。
 type HookCommandChange struct {
-	// Event は `.hooks` 直下のイベント名(Notification / Stop など)。
+	// Event は `.hooks` 直下のイベント名(Notification / Stop の類)。
 	Event string
 	// Before / After は置換前後のコマンド文字列。
 	Before string
@@ -44,18 +45,22 @@ type SwitchHooksResult struct {
 	DryRun bool
 }
 
-// RestoreHooksResult は Restore の結果である。
+// RestoreHooksResult は Restore の結果である。表示のために使う。
 type RestoreHooksResult struct {
 	// SettingsPath は対象の settings.json のパス。
 	SettingsPath string
-	// BackupPath は復元元にしたバックアップのパス。Found が false なら空。
+	// Changes は元へ戻した(dry-run では戻す予定の)コマンドの一覧。
+	// 空なら既にスクリプトを指しており、何もしていない。
+	// バックアップからの全文復元では中身が分からないため空になる。
+	Changes []HookCommandChange
+	// SettingsMissing は settings.json が存在しなかったことを表す。
+	SettingsMissing bool
+	// BackupPath は全文復元の復元元にしたバックアップのパス。
+	// 通常の(逆向きの書き換えによる)復元では空になる。
 	BackupPath string
-	// Found はバックアップが見つかったかどうか。switch を一度も実行して
-	// いなければ false になる。これはエラーではなく報告すべき状態である。
-	Found bool
-	// Changed は現在の内容がバックアップと異なり、書き戻した
+	// RestoredFromBackup はバックアップの全文で書き戻した
 	// (dry-run では書き戻す予定である)ことを表す。
-	Changed bool
+	RestoredFromBackup bool
 	// DryRun は書き込みを行わなかったことを表す。
 	DryRun bool
 }
@@ -97,16 +102,52 @@ func (s *HookSwitcher) Switch(dryRun bool) (SwitchHooksResult, error) {
 	return result, nil
 }
 
-// Restore は最新のバックアップから settings.json を書き戻す。
+// Restore は settings.json の hooks を conductor のスクリプト呼び出しへ戻す。
 //
-// バックアップが無い場合(switch を一度も実行していない場合)と、現在の内容が
-// 既にバックアップと一致している場合はエラーにせず、その状態を結果で返す。
+// 現在の settings.json に対して Switch と逆向きの置換を行う。バックアップの
+// 全文を書き戻さないのは、切り替え後に Claude Code 自身が settings.json へ
+// 書いた変更(permissions.allow の追加が典型)を消さないためである。
+// 逆向きの置換であれば hooks 以外の差分には一切触れない。
 //
-// 復元前に現在の内容を退避することはしない。退避すると次の Restore が
-// 「切り替え後の内容」を最新のバックアップとして拾ってしまうためである。
+// 既にスクリプトを指している場合は何もしない(冪等)。
+//
+// settings.json が存在しない場合に限り、最新のバックアップの全文で書き戻す。
+// これは「設定ファイルごと失った」という復元の主目的シナリオであり、
+// 逆向きの置換の対象そのものが無いためである。バックアップも無ければ
+// エラーにはせず、その状態を結果で返す。
+//
+// 復元前に現在の内容を退避することはしない。退避すると次の Restore の
+// フォールバックが「切り替え後の内容」を最新のバックアップとして拾ってしまう。
 func (s *HookSwitcher) Restore(dryRun bool) (RestoreHooksResult, error) {
 	result := RestoreHooksResult{SettingsPath: s.Settings.Path(), DryRun: dryRun}
 
+	current, err := s.Settings.Read()
+	if errors.Is(err, fs.ErrNotExist) {
+		result.SettingsMissing = true
+		return s.restoreFromBackup(result)
+	}
+	if err != nil {
+		return result, err
+	}
+
+	restored, changes, err := domain.RestoreHookCommands(current)
+	if err != nil {
+		return result, fmt.Errorf("%s: %w", result.SettingsPath, err)
+	}
+	result.Changes = toHookCommandChanges(changes)
+
+	if len(changes) == 0 || dryRun {
+		return result, nil
+	}
+	if err := s.Settings.Write(restored); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// restoreFromBackup は settings.json が存在しないときのフォールバックである。
+// 最新のバックアップの全文で書き戻す。
+func (s *HookSwitcher) restoreFromBackup(result RestoreHooksResult) (RestoreHooksResult, error) {
 	backupPath, backup, found, err := s.Settings.LatestBackup()
 	if err != nil {
 		return result, err
@@ -115,18 +156,9 @@ func (s *HookSwitcher) Restore(dryRun bool) (RestoreHooksResult, error) {
 		return result, nil
 	}
 	result.BackupPath = backupPath
-	result.Found = true
+	result.RestoredFromBackup = true
 
-	current, err := s.Settings.Read()
-	if err != nil {
-		return result, err
-	}
-	if bytes.Equal(current, backup) {
-		return result, nil
-	}
-	result.Changed = true
-
-	if dryRun {
+	if result.DryRun {
 		return result, nil
 	}
 	if err := s.Settings.Write(backup); err != nil {
