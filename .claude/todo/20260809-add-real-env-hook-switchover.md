@@ -22,7 +22,7 @@
 - [x] infra: settings ファイルストアのテストを作成(原子書き込み / バックアップ命名 `settings.json.mdev-backup-{timestamp}` / settings.json 不在時のエラー)→ 実装
 - [x] cli: `mdev hooks switch` / `mdev hooks restore` を実装(`--dry-run` で差分表示のみ。実行時は変更前後の hook 設定を表示)
 - [x] hook 失敗時の終了コード方針を決めて evidence に記録(PR #3 持ち越し: 現状 exit 1。Claude Code の hook 仕様では 0/2 以外は非ブロッキングであることをドキュメントで確認して確定する)
-- [ ] `make install` ターゲットを追加(`go build` して `~/.claude-conductor/bin/mdev` へ配置。hooks の書き換え先コマンドはこの絶対パスを使う)
+- [x] `make install` ターゲットを追加(`go build` して `~/.claude-conductor/bin/mdev` へ配置。hooks の書き換え先コマンドはこの絶対パスを使う)
 - [ ] ユーザーテスト手順書を作成(`docs/user-test-01-hooks.md`: 切り替え → 確認項目チェックリスト → 問題時の復元手順)
 - [ ] `make check` 緑を確認
 

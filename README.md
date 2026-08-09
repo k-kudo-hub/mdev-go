@@ -50,7 +50,20 @@ make arch        # go-arch-lint check(ADR-0002 の依存方向)
 make test        # go test -race -covermode=atomic -coverprofile=cover.out ./...
 make cover       # make test の後にカバレッジ閾値を検査する
 make build       # bin/mdev をビルドする
+make install     # $CONDUCTOR_HOME/bin/mdev(既定 ~/.claude-conductor/bin)へ配置する
 make clean       # bin/ と cover.out を削除する
+```
+
+### 実環境で試す
+
+`make install` で配置したうえで、Claude Code の hooks を Go 版へ切り替えられる。
+手順とチェックリストは [docs/user-test-01-hooks.md](docs/user-test-01-hooks.md) を参照。
+
+```sh
+make install                   # ~/.claude-conductor/bin/mdev へ配置
+mdev hooks switch --dry-run    # 変更内容の確認のみ
+mdev hooks switch              # バックアップを作って切り替え
+mdev hooks restore             # 最新のバックアップから復元
 ```
 
 ### 品質基準
