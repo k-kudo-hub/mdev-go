@@ -1,0 +1,8 @@
+[1m  Waiting[0m [2m[external][0m
+[2m  ──────────────────────────[0m
+
+  [0;33m■[0m [1mreview-task[0m [2m[11:01:00][0m
+      waiting for pr review
+
+[2m  ──────────────────────────[0m
+  [1mWaiting: 1[0m

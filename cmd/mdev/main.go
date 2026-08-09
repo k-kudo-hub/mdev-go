@@ -25,7 +25,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, "mdev: ホームディレクトリを特定できません:", err)
 		os.Exit(1)
 	}
-	conductorHome := store.ConductorHome(home, os.Getenv("CONDUCTOR_HOME"))
+
+	os.Exit(cli.Execute(buildDeps(home, os.Getenv, infra.SystemClock{})))
+}
+
+// buildDeps は実行時の依存一式を組み立てる(ADR-0002 の DI はここだけ)。
+//
+// home は pending と settings.json の基準になるホームディレクトリ、getenv は
+// 環境変数の読み取り、clock は「今」を供給する時計である。3 つとも引数で
+// 受けるのは、ゴールデンテストが隔離したディレクトリと固定の日付で同じ
+// 依存グラフを組み立て直せるようにするためである。
+func buildDeps(home string, getenv func(string) string, clock app.Clock) cli.Deps {
+	conductorHome := store.ConductorHome(home, getenv("CONDUCTOR_HOME"))
 
 	pending := store.NewPendingStore(store.PendingRoot(home))
 
@@ -33,7 +44,7 @@ func main() {
 		Pending:  pending,
 		Registry: store.NewRegistryStore(store.RegistryRoot(conductorHome)),
 		Focuser:  zellij.NewFocuser(),
-		Clock:    infra.SystemClock{},
+		Clock:    clock,
 	}
 
 	// ロックを取れなかったことは stderr に警告するだけで処理は続ける
@@ -43,7 +54,7 @@ func main() {
 		Transcript: store.NewTranscriptStore(),
 		Daily:      store.NewDailyStore(store.DailyRoot(conductorHome), os.Stderr),
 		Pricing:    store.NewPricingStore(conductorHome),
-		Clock:      infra.SystemClock{},
+		Clock:      clock,
 	}
 
 	// settings.json は CONDUCTOR_HOME ではなく Claude Code の設定であるため
@@ -53,8 +64,8 @@ func main() {
 	// CONDUCTOR_HOME 配下を見る。
 	hookSettings := &app.HookSwitcher{
 		Settings: store.NewSettingsStore(
-			store.SettingsPath(home, os.Getenv("MDEV_SETTINGS_FILE")),
-			infra.SystemClock{},
+			store.SettingsPath(home, getenv("MDEV_SETTINGS_FILE")),
+			clock,
 		),
 		Binary: store.NewMdevBinaryStore(conductorHome),
 	}
@@ -81,21 +92,21 @@ func main() {
 			Shell:       runner,
 		},
 		Waiting: &app.WaitingPane{Pending: paneStore},
-		Done:    &app.DonePane{Daily: paneStore, Shell: runner, Clock: infra.SystemClock{}},
+		Done:    &app.DonePane{Daily: paneStore, Shell: runner, Clock: clock},
 		News: &app.NewsPane{
 			News:   paneStore,
 			Shell:  runner,
 			Opener: shell.NewOpener(),
-			Clock:  infra.SystemClock{},
+			Clock:  clock,
 		},
-		Env: app.PaneEnv{ZellijSession: os.Getenv("ZELLIJ_SESSION_NAME")},
+		Env: app.PaneEnv{ZellijSession: getenv("ZELLIJ_SESSION_NAME")},
 	}
 
-	os.Exit(cli.Execute(cli.Deps{
+	return cli.Deps{
 		Hooks:        hooks,
 		Record:       record,
 		HookSettings: hookSettings,
 		Panes:        panes,
-		Getenv:       os.Getenv,
-	}))
+		Getenv:       getenv,
+	}
 }

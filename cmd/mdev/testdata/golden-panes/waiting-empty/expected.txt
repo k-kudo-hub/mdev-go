@@ -1,0 +1,4 @@
+[1m  Waiting[0m [2m[external][0m
+[2m  ──────────────────────────[0m
+
+  [2mNo waiting tasks[0m

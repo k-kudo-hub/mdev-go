@@ -1,0 +1,4 @@
+[1m  Done Tasks[0m
+[2m  ──────────────────────────[0m
+
+  [2mNo tasks completed yet[0m
