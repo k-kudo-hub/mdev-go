@@ -18,13 +18,25 @@ type HookSwitcher struct {
 	Settings SettingsStore
 }
 
+// HookCommandChange は置き換える hook コマンド 1 件である。
+//
+// 中身は domain.HookCommandChange と同じだが、cli / tui は app にしか
+// 依存できない(ADR-0002)ため、境界に出す型は app が持つ。
+type HookCommandChange struct {
+	// Event は `.hooks` 直下のイベント名(Notification / Stop など)。
+	Event string
+	// Before / After は置換前後のコマンド文字列。
+	Before string
+	After  string
+}
+
 // SwitchHooksResult は Switch の結果である。表示のために使う。
 type SwitchHooksResult struct {
 	// SettingsPath は対象の settings.json のパス。
 	SettingsPath string
 	// Changes は置き換えた(dry-run では置き換える予定の)コマンドの一覧。
 	// 空なら既に切り替え済みで、何もしていない。
-	Changes []domain.HookCommandChange
+	Changes []HookCommandChange
 	// BackupPath は作成したバックアップのパス。
 	// dry-run のときと変更が無いときは空になる。
 	BackupPath string
@@ -67,7 +79,7 @@ func (s *HookSwitcher) Switch(dryRun bool) (SwitchHooksResult, error) {
 	if err != nil {
 		return result, fmt.Errorf("%s: %w", result.SettingsPath, err)
 	}
-	result.Changes = changes
+	result.Changes = toHookCommandChanges(changes)
 
 	if len(changes) == 0 || dryRun {
 		return result, nil
@@ -121,4 +133,16 @@ func (s *HookSwitcher) Restore(dryRun bool) (RestoreHooksResult, error) {
 		return result, err
 	}
 	return result, nil
+}
+
+// toHookCommandChanges は domain の置換一覧を境界の型へ移し替える。
+func toHookCommandChanges(changes []domain.HookCommandChange) []HookCommandChange {
+	if len(changes) == 0 {
+		return nil
+	}
+	out := make([]HookCommandChange, 0, len(changes))
+	for _, c := range changes {
+		out = append(out, HookCommandChange{Event: c.Event, Before: c.Before, After: c.After})
+	}
+	return out
 }

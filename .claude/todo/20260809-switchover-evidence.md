@@ -156,3 +156,55 @@ Claude Code のユーザー設定は公式ドキュメント
 `writeFileAtomic` は 0644 固定だったため、権限指定版
 `writeFileAtomicMode` を足して既存ファイルのパーミッションを引き継ぐようにした。
 利用者が 0600 に絞っている設定ファイルを mdev の都合で緩めないためである。
+
+## 5. `make check` で判明したこと
+
+### ADR-0002 違反(go-arch-lint が検出)
+
+cli のテストで `domain.HookCommandChange` を組み立てていたため、
+`Component cli shouldn't depend on internal/domain` で落ちた。
+
+`app.SwitchHooksResult.Changes` の要素型が domain の型のままだったのが原因である。
+cli / tui は app にしか依存できない(ADR-0002)ので、境界に出す型は app が持つ
+ことにし、`app.HookCommandChange` を定義してユースケースの中で移し替えた
+(`toHookCommandChanges`)。`app.HookEnv` / `app.RecordEnv` と同じ扱いである。
+
+型エイリアス(`type HookCommandChange = domain.HookCommandChange`)でも
+import は消えるが、go-arch-lint は import しか見ないため、それは
+ガードレールをすり抜けるだけで ADR の意図には反する。採らなかった。
+
+### 最終結果
+
+```
+gofmt: no diff
+golangci-lint: 0 issues
+go-arch-lint: OK - No warnings found
+go test -race: 全パッケージ ok
+Total test coverage: 93.8% (859/916)  ... internal/domain 97.3% / internal/app 100.0%
+go build: OK
+```
+
+## 6. 実環境を変更していないことの確認
+
+- 自動テストの settings.json はすべて `t.TempDir()` 配下に作る
+  (`internal/infra/store/settings_test.go` の `newSettingsFile`)。
+  実環境のパスを組み立てるのは `cmd/mdev/main.go` だけで、そこにテストは無い。
+- 手動の動作確認は `mktemp -d` に置いたコピーへ `MDEV_SETTINGS_FILE` を
+  向けて行った。
+- `make install` の確認は `CONDUCTOR_HOME=$(mktemp -d)/.claude-conductor` で行い、
+  実行後に `ls ~/.claude-conductor/bin` が
+  `No such file or directory` であることを確認した。
+- `~/.claude/settings.json` の更新時刻は作業開始時のまま
+  (`2026-08-08 22:37:52` = このタスクの着手より前)で、
+  mdev のバックアップも 1 つも作られていない。
+
+```sh
+$ stat -f '%Sm %N' -t '%F %T' ~/.claude/settings.json
+2026-08-08 22:37:52 /Users/kazuto/.claude/settings.json
+
+$ ls ~/.claude/settings.json.mdev-backup-*
+no matches found
+
+$ ls ~/.claude-conductor/bin
+ls: /Users/kazuto/.claude-conductor/bin: No such file or directory
+```

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
-	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
 // fakeHookSettingsService は hooks 切り替えユースケースの代役である。
@@ -57,7 +56,7 @@ func runCLIOut(t *testing.T, deps Deps, args ...string) (code int, stdout, stder
 }
 
 // testChanges は表示の確認に使う置換 2 件。
-var testChanges = []domain.HookCommandChange{
+var testChanges = []app.HookCommandChange{
 	{
 		Event:  "Notification",
 		Before: "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh",

@@ -24,7 +24,7 @@
 - [x] hook 失敗時の終了コード方針を決めて evidence に記録(PR #3 持ち越し: 現状 exit 1。Claude Code の hook 仕様では 0/2 以外は非ブロッキングであることをドキュメントで確認して確定する)
 - [x] `make install` ターゲットを追加(`go build` して `~/.claude-conductor/bin/mdev` へ配置。hooks の書き換え先コマンドはこの絶対パスを使う)
 - [x] ユーザーテスト手順書を作成(`docs/user-test-01-hooks.md`: 切り替え → 確認項目チェックリスト → 問題時の復元手順)
-- [ ] `make check` 緑を確認
+- [x] `make check` 緑を確認
 
 ## ユーザーテストの確認項目(手順書に含める)
 
