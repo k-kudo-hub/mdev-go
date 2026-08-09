@@ -25,7 +25,7 @@
 - [x] daily レコード型のテストを作成(必須/任意フィールド、summary null 許容、未知フィールド保持は対象外であることの明記)→ 実装
 - [x] claude transcript 集計のテストを作成(turns / tool_calls / tools_used / model / speed / トークン 5 種。test.sh の期待値を移植)→ 実装
 - [x] pricing 解決と cost 計算のテストを作成(モデル別 → sonnet フォールバック → ハードコード既定、fast_multiplier、丸め)→ 実装
-- [ ] markers 判定のテストを作成(merged の正規表現 / slack / doc の拡張子)→ 実装
+- [x] markers 判定のテストを作成(merged の正規表現 / slack / doc の拡張子)→ 実装
 - [ ] codex rollout 集計のテストを作成(user_message 数 / `_call$` / total_token_usage / 価格未知 cost null / キー名差異)→ 実装
 - [ ] フォールバック 3 段のテストを作成(parse 失敗 / transcript 無しの message 既定値)→ 実装
 
