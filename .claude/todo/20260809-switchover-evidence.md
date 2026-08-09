@@ -208,3 +208,188 @@ no matches found
 $ ls ~/.claude-conductor/bin
 ls: /Users/kazuto/.claude-conductor/bin: No such file or directory
 ```
+
+## 7. `/code-review` 指摘対応(PR #4)
+
+PR #4 に対するコードレビューの指摘を検証し、対応した。指摘単位で 1 コミットにしている。
+
+### 7-1. restore を逆向きの外科的書き換えにする(最重要)
+
+**指摘**: `Restore` がバックアップの**全文**を書き戻すため、
+
+1. switch 後に Claude Code 自身が `settings.json` へ書いた変更
+   (`permissions.allow` の追加が典型)が silent に消える
+2. `settings.json` が欠損・読めないとき `Read` エラーで失敗し、
+   「設定ファイルごと失った」という復旧の主目的シナリオで使えない
+
+**検証**: 実ファイルで再現した。切り替え後に `permissions.allow` へ
+1 要素足してから `restore` すると、旧実装ではその要素が消える。
+
+**対応**: 置換規則を `from` / `to` の対称な形にし、走査(`scanHookCommands`)と
+編集(`applyEdits`)の機構をルールセットのパラメータで共用した上で、
+規則を反転した `RestoreHookCommands` を足した。`Restore` の流れは
+
+1. `Read` 成功 → 現在の内容へ逆置換。変更が無ければ no-op を報告し、
+   あれば原子的に書き込む(hooks 以外の差分は 1 バイトも触らない)
+2. `Read` が `fs.ErrNotExist` → 最新のバックアップの全文で書き戻す
+   (この経路だけ)。バックアップも無ければエラーにせず状態を報告する
+3. その他の `Read` エラー → エラー
+
+`SettingsStore.Read` の契約に「不存在は `errors.Is(err, fs.ErrNotExist)` で
+判別できること」を明記した。実装は `os.ReadFile` のエラーを `%w` で包んでいるため
+既に成り立っているが、権限エラーまで「不存在」に倒れると全文書き戻しへ
+誤って落ちるので、成り立つ側と成り立たない側の両方をテストで固定した。
+
+**往復恒等のプロパティ**: `restore(switch(x)) == x` と
+`switch(restore(y)) == y` をバイト比較で固定した(`TestSwitchRestoreRoundTripIsIdentity`)。
+入力は install.sh がマージした実物・インデント 4 の変種・1 行の最小構成・
+絶対パス前置き・対象 0 件の 5 通り。
+
+唯一の例外は、対象の文字列リテラルが `\/` のような非正規なエスケープで
+書かれていた場合である。1 回目の変換で素直な表記へ正規化されるため
+バイト単位では戻らない。正規化自体は既存テストで固定されているので、
+プロパティのコメントに例外として明記した。
+
+**結果の型**: `RestoreHooksResult` を `Changes` / `SettingsMissing` /
+`BackupPath` / `RestoredFromBackup` の形へ更新し、cli の出力と `--dry-run`
+表示を switch と対称(before / after の一覧)にした。
+
+### 7-2. バックアップ名を対象ファイル名から導出する
+
+**指摘**: どの対象でも `settings.json.mdev-backup-<ts>` の固定名のため、
+`MDEV_SETTINGS_FILE` で同一ディレクトリ内のコピーを対象にすると、
+実ファイルの復元が予行演習のバックアップを拾う。
+
+**検証**: 同じディレクトリに `settings.json` と `settings.copy.json` を置いて
+それぞれ `Backup` を呼ぶテストで再現した(両方が同じ名前になり、
+実ファイル側の `LatestBackup` がコピーの内容を返した)。
+
+**対応**: 前置きを `filepath.Base(s.path) + ".mdev-backup-"` に変更し、
+`LatestBackup` も同じ導出で絞り込むようにした。
+
+### 7-3. `LatestBackup` が tmp 残骸を拾い得る
+
+**指摘**: `writeFileAtomicMode` の一時ファイル(`<名前>.tmp-<乱数>`)が
+クラッシュで残ると、`settings.json.mdev-backup-<ts>.tmp-<乱数>` は前置きが
+一致し辞書順でも大きいため「最新のバックアップ」に選ばれ得る。
+
+**検証**: 残骸を置いたテストで再現した。書きかけの内容で `settings.json` を
+復元することになり、復旧手段そのものが壊れる。
+
+**対応**: 前置きを除いた残りが `20060102T150405Z` として `time.Parse` できる
+名前だけを候補にした。手で付けた名前も同時に外れる。
+
+### 7-4. Write 失敗時にバックアップパスが報告されない
+
+**指摘**: `app.Switch` は Write 失敗時も `result.BackupPath` を持って返すが、
+cli が `err` だけを見て結果を捨てている。
+
+**対応**: 失敗時に「settings.json は変更されていません。バックアップ: <path>」を
+stderr へ出す。書き込みは原子的な置き換えなので、失敗した時点で
+`settings.json` が元のままであることは断定できる。退避の前に失敗した場合は
+`BackupPath` が空なので何も出さない。
+
+### 7-5. 切り替え先バイナリの未設置チェック
+
+**指摘**: 切り替え後の hooks が指す
+`${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev` が無くても切り替えは
+成功するため、「切り替えたのにダッシュボードが無反応」という形でしか
+気付けない。
+
+**対応**: switch 実行時(dry-run 含む)に存在を確認し、無ければ警告を出す。
+エラーにはしない(hook は非ブロッキングなので会話は壊れない)。
+
+ADR-0002 に沿った置き場所は次のとおり。
+
+| 層 | 担当 |
+|---|---|
+| infra | `MdevBinaryStore` が `CONDUCTOR_HOME` 配下の存在確認を行う |
+| app | `MdevBinaryLocator` port を定義し、`MissingBinaryPath` として判断を返す |
+| cli | 無反応になる旨と `make install` の案内を表示する |
+
+`CONDUCTOR_HOME` は mdev 実行時の環境変数から解決する(`cmd/mdev` が組み立てる)。
+hooks のコマンド文字列は環境変数展開の形のまま残すので、hook 実行時に
+どのファイルが呼ばれるかは実行環境次第だが、mdev-test で `CONDUCTOR_HOME` を
+worktree へ向けている場合に一番起きやすい取り違えはこれで拾える。
+
+ディレクトリは hook から実行できないため「存在しない」扱いにした。
+
+### 7-6. hook サブコマンド名の二重定義
+
+**指摘**: domain の置換規則内の `hook notify` などと cli のサブコマンド名が
+独立に定義されている。
+
+**検証**: 片方だけを直しても両方ともコンパイルが通り、両パッケージのテストも
+緑のままになる。実環境では hook 実行時の `unknown command` としてしか現れない。
+
+**対応**: domain に `SwitchedHookCommandSuffixes()` を足し、全パッケージを
+参照できる `cmd/mdev`(ADR-0002 で唯一許される)のテストで cobra の
+コマンドツリーと双方向に突き合わせる。
+
+- 規則にあるサブコマンドがコマンドツリーに存在すること
+- コマンドツリーの `mdev hook` の子すべてに対応する規則があること
+
+規則名を実際に `post-tool` → `posttool` と食い違わせて、両方向の検出が
+働くことを確認してから戻した。
+
+### 7-7. 未置換の pending スクリプトの警告
+
+**指摘**: 置換規則は末尾一致なので、引数付きの呼び出しや利用者が足した
+別のスクリプトは切り替わらずに残る。
+
+**対応**: 切り替え後の内容に `/scripts/pending-` を含むコマンドが残っていれば、
+イベント名とコマンドを一覧で警告する(dry-run でも出す)。走査は
+`scanHookCommands` を共用する。
+
+### 7-8. 見送った指摘
+
+**`app.HookCommandChange` の DTO コピー**(型エイリアスで簡素化可能)
+
+型エイリアス `type HookCommandChange = domain.HookCommandChange` にすれば
+移し替えのコードは消えるが、go-arch-lint は import しか見ないため、
+エイリアスは境界検査を形式的に通すだけになる。ADR-0002 の意図は
+「cli / tui が domain の型に依存しない」ことなので、レイヤー境界を明示する
+DTO を維持する(実装時の判断をそのまま支持する)。今回 `HookCommand` を
+足したときも同じ方針を踏襲した。
+
+**コメント規約(曖昧な「など」)**
+
+`grep -rn "など" --include='*.go' .` で 18 箇所。このタスクで書いた 4 箇所
+(`app/hookswitch.go` 2・`cli/hooks.go` 2・`domain/hooksettings.go` 1 のうち
+重複を除く)を具体的な言い回しへ直し、1 コミットにまとめた。
+残る 12 箇所は transcript / pricing / config の既存コメントで、
+このタスク以前から存在するため変更範囲外とした。
+
+### 7-9. 対応後の `make check`
+
+```
+gofmt: no diff
+golangci-lint: 0 issues
+go-arch-lint: OK - No warnings found
+go test -race: 全パッケージ ok
+Total test coverage: 94.4% (938/994)
+  internal/domain 97.6% / internal/app 99.2% / internal/cli 96.2% /
+  internal/infra/store 89.4%
+go build: OK
+```
+
+`internal/app` が 100.0% から 99.2% へ下がったのは、`Switch` が
+`RemainingPendingScriptCommands` のエラーを返す分岐が到達不能だからである
+(切り替え後のバイト列は必ず妥当な JSON になる)。エラーを握り潰すよりは
+返す方が正しいので、防御的な分岐として残した。閾値(90%)は満たしている。
+
+`cmd/mdev` にテストファイルを足したため、これまでカバレッジ計測の対象外だった
+`main.go` が母数に入った。全体の閾値(70%)は満たしている。
+
+### 7-10. 実環境を変更していないことの再確認
+
+```sh
+$ stat -f '%Sm %N' -t '%F %T' ~/.claude/settings.json
+2026-08-08 22:37:52 /Users/kazuto/.claude/settings.json
+
+$ ls ~/.claude/settings.json.mdev-backup-*
+no matches found
+
+$ ls ~/.claude-conductor/bin
+ls: /Users/kazuto/.claude-conductor/bin: No such file or directory
+```

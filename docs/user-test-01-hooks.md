@@ -28,6 +28,9 @@ Go 版 `mdev` が実環境で動く最初のユーザーテストである。
 `${CONDUCTOR_HOME:-$HOME/.claude-conductor}` という前置きは維持する。
 これを絶対パスへ展開すると、`mdev-test` の worktree 隔離が hooks に効かなくなる。
 
+戻すとき(`mdev hooks restore`)も同じ 4 箇所を逆向きに差し替えるだけである。
+詳しくは「0. 事前準備」の「復元のしくみ」を読む。
+
 ## 0. 事前準備
 
 ```sh
@@ -43,6 +46,26 @@ make install          # ~/.claude-conductor/bin/mdev へ配置
 ```sh
 MDEV=~/.claude-conductor/bin/mdev
 ```
+
+### 復元のしくみ(先に読む)
+
+`mdev hooks restore` は**バックアップを書き戻すコマンドではない**。
+switch と逆向きの差し替えを、そのときの `settings.json` に対して行う。
+
+| | 対象 | hooks 以外の変更の扱い |
+|---|---|---|
+| `hooks switch` | 4 つのコマンド文字列 | 触らない |
+| `hooks restore` | 同じ 4 つ(逆向き) | 触らない |
+
+これは、切り替えてから戻すまでの間に Claude Code 自身が
+`settings.json` へ書いた変更(`permissions.allow` の追加が典型)を
+消さないためである。バックアップの全文を書き戻すとそれが黙って失われる。
+
+バックアップは 2 つの役目に絞られる。
+
+1. `settings.json` ごと失われている場合のフォールバック
+   (このときだけ `restore` が全文を書き戻す)
+2. 何かがおかしくなったときに人が手で戻すための保険
 
 ### 自分で取る保険(推奨)
 
@@ -70,6 +93,12 @@ diff ~/.claude/settings.json "$TMP/settings.json"                         # 差�
 ```
 
 最後の `diff` が無出力なら、往復で 1 バイトも変わらないことが確認できている。
+
+バックアップのファイル名は**対象ファイル名から作られる**
+(`<対象ファイル名>.mdev-backup-<UTCタイムスタンプ>`)。
+上のように別ディレクトリのコピーを対象にすれば、実ファイルの
+バックアップと混ざることはない。同じディレクトリに別名でコピーを
+置いた場合も、名前が違えば互いのバックアップを拾わない。
 
 ## 1. 切り替える
 
@@ -106,6 +135,23 @@ hooks を mdev へ切り替えました。
       「hooks は既に mdev を指しています。変更はありません。」と出る(冪等)
 - [ ] `diff ~/settings.json.before-usertest01 ~/.claude/settings.json` の差分が
       4 行だけで、いずれも `command` の行である
+
+### 出るかもしれない警告
+
+いずれも切り替え自体は成功している。エラーではない。
+
+**`警告: .../bin/mdev が見つかりません。`**
+
+切り替え後の hooks が呼ぶバイナリが未設置である。`make install` を
+実行していないか、`CONDUCTOR_HOME` が別の場所を指している。このまま
+使うと会話は普通に進むのにダッシュボードだけが反応しなくなる。
+`--dry-run` の段階でも出るので、そこで気付いたら先に配置する。
+
+**`警告: 切り替えられなかった conductor スクリプトの呼び出しが残っています`**
+
+既知の 3 種類と一致しない `pending-*.sh` の呼び出し(引数付き・別名)が
+`.hooks` に残っている。一覧に出たイベントだけは Shell 版のまま動く。
+意図したものかを手で確認する。
 
 **切り替え後は Claude Code を起動し直す。** 起動済みのセッションは
 古い hooks 設定を保持している可能性がある。
@@ -167,13 +213,19 @@ tail -1 ~/.claude-conductor/daily/<セッション名>/$(date +%F).jsonl | jq .
 ### 2-4. 復元
 
 ```sh
+$MDEV hooks restore --dry-run   # 戻す内容の確認だけ。書き込まない
 $MDEV hooks restore
 ```
 
-- [ ] 「settings.json をバックアップの内容へ復元しました。」と出る
+switch と対称に、戻す 4 件が before / after 付きで表示される。
+
+- [ ] 4 件すべてが表示され、「hooks を conductor のスクリプトへ戻しました。」と出る
 - [ ] `diff ~/settings.json.before-usertest01 ~/.claude/settings.json` が無出力
+      (テスト中に Claude Code が `settings.json` を書き換えていた場合は、
+      その分だけ差分が残る。それが**残っているのが正しい**)
 - [ ] もう一度 `$MDEV hooks restore` を実行すると
-      「settings.json はバックアップと同じ内容です。変更はありません。」と出る
+      「hooks は既に conductor のスクリプトを指しています。変更はありません。」と出る
+- [ ] バックアップのファイルは消えていない(restore は使わない)
 - [ ] Claude Code を再起動し、2-1 の 4 項目が Shell 版のままでも動く
 
 ## 3. 問題が起きたときの復元手順
@@ -186,17 +238,23 @@ $MDEV hooks restore
 ~/.claude-conductor/bin/mdev hooks restore
 ```
 
-`mdev hooks switch` が作った最新のバックアップで `settings.json` を置き換える。
-これで元に戻る。
+`.hooks` の 4 つのコマンド文字列を conductor のスクリプト呼び出しへ戻す。
+hooks 以外のキーには触らないので、切り替え後に加わった設定は残る。
+
+`settings.json` そのものを失っている場合は、このコマンドが自動で
+最新のバックアップの全文を書き戻す(その旨が出力に出る)。
 
 ### 手順 B: バックアップから手で戻す
 
-`mdev` 自体が動かない場合(ビルドが壊れている、バイナリを消したなど)。
+`mdev` 自体が動かない場合(ビルドが壊れている、バイナリを消した)。
 
 ```sh
 ls -t ~/.claude/settings.json.mdev-backup-*        # 新しい順に並ぶ
 cp ~/.claude/settings.json.mdev-backup-<最新> ~/.claude/settings.json
 ```
+
+この方法は**切り替え直前の状態に丸ごと戻す**。切り替え後に加わった
+hooks 以外の変更は失われるので、手順 A が使えるならそちらを先に試す。
 
 事前準備で取った控えがあればそちらでもよい。
 
@@ -252,11 +310,18 @@ Dashboard が反応しないのに会話は普通に進む、という形で現�
 
 `mdev hooks switch` は**変更がある場合にだけ**バックアップを作る。
 切り替え済みの状態で何度実行してもファイルは増えない。
+`mdev hooks restore` はバックアップを作らず、消しもしない。
 テストが終わったら不要なバックアップは消してよい。
 
 ```sh
 ls ~/.claude/settings.json.mdev-backup-*
 ```
+
+ファイル名は `<対象ファイル名>.mdev-backup-<UTCタイムスタンプ>` である。
+`mdev` が「最新のバックアップ」として選ぶのは、この形の名前に
+**完全に一致する**ものだけである。手で付けた名前
+(`settings.json.mdev-backup-手動` の類)や、書き込み中に中断して
+残った `.tmp-<乱数>` 付きのファイルは候補にならない。
 
 ## 5. 片付け
 
