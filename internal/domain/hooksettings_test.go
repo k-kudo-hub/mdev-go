@@ -381,6 +381,184 @@ func TestSwitchHookCommandsDoesNotAliasInput(t *testing.T) {
 	}
 }
 
+func TestRestoreHookCommandsReversesSwitch(t *testing.T) {
+	t.Parallel()
+
+	out, changes, err := domain.RestoreHookCommands([]byte(settingsAfter))
+	if err != nil {
+		t.Fatalf("RestoreHookCommands() = %v", err)
+	}
+	if string(out) != settingsBefore {
+		t.Errorf("出力が期待と異なる:\n--- got ---\n%s\n--- want ---\n%s", out, settingsBefore)
+	}
+
+	want := []domain.HookCommandChange{
+		{
+			Event:  "Notification",
+			Before: "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify",
+			After:  "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh",
+		},
+		{
+			Event:  "Stop",
+			Before: "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify",
+			After:  "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh",
+		},
+		{
+			Event:  "PostToolUse",
+			Before: "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook post-tool",
+			After:  "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-post-tool.sh",
+		},
+		{
+			Event:  "UserPromptSubmit",
+			Before: "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook resolve",
+			After:  "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-resolve.sh",
+		},
+	}
+	if !reflect.DeepEqual(changes, want) {
+		t.Errorf("変更一覧 = %+v\nwant %+v", changes, want)
+	}
+}
+
+// TestSwitchRestoreRoundTripIsIdentity は switch → restore の往復が
+// バイト単位で恒等であることを固定する。
+//
+// restore がバックアップの全文ではなく現在の内容の逆変換で戻せるのは、
+// この性質があるからである。逆向き(restore → switch)も同時に見る。
+//
+// ただし対象の文字列リテラルが `\/` のような非正規なエスケープで
+// 書かれていた場合は、1 回目の変換で素直な表記へ正規化されるため恒等にならない
+// (TestSwitchHookCommandsHandlesEscapedTargets で正規化そのものを固定している)。
+func TestSwitchRestoreRoundTripIsIdentity(t *testing.T) {
+	t.Parallel()
+
+	conductor, err := os.ReadFile(filepath.Join("testdata", "settings-conductor-merged.json"))
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "install.sh がマージした実物", in: string(conductor)},
+		{name: "インデント 4 と未知キー", in: settingsBefore},
+		{name: "1 行の最小構成", in: `{"hooks":{"Stop":[{"hooks":[{"command":"$C/scripts/pending-notify.sh"}]}]}}`},
+		{name: "絶対パスの前置き", in: `{"hooks":{"Stop":[{"hooks":[{"command":"/Users/x/.claude-conductor/scripts/pending-post-tool.sh"}]}]}}`},
+		{name: "対象が 1 つも無い", in: `{"hooks":{"Stop":[{"hooks":[{"command":"echo hi"}]}]}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			switched, _, err := domain.SwitchHookCommands([]byte(tt.in))
+			if err != nil {
+				t.Fatalf("SwitchHookCommands() = %v", err)
+			}
+			back, _, err := domain.RestoreHookCommands(switched)
+			if err != nil {
+				t.Fatalf("RestoreHookCommands() = %v", err)
+			}
+			if string(back) != tt.in {
+				t.Errorf("switch → restore が恒等でない:\n--- got ---\n%s\n--- want ---\n%s", back, tt.in)
+			}
+
+			// 逆向きも同じく恒等である。切り替え済みの settings.json を
+			// restore → switch しても元へ戻る。
+			again, _, err := domain.SwitchHookCommands(back)
+			if err != nil {
+				t.Fatalf("2 回目の SwitchHookCommands() = %v", err)
+			}
+			if string(again) != string(switched) {
+				t.Errorf("restore → switch が恒等でない:\n--- got ---\n%s\n--- want ---\n%s", again, switched)
+			}
+		})
+	}
+}
+
+func TestRestoreHookCommandsIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	once, _, err := domain.RestoreHookCommands([]byte(settingsAfter))
+	if err != nil {
+		t.Fatalf("1 回目 = %v", err)
+	}
+	twice, changes, err := domain.RestoreHookCommands(once)
+	if err != nil {
+		t.Fatalf("2 回目 = %v", err)
+	}
+	if len(changes) != 0 {
+		t.Errorf("2 回目の変更一覧 = %+v, want 空", changes)
+	}
+	if string(twice) != string(once) {
+		t.Errorf("2 回目で内容が変わった:\n%s", twice)
+	}
+}
+
+func TestRestoreHookCommandsLeavesUnrelatedContentUntouched(t *testing.T) {
+	t.Parallel()
+
+	// switch と同じ限定条件が逆向きの規則でも効いていること。
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{
+			name: "hooks の外にある mdev 呼び出し",
+			in:   `{"scripts":"$C/bin/mdev hook notify","hooks":{}}`,
+		},
+		{
+			name: "command 以外のフィールド",
+			in:   `{"hooks":{"Stop":[{"note":"$C/bin/mdev hook notify"}]}}`,
+		},
+		{
+			name: "似ているが一致しないコマンド",
+			in:   `{"hooks":{"Stop":[{"hooks":[{"command":"$C/bin/mdev hook notify --flag"}]}]}}`,
+		},
+		{
+			name: "既にスクリプトを指している",
+			in:   `{"hooks":{"Stop":[{"hooks":[{"command":"$C/scripts/pending-notify.sh"}]}]}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			out, changes, err := domain.RestoreHookCommands([]byte(tt.in))
+			if err != nil {
+				t.Fatalf("RestoreHookCommands() = %v", err)
+			}
+			if len(changes) != 0 {
+				t.Errorf("変更一覧 = %+v, want 空", changes)
+			}
+			if string(out) != tt.in {
+				t.Errorf("出力 = %s, want %s(入力のまま)", out, tt.in)
+			}
+		})
+	}
+}
+
+func TestRestoreHookCommandsRejectsBrokenJSON(t *testing.T) {
+	t.Parallel()
+
+	if _, _, err := domain.RestoreHookCommands([]byte(`{"hooks":`)); err == nil {
+		t.Error("RestoreHookCommands() = nil, want エラー")
+	}
+}
+
+func TestRestoreHookCommandsDoesNotAliasInput(t *testing.T) {
+	t.Parallel()
+
+	in := []byte(`{"hooks":{"Stop":[{"hooks":[{"command":"$C/bin/mdev hook resolve"}]}]}}`)
+	original := string(in)
+
+	if _, _, err := domain.RestoreHookCommands(in); err != nil {
+		t.Fatalf("RestoreHookCommands() = %v", err)
+	}
+	if string(in) != original {
+		t.Errorf("入力が書き換えられた: %s", in)
+	}
+}
+
 func TestSwitchHookCommandsHandlesEscapedTargets(t *testing.T) {
 	t.Parallel()
 

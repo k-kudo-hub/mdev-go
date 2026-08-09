@@ -16,30 +16,48 @@ const hookCommandKey = "command"
 // hooksKey は settings.json のトップレベルで hook 定義が入るキー。
 const hooksKey = "hooks"
 
-// hookCommandRule は conductor のスクリプト呼び出し 1 種類に対する置換規則である。
+// hookCommandRule はコマンド文字列 1 種類に対する置換規則である。
 //
 // コマンド文字列の「末尾」だけを対象にし、前置きは書き換えない。現行 hooks.json は
 // `${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh` の形で、
 // この環境変数展開が mdev-test の worktree 隔離を hooks にも効かせている。
 // 絶対パスへ展開してしまうと隔離が壊れるため、前置きはそのまま残す。
 type hookCommandRule struct {
-	// scriptSuffix は切り替え前のコマンドの末尾。
-	scriptSuffix string
-	// mdevSuffix は切り替え後のコマンドの末尾。
-	mdevSuffix string
+	// from は置換前のコマンドの末尾。
+	from string
+	// to は置換後のコマンドの末尾。
+	to string
 }
 
-// hookCommandRules は置き換える 3 種類のスクリプトである。
+// switchHookCommandRules は置き換える 3 種類のスクリプトである。
 // pending-notify.sh は Notification と Stop の 2 箇所に現れる。
-var hookCommandRules = []hookCommandRule{
-	{scriptSuffix: "/scripts/pending-notify.sh", mdevSuffix: "/bin/mdev hook notify"},
-	{scriptSuffix: "/scripts/pending-post-tool.sh", mdevSuffix: "/bin/mdev hook post-tool"},
-	{scriptSuffix: "/scripts/pending-resolve.sh", mdevSuffix: "/bin/mdev hook resolve"},
+var switchHookCommandRules = []hookCommandRule{
+	{from: "/scripts/pending-notify.sh", to: "/bin/mdev hook notify"},
+	{from: "/scripts/pending-post-tool.sh", to: "/bin/mdev hook post-tool"},
+	{from: "/scripts/pending-resolve.sh", to: "/bin/mdev hook resolve"},
+}
+
+// restoreHookCommandRules は switchHookCommandRules の from と to を入れ替えた
+// 逆向きの規則である。復元をバックアップの全文書き戻しではなく
+// 「切り替えと逆向きの外科的な書き換え」で行うために使う。
+//
+// 全文を書き戻すと、切り替え後に Claude Code 自身が settings.json へ書いた
+// 変更(permissions.allow の追加が典型)が黙って消える。逆変換であれば
+// hooks 以外の差分は一切触らずに残る。
+var restoreHookCommandRules = reverseHookCommandRules(switchHookCommandRules)
+
+// reverseHookCommandRules は規則の向きを入れ替えた新しい規則列を返す。
+func reverseHookCommandRules(rules []hookCommandRule) []hookCommandRule {
+	out := make([]hookCommandRule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, hookCommandRule{from: r.to, to: r.from})
+	}
+	return out
 }
 
 // HookCommandChange は hook コマンド 1 件の置換内容である。表示用に使う。
 type HookCommandChange struct {
-	// Event は `.hooks` 直下のイベント名(Notification / Stop など)。
+	// Event は `.hooks` 直下のイベント名(Notification / Stop の類)。
 	Event string
 	// Before / After は置換前後のコマンド文字列。
 	Before string
@@ -61,13 +79,44 @@ type HookCommandChange struct {
 // 既に `mdev hook ...` を指しているコマンドはどの規則にも一致しないため、
 // 2 回目以降の呼び出しは変更なしになる(冪等)。
 func SwitchHookCommands(settings []byte) ([]byte, []HookCommandChange, error) {
-	if !json.Valid(settings) {
-		return nil, nil, errors.New("settings.json として解釈できる JSON ではありません")
-	}
+	return rewriteHookCommands(settings, switchHookCommandRules)
+}
 
-	edits, changes, err := findHookCommandEdits(settings)
+// RestoreHookCommands は SwitchHookCommands と逆向きの置換を行う。
+// `mdev hook` サブコマンドの呼び出しを conductor のスクリプト呼び出しへ戻す。
+//
+// 走査と編集の仕組みは SwitchHookCommands と同一で、規則の向きだけが違う。
+// そのため switch → restore の往復は(対象の文字列リテラルが素直な表記で
+// 書かれている限り)バイト単位で恒等になる。
+//
+// 既にスクリプトを指しているコマンドはどの規則にも一致しないため、
+// 2 回目以降の呼び出しは変更なしになる(冪等)。
+func RestoreHookCommands(settings []byte) ([]byte, []HookCommandChange, error) {
+	return rewriteHookCommands(settings, restoreHookCommandRules)
+}
+
+// rewriteHookCommands は rules に従って `.hooks` 配下のコマンドを書き換える。
+func rewriteHookCommands(settings []byte, rules []hookCommandRule) ([]byte, []HookCommandChange, error) {
+	refs, err := scanHookCommands(settings)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	var (
+		edits   []byteEdit
+		changes []HookCommandChange
+	)
+	for _, ref := range refs {
+		after, ok := rewrittenHookCommand(ref.value, rules)
+		if !ok {
+			continue
+		}
+		literal, err := encodeJSONString(after)
+		if err != nil {
+			return nil, nil, err
+		}
+		edits = append(edits, byteEdit{start: ref.start, end: ref.end, replacement: literal})
+		changes = append(changes, HookCommandChange{Event: ref.event, Before: ref.value, After: after})
 	}
 	return applyEdits(settings, edits), changes, nil
 }
@@ -100,25 +149,36 @@ type jsonFrame struct {
 	expectKey bool
 }
 
-// findHookCommandEdits は settings を走査し、置換すべき文字列リテラルの
-// バイト範囲と置換内容を先頭から順に集める。
-func findHookCommandEdits(settings []byte) ([]byteEdit, []HookCommandChange, error) {
+// hookCommandRef は `.hooks` 配下で見つけたコマンド 1 件と、
+// その値の文字列リテラルが元のバイト列で占める範囲 [start, end) である。
+type hookCommandRef struct {
+	event string
+	value string
+	start int
+	end   int
+}
+
+// scanHookCommands は settings を 1 回走査し、`.hooks` 配下の `command` の値を
+// 先頭から順に集める。JSON として解釈できない入力はエラーにする。
+func scanHookCommands(settings []byte) ([]hookCommandRef, error) {
+	if !json.Valid(settings) {
+		return nil, errors.New("settings.json として解釈できる JSON ではありません")
+	}
 	dec := json.NewDecoder(bytes.NewReader(settings))
 
 	var (
-		stack   []jsonFrame
-		edits   []byteEdit
-		changes []HookCommandChange
+		stack []jsonFrame
+		refs  []hookCommandRef
 	)
 	for {
 		prev := dec.InputOffset()
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
-			return edits, changes, nil
+			return refs, nil
 		}
 		if err != nil {
 			// json.Valid を通っているためここには来ない。
-			return nil, nil, fmt.Errorf("settings.json の走査に失敗しました: %w", err)
+			return nil, fmt.Errorf("settings.json の走査に失敗しました: %w", err)
 		}
 
 		if d, ok := tok.(json.Delim); ok {
@@ -137,17 +197,13 @@ func findHookCommandEdits(settings []byte) ([]byteEdit, []HookCommandChange, err
 		if !isString || !isHookCommandValue(stack) {
 			continue
 		}
-		after, ok := switchedHookCommand(s)
-		if !ok {
-			continue
-		}
-		literal, err := encodeJSONString(after)
-		if err != nil {
-			return nil, nil, err
-		}
 		start := int(prev) + bytes.IndexByte(settings[prev:], '"')
-		edits = append(edits, byteEdit{start: start, end: int(dec.InputOffset()), replacement: literal})
-		changes = append(changes, HookCommandChange{Event: stack[1].key, Before: s, After: after})
+		refs = append(refs, hookCommandRef{
+			event: stack[1].key,
+			value: s,
+			start: start,
+			end:   int(dec.InputOffset()),
+		})
 	}
 }
 
@@ -197,12 +253,12 @@ func isHookCommandValue(stack []jsonFrame) bool {
 	return top.isObject && top.key == hookCommandKey
 }
 
-// switchedHookCommand は cmd を切り替え後のコマンドに変換する。
+// rewrittenHookCommand は cmd に rules を当てた結果を返す。
 // どの規則にも当てはまらなければ ok=false を返す。
-func switchedHookCommand(cmd string) (string, bool) {
-	for _, r := range hookCommandRules {
-		if strings.HasSuffix(cmd, r.scriptSuffix) {
-			return strings.TrimSuffix(cmd, r.scriptSuffix) + r.mdevSuffix, true
+func rewrittenHookCommand(cmd string, rules []hookCommandRule) (string, bool) {
+	for _, r := range rules {
+		if strings.HasSuffix(cmd, r.from) {
+			return strings.TrimSuffix(cmd, r.from) + r.to, true
 		}
 	}
 	return "", false
