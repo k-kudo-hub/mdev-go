@@ -316,6 +316,55 @@ func TestHooksReportsUseCaseErrors(t *testing.T) {
 	}
 }
 
+func TestHooksSwitchReportsBackupPathOnWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	// 書き込みに失敗しても退避は済んでいる。バックアップの場所を伝えないと、
+	// 利用者は settings.json が半端な状態かどうかを判断できない。
+	settings := &fakeHookSettingsService{
+		switchResult: app.SwitchHooksResult{
+			SettingsPath: "/home/x/.claude/settings.json",
+			Changes:      testChanges,
+			BackupPath:   "/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
+		},
+		switchErr: errors.New("書けない"),
+	}
+
+	code, stdout, stderr := runCLIOut(t, newHooksDeps(settings), "hooks", "switch")
+	if code != exitError {
+		t.Fatalf("終了コード = %d, want %d", code, exitError)
+	}
+	// runCLIOut は cobra の stderr を stdout と同じバッファへ集めている。
+	got := stdout + stderr
+	for _, want := range []string{
+		"書けない",
+		"変更されていません",
+		"/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("出力に %q が無い:\n%s", want, got)
+		}
+	}
+}
+
+func TestHooksSwitchWithoutBackupDoesNotMentionIt(t *testing.T) {
+	t.Parallel()
+
+	// 退避の前に失敗した場合は触れるバックアップが無い。
+	settings := &fakeHookSettingsService{
+		switchResult: app.SwitchHooksResult{SettingsPath: "/home/x/.claude/settings.json"},
+		switchErr:    errors.New("退避できない"),
+	}
+
+	code, stdout, stderr := runCLIOut(t, newHooksDeps(settings), "hooks", "switch")
+	if code != exitError {
+		t.Fatalf("終了コード = %d, want %d", code, exitError)
+	}
+	if got := stdout + stderr; strings.Contains(got, "バックアップ") {
+		t.Errorf("存在しないバックアップに触れている:\n%s", got)
+	}
+}
+
 func TestHooksWithoutSubCommandShowsHelp(t *testing.T) {
 	t.Parallel()
 

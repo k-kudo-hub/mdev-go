@@ -55,6 +55,7 @@ func newHooksSwitchCommand(deps Deps) *cobra.Command {
 			}
 			result, err := deps.HookSettings.Switch(dryRun)
 			if err != nil {
+				printSwitchFailure(cmd.ErrOrStderr(), result)
 				return err
 			}
 			printSwitchResult(cmd.OutOrStdout(), result)
@@ -115,6 +116,20 @@ func printSwitchResult(w io.Writer, result app.SwitchHooksResult) {
 	}
 	_, _ = fmt.Fprintf(w, "バックアップ: %s\n", result.BackupPath)
 	_, _ = fmt.Fprintln(w, "hooks を mdev へ切り替えました。")
+}
+
+// printSwitchFailure は switch が失敗したときの後始末の手掛かりを書き出す。
+//
+// 退避が済んでから書き込みに失敗した場合、エラーメッセージだけでは
+// settings.json が半端な状態かどうか、どこに控えがあるのかが分からない。
+// 書き込みは原子的な置き換えなので、失敗した時点で settings.json は
+// 元のままである。
+func printSwitchFailure(w io.Writer, result app.SwitchHooksResult) {
+	if result.BackupPath == "" {
+		return
+	}
+	// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
+	_, _ = fmt.Fprintf(w, "settings.json は変更されていません。バックアップ: %s\n", result.BackupPath)
 }
 
 // printRestoreResult は restore の結果を人が読める形で書き出す。
