@@ -381,6 +381,21 @@ func TestSwitchHookCommandsDoesNotAliasInput(t *testing.T) {
 	}
 }
 
+func TestSwitchedHookCommandSuffixes(t *testing.T) {
+	t.Parallel()
+
+	// 置換規則が実際に書き込むコマンドの一覧。cmd/mdev のテストが
+	// これを cobra のコマンドツリーと突き合わせる。
+	want := []string{
+		"/bin/mdev hook notify",
+		"/bin/mdev hook post-tool",
+		"/bin/mdev hook resolve",
+	}
+	if got := domain.SwitchedHookCommandSuffixes(); !reflect.DeepEqual(got, want) {
+		t.Errorf("SwitchedHookCommandSuffixes() = %v, want %v", got, want)
+	}
+}
+
 func TestRestoreHookCommandsReversesSwitch(t *testing.T) {
 	t.Parallel()
 

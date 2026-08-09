@@ -55,6 +55,21 @@ func reverseHookCommandRules(rules []hookCommandRule) []hookCommandRule {
 	return out
 }
 
+// SwitchedHookCommandSuffixes は切り替え後のコマンドの末尾を、規則の順で返す。
+//
+// `/bin/mdev hook notify` の形の文字列であり、ここに現れるコマンド名は
+// mdev が実際に受け付けるサブコマンドと一致していなければならない。
+// 置換規則(domain)と cobra のコマンドツリー(cli)は互いを参照しないため、
+// 片方だけを直しても両方ともコンパイルは通ってしまう。全パッケージを
+// 参照できる cmd/mdev のテストが、この一覧をコマンドツリーと突き合わせる。
+func SwitchedHookCommandSuffixes() []string {
+	out := make([]string, 0, len(switchHookCommandRules))
+	for _, r := range switchHookCommandRules {
+		out = append(out, r.to)
+	}
+	return out
+}
+
 // HookCommandChange は hook コマンド 1 件の置換内容である。表示用に使う。
 type HookCommandChange struct {
 	// Event は `.hooks` 直下のイベント名(Notification / Stop の類)。
