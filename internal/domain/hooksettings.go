@@ -123,7 +123,7 @@ func RemainingPendingScriptCommands(settings []byte) ([]HookCommand, error) {
 // アルファベット順に並べ替えられ、ユーザーの settings.json が壊れる。
 //
 // 置換対象は「`.hooks` 配下のオブジェクトの `command` キーの値」に限る。
-// `.hooks` の外に同じパスがあっても、イベント名などキーの位置に現れても触らない。
+// `.hooks` の外に同じパスがあっても、イベント名のようなキーの位置に現れても触らない。
 //
 // 既に `mdev hook ...` を指しているコマンドはどの規則にも一致しないため、
 // 2 回目以降の呼び出しは変更なしになる(冪等)。

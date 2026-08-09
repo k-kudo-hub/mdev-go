@@ -13,7 +13,7 @@ import (
 // ユースケースである。
 //
 // settings.json は Claude Code 全体の設定ファイルであり、mdev の管理外の
-// 設定(permissions など)も入っている。書き換えは必ず「読む → 退避 →
+// 設定(permissions の類)も入っている。書き換えは必ず「読む → 退避 →
 // 原子的に置き換える」の順で行い、退避に失敗したら書き換えない。
 type HookSwitcher struct {
 	Settings SettingsStore

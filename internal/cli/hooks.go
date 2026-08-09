@@ -30,7 +30,7 @@ func newHooksCommand(deps Deps) *cobra.Command {
 		Long: "~/.claude/settings.json の hooks に登録されている conductor の\n" +
 			"シェルスクリプト呼び出しを `mdev hook` サブコマンドへ差し替える。\n" +
 			"書き換えは同じディレクトリへバックアップを作ってから原子的に行い、\n" +
-			"hooks 以外のキー(permissions など)には触れない。",
+			"hooks 以外のキー(permissions の類)には触れない。",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -74,7 +74,7 @@ func newHooksRestoreCommand(deps Deps) *cobra.Command {
 		Short: "hooks を conductor のスクリプトへ戻す",
 		Long: "`mdev hook` の呼び出しを conductor のスクリプト呼び出しへ戻す。\n" +
 			"switch と逆向きの差し替えなので、切り替え後に settings.json へ\n" +
-			"加わった hooks 以外の変更(permissions など)はそのまま残る。\n" +
+			"加わった hooks 以外の変更(permissions の類)はそのまま残る。\n" +
 			"settings.json ごと失われている場合に限り、`mdev hooks switch` が\n" +
 			"作った最新のバックアップで書き戻す。",
 		Args: cobra.NoArgs,
