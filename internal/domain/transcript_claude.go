@@ -163,7 +163,11 @@ func ParseClaudeTranscript(data []byte) (ClaudeTranscript, bool) {
 		}
 	}
 
-	result.ToolsUsed = uniqueToolNames(result.Tools)
+	names := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		names = append(names, tool.Name)
+	}
+	result.ToolsUsed = uniqueSortedStrings(names)
 	return result, true
 }
 
@@ -231,20 +235,20 @@ func toolInputString(input json.RawMessage, key string) (string, bool) {
 	return jsonString(raw)
 }
 
-// uniqueToolNames はツール名を重複なく昇順で返す(現行版の `unique` 相当)。
+// uniqueSortedStrings は重複を除いて昇順に並べ替える(現行版の `unique` 相当)。
 // jq の並びはコードポイント順で、UTF-8 のバイト順と一致する。
-func uniqueToolNames(tools []ClaudeToolUse) []string {
-	seen := make(map[string]struct{}, len(tools))
-	names := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		if _, ok := seen[tool.Name]; ok {
+func uniqueSortedStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
 			continue
 		}
-		seen[tool.Name] = struct{}{}
-		names = append(names, tool.Name)
+		seen[value] = struct{}{}
+		unique = append(unique, value)
 	}
-	sort.Strings(names)
-	return names
+	sort.Strings(unique)
+	return unique
 }
 
 // jsonString は raw が JSON 文字列ならその値を返す。

@@ -202,3 +202,38 @@ $ jq -n -c '{nl:("a.md\n"|test("\\.(md)$")), nlb:("a.md\nb"|test("\\.(md)$")), n
 
 Go の `$`(非マルチライン)は文字列末尾だけなので、doc の正規表現は
 `\.(md|mdx|txt|rst|adoc)\n?$` として合わせた。`^` の意味は両者で同じだった。
+
+## 7. codex 集計の実測(record-output.sh:70-119)
+
+`cxcheck.sh`(scratchpad)で codex 用の jq プログラムをそのまま実行した。
+
+| 入力 | 現行版 |
+|---|---|
+| `_call` で終わる payload.type だけがツール(`_call_output` は除外) | tool_calls 2 / tools_used ["apply_patch","exec"] |
+| `payload.name` が無ければ `payload.type` をツール名にする | tools_used ["local_shell_call"] |
+| model は **最後** の turn_context(claude は最初の message.model) | "gpt-5.6-thinking" |
+| usage は **最後** の token_count の total_token_usage(累計値) | in 25 / out 3 / read 5 / write 7 |
+| `total_token_usage` が null の token_count は候補から外れ、直前の値が残る | in 10 / out 1 |
+| `.input // .arguments // ""` の順で merged 判定の文字列を選ぶ | arguments でも真 |
+| input がオブジェクトなら `tostring` で compact JSON になる | `{"cmd":"gh pr merge 1"}` |
+
+`tostring` の出力も実測した(オブジェクト → compact JSON、数値 → `"5"`、文字列 → そのまま)。
+Go 側は `json.Compact` で再現する(キーの並びは入力のまま保たれる)。
+
+パース失敗になるのは以下(いずれも実測):壊れた行 / トップレベルがオブジェクト以外 /
+各行種別で payload がスカラー / token_count の info・total_token_usage がスカラー /
+input_tokens が文字列 / response_item の payload.type が数値 / turn_context の model が数値。
+
+## 8. 現行仕様との差異(意図的に一致させなかった点)
+
+いずれも「現行版は summary を出すが Go 版はフォールバック(summary: null)へ落とす」方向で、
+値を偽らない側に倒してある。実在の transcript / rollout では起こらない型崩れのみである。
+
+1. **codex のツール名が文字列でない**。現行版は `.name // .type` を `unique` に流すだけなので
+   `tools_used: [7]` のように数値が混ざった summary を出す(実測)。
+   `ToolsUsed []string` の Go 版では同じ JSON を作れないため、パース失敗にする
+2. **claude の `message.model` / `usage.speed` が文字列でない**。model は現行版でも
+   `$pricing[$model]` で落ちるため一致するが、speed は現行版だと数値のまま summary に載る
+3. **`pricing` が JSON オブジェクト以外**(5 節に既述)。現行版はフォールバック、Go 版は空 pricing で続行
+4. **モデルの単価に `input` などのキーが無い**。現行版は `$in * null` で落ちるが、
+   Go 版は `ModelPricing` のゼロ値(0)として計算する
