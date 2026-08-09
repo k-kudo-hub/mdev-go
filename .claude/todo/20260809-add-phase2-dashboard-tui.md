@@ -41,7 +41,7 @@ Zellij レイアウトのペイン起動コマンドを差し替えるだけで 
 
 ### app / infra
 
-- [ ] port を定義(`TabController`(list-tabs / go-to-tab-name / close-tab-by-id)/ `DailyReader` / `NewsReader` / `ShellRunner`(upload-log / restore-task / fetch-news / restore-session / screen_detect_tick))+ fake
+- [x] port を定義(`TabController`(list-tabs / go-to-tab-name / close-tab-by-id)/ `DailyReader` / `NewsReader` / `ShellRunner`(upload-log / restore-task / fetch-news / restore-session / screen_detect_tick))+ fake
 - [ ] Dashboard ユースケースのテストを作成(一覧構築 / ジャンプ時の agent 別 pending クリア(claude・screen 検出は消さない)/ 削除フローの順序: record → upload(失敗で中止)→ pending 削除 → registry 削除 → screen-state 削除 → close-tab-by-id)→ 実装(record-output は既存 `RecordOutput` を使用)
 - [ ] Done / Waiting / News ユースケースのテストを作成 → 実装
 - [ ] infra: DailyReader(find 相当・全セッション横断)/ NewsReader / TabController / ShellRunner を実装
