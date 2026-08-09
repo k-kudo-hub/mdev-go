@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -57,6 +58,58 @@ func TestHookSwitcherSwitchWarnsWhenBinaryIsNotInstalled(t *testing.T) {
 				t.Errorf("MissingBinaryPath = %q, want %q", got.MissingBinaryPath, testMdevBinaryPath)
 			}
 		})
+	}
+}
+
+func TestHookSwitcherSwitchReportsRemainingScripts(t *testing.T) {
+	t.Parallel()
+
+	// 置換規則に無い亜種は切り替わらずに残る。そのイベントだけ Shell 版の
+	// まま取り残されるため、切り替えたことだけを報告してはいけない。
+	const withVariant = `{"hooks":{"Stop":[{"hooks":[` +
+		`{"type":"command","command":"$C/scripts/pending-notify.sh"},` +
+		`{"type":"command","command":"$C/scripts/pending-notify.sh --quiet"}]}]}}`
+
+	tests := []struct {
+		name   string
+		dryRun bool
+	}{
+		{name: "書き込みあり"},
+		{name: "dry-run", dryRun: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newFakeSettingsStore(withVariant)
+			got, err := newSwitcher(store).Switch(tt.dryRun)
+			if err != nil {
+				t.Fatalf("Switch() = %v", err)
+			}
+			want := []app.HookCommand{
+				{Event: "Stop", Command: "$C/scripts/pending-notify.sh --quiet"},
+			}
+			if !reflect.DeepEqual(got.RemainingScripts, want) {
+				t.Errorf("RemainingScripts = %+v, want %+v", got.RemainingScripts, want)
+			}
+			// 規則に一致する側はきちんと切り替わっている。
+			if len(got.Changes) != 1 {
+				t.Errorf("Changes = %+v, want 1 件", got.Changes)
+			}
+		})
+	}
+}
+
+func TestHookSwitcherSwitchWithoutRemainingScripts(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeSettingsStore(settingsBefore)
+	got, err := newSwitcher(store).Switch(false)
+	if err != nil {
+		t.Fatalf("Switch() = %v", err)
+	}
+	if got.RemainingScripts != nil {
+		t.Errorf("RemainingScripts = %+v, want 空", got.RemainingScripts)
 	}
 }
 

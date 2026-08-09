@@ -46,6 +46,10 @@ var switchHookCommandRules = []hookCommandRule{
 // hooks 以外の差分は一切触らずに残る。
 var restoreHookCommandRules = reverseHookCommandRules(switchHookCommandRules)
 
+// pendingScriptMarker は conductor の pending スクリプト呼び出しの目印である。
+// switchHookCommandRules の from はすべてこの文字列を含む。
+const pendingScriptMarker = "/scripts/pending-"
+
 // reverseHookCommandRules は規則の向きを入れ替えた新しい規則列を返す。
 func reverseHookCommandRules(rules []hookCommandRule) []hookCommandRule {
 	out := make([]hookCommandRule, 0, len(rules))
@@ -77,6 +81,36 @@ type HookCommandChange struct {
 	// Before / After は置換前後のコマンド文字列。
 	Before string
 	After  string
+}
+
+// HookCommand は `.hooks` 配下のコマンド 1 件である。表示用に使う。
+type HookCommand struct {
+	// Event は `.hooks` 直下のイベント名。
+	Event string
+	// Command はコマンド文字列。
+	Command string
+}
+
+// RemainingPendingScriptCommands は `.hooks` 配下に残っている conductor の
+// pending スクリプト呼び出しを返す。
+//
+// 切り替えた後にこれが空でなければ、置換規則に無い亜種(引数付きの呼び出しや
+// 利用者が足した別のスクリプト)が残っているということである。切り替え自体は
+// 成功しているが、そのイベントだけ Shell 版のまま取り残されるため、
+// 呼び出し側は警告として提示する。
+func RemainingPendingScriptCommands(settings []byte) ([]HookCommand, error) {
+	refs, err := scanHookCommands(settings)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []HookCommand
+	for _, ref := range refs {
+		if strings.Contains(ref.value, pendingScriptMarker) {
+			out = append(out, HookCommand{Event: ref.event, Command: ref.value})
+		}
+	}
+	return out, nil
 }
 
 // SwitchHookCommands は settings.json のバイト列を受け取り、`.hooks` 配下の

@@ -123,14 +123,23 @@ func printSwitchResult(w io.Writer, result app.SwitchHooksResult) {
 //
 // dry-run でも出す。実行してからでは遅い類の警告だからである。
 func printSwitchWarnings(w io.Writer, result app.SwitchHooksResult) {
-	if result.MissingBinaryPath == "" {
-		return
+	if result.MissingBinaryPath != "" {
+		// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
+		_, _ = fmt.Fprintf(w, "\n警告: %s が見つかりません。\n", result.MissingBinaryPath)
+		_, _ = fmt.Fprintln(w, "  切り替え後の hooks はこのパスを呼びます。hook の失敗は会話を止めませんが、")
+		_, _ = fmt.Fprintln(w, "  pending が書かれずダッシュボードが反応しなくなります。")
+		_, _ = fmt.Fprintln(w, "  `make install` で配置してください。")
 	}
-	// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
-	_, _ = fmt.Fprintf(w, "\n警告: %s が見つかりません。\n", result.MissingBinaryPath)
-	_, _ = fmt.Fprintln(w, "  切り替え後の hooks はこのパスを呼びます。hook の失敗は会話を止めませんが、")
-	_, _ = fmt.Fprintln(w, "  pending が書かれずダッシュボードが反応しなくなります。")
-	_, _ = fmt.Fprintln(w, "  `make install` で配置してください。")
+
+	if len(result.RemainingScripts) > 0 {
+		_, _ = fmt.Fprintf(w, "\n警告: 切り替えられなかった conductor スクリプトの呼び出しが残っています(%d 件):\n",
+			len(result.RemainingScripts))
+		for _, c := range result.RemainingScripts {
+			_, _ = fmt.Fprintf(w, "  [%s] %s\n", c.Event, c.Command)
+		}
+		_, _ = fmt.Fprintln(w, "  既知の 3 種類と一致しないため手で確認してください。")
+		_, _ = fmt.Fprintln(w, "  このイベントだけ Shell 版のまま動きます。")
+	}
 }
 
 // printSwitchFailure は switch が失敗したときの後始末の手掛かりを書き出す。

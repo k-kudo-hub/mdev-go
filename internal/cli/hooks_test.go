@@ -353,6 +353,35 @@ func TestHooksSwitchWarnsAboutMissingBinary(t *testing.T) {
 	}
 }
 
+func TestHooksSwitchWarnsAboutRemainingScripts(t *testing.T) {
+	t.Parallel()
+
+	settings := &fakeHookSettingsService{switchResult: app.SwitchHooksResult{
+		SettingsPath: "/home/x/.claude/settings.json",
+		Changes:      testChanges,
+		BackupPath:   "/home/x/.claude/settings.json.mdev-backup-20260809T133344Z",
+		RemainingScripts: []app.HookCommand{
+			{Event: "Stop", Command: "${CONDUCTOR_HOME}/scripts/pending-notify.sh --quiet"},
+		},
+	}}
+
+	code, stdout, stderr := runCLIOut(t, newHooksDeps(settings), "hooks", "switch")
+	if code != exitOK {
+		t.Fatalf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
+	}
+	got := stdout + stderr
+	for _, want := range []string{
+		"警告",
+		"残っています",
+		"Stop",
+		"${CONDUCTOR_HOME}/scripts/pending-notify.sh --quiet",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("出力に %q が無い:\n%s", want, got)
+		}
+	}
+}
+
 func TestHooksSwitchWithoutWarningStaysQuiet(t *testing.T) {
 	t.Parallel()
 

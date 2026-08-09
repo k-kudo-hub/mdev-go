@@ -33,6 +33,17 @@ type HookCommandChange struct {
 	After  string
 }
 
+// HookCommand は `.hooks` 配下のコマンド 1 件である。
+//
+// 中身は domain.HookCommand と同じだが、cli / tui は app にしか
+// 依存できない(ADR-0002)ため、境界に出す型は app が持つ。
+type HookCommand struct {
+	// Event は `.hooks` 直下のイベント名。
+	Event string
+	// Command はコマンド文字列。
+	Command string
+}
+
 // SwitchHooksResult は Switch の結果である。表示のために使う。
 type SwitchHooksResult struct {
 	// SettingsPath は対象の settings.json のパス。
@@ -50,6 +61,10 @@ type SwitchHooksResult struct {
 	// 非ブロッキングなので会話は壊れないが、pending が書かれずダッシュボードが
 	// 無反応になる。
 	MissingBinaryPath string
+	// RemainingScripts は切り替えた後も `.hooks` 配下に残る conductor の
+	// スクリプト呼び出しである。置換規則に無い亜種がここに出る。
+	// 切り替え自体は成功しているため、エラーではなく警告として扱う。
+	RemainingScripts []HookCommand
 	// DryRun は書き込みを行わなかったことを表す。
 	DryRun bool
 }
@@ -97,6 +112,14 @@ func (s *HookSwitcher) Switch(dryRun bool) (SwitchHooksResult, error) {
 		return result, fmt.Errorf("%s: %w", result.SettingsPath, err)
 	}
 	result.Changes = toHookCommandChanges(changes)
+
+	// 切り替えた結果に対して数える。規則で置き換わったものは残らないので、
+	// ここに出るのは規則に無い亜種だけである。
+	remaining, err := domain.RemainingPendingScriptCommands(switched)
+	if err != nil {
+		return result, fmt.Errorf("%s: %w", result.SettingsPath, err)
+	}
+	result.RemainingScripts = toHookCommands(remaining)
 
 	if len(changes) == 0 || dryRun {
 		return result, nil
@@ -187,6 +210,18 @@ func toHookCommandChanges(changes []domain.HookCommandChange) []HookCommandChang
 	out := make([]HookCommandChange, 0, len(changes))
 	for _, c := range changes {
 		out = append(out, HookCommandChange{Event: c.Event, Before: c.Before, After: c.After})
+	}
+	return out
+}
+
+// toHookCommands は domain のコマンド一覧を境界の型へ移し替える。
+func toHookCommands(commands []domain.HookCommand) []HookCommand {
+	if len(commands) == 0 {
+		return nil
+	}
+	out := make([]HookCommand, 0, len(commands))
+	for _, c := range commands {
+		out = append(out, HookCommand{Event: c.Event, Command: c.Command})
 	}
 	return out
 }

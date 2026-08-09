@@ -396,6 +396,66 @@ func TestSwitchedHookCommandSuffixes(t *testing.T) {
 	}
 }
 
+func TestRemainingPendingScriptCommands(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want []domain.HookCommand
+	}{
+		{
+			name: "規則どおりに切り替えた後は空",
+			in:   settingsAfter,
+		},
+		{
+			name: "引数付きの亜種が残る",
+			in: `{"hooks":{"Stop":[{"hooks":[` +
+				`{"command":"$C/bin/mdev hook notify"},` +
+				`{"command":"$C/scripts/pending-notify.sh --quiet"}]}]}}`,
+			want: []domain.HookCommand{
+				{Event: "Stop", Command: "$C/scripts/pending-notify.sh --quiet"},
+			},
+		},
+		{
+			name: "規則に無い別のスクリプト",
+			in:   `{"hooks":{"PreToolUse":[{"hooks":[{"command":"$C/scripts/pending-custom.sh"}]}]}}`,
+			want: []domain.HookCommand{
+				{Event: "PreToolUse", Command: "$C/scripts/pending-custom.sh"},
+			},
+		},
+		{
+			name: "hooks の外は数えない",
+			in:   `{"permissions":{"allow":["Bash($C/scripts/pending-notify.sh)"]},"hooks":{}}`,
+		},
+		{
+			name: "conductor と無関係の hook は数えない",
+			in:   `{"hooks":{"Stop":[{"hooks":[{"command":"echo hi"}]}]}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := domain.RemainingPendingScriptCommands([]byte(tt.in))
+			if err != nil {
+				t.Fatalf("RemainingPendingScriptCommands() = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("残存 = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRemainingPendingScriptCommandsRejectsBrokenJSON(t *testing.T) {
+	t.Parallel()
+
+	if _, err := domain.RemainingPendingScriptCommands([]byte(`{"hooks":`)); err == nil {
+		t.Error("RemainingPendingScriptCommands() = nil, want エラー")
+	}
+}
+
 func TestRestoreHookCommandsReversesSwitch(t *testing.T) {
 	t.Parallel()
 
