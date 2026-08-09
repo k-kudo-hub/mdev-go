@@ -8,11 +8,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// 終了コード。hook は Claude Code から呼ばれるため、失敗しても会話を
-// 止めない非ブロッキングの扱い(0 と 2 以外)にする。
+// 終了コード。
+//
+// Claude Code の hook 仕様(https://code.claude.com/docs/en/hooks)では
+// 終了コードの意味が次の 3 通りに分かれる(2026-08-09 時点)。
+//
+//   - 0: 成功。stdout が JSON 出力として解釈される
+//   - 2: ブロッキングエラー。stderr が Claude へ渡され、Stop では会話が
+//     止まらなくなり、UserPromptSubmit ではユーザーの入力が消える
+//   - それ以外: 非ブロッキングエラー。処理はそのまま進み、transcript に
+//     `<hook name> hook error` と stderr の 1 行目が出る
+//
+// mdev の hook は pending ファイルとレジストリの更新という補助的な副作用で
+// あり、失敗しても会話を止めるべきではない。そのため失敗時は 2 ではなく 1 を
+// 返す(非ブロッキング。失敗したことは stderr 経由で transcript に現れる)。
 const (
 	exitOK    = 0
 	exitError = 1
+	// exitBlocking は Claude Code がブロッキングエラーとして扱う終了コードで、
+	// mdev は返さない。使っていないことをテストで固定するために置いている。
+	exitBlocking = 2
 )
 
 // Deps はサブコマンドが必要とする依存である。組み立ては cmd/mdev が行う。
@@ -21,6 +36,8 @@ type Deps struct {
 	Hooks HookService
 	// Record は作業サマリを daily log へ記録するユースケース。
 	Record RecordService
+	// HookSettings は settings.json の hooks を切り替えるユースケース。
+	HookSettings HookSettingsService
 	// Getenv は環境変数を読む。テストで差し替える。
 	Getenv func(string) string
 }
@@ -37,6 +54,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	}
 	cmd.AddCommand(newHookCommand(deps))
 	cmd.AddCommand(newRecordCommand(deps))
+	cmd.AddCommand(newHooksCommand(deps))
 	return cmd
 }
 

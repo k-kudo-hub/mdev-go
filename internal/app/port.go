@@ -104,3 +104,46 @@ type PricingLoader interface {
 type RecordEnv struct {
 	ZellijSession string // ZELLIJ_SESSION_NAME
 }
+
+// SettingsStore は Claude Code の settings.json の読み書きと、その退避
+// (バックアップ)を抽象化する。実装は internal/infra/store にある。
+//
+// mdev が触ってよいのは `.hooks` の中の 4 つのコマンド文字列だけだが、
+// ファイル全体の入出力はこの port が担う。差し替えの中身を決めるのは
+// domain の純粋関数で、この port はバイト列を運ぶだけである。
+type SettingsStore interface {
+	// Path は settings.json のパスを返す。表示にのみ使う。
+	Path() string
+
+	// Read は settings.json の内容をそのまま返す。
+	//
+	// ファイルが無い場合はエラーを返す。存在しない設定ファイルを
+	// 切り替えの対象にすることはできないためである。ただし復元は
+	// 「設定ファイルごと失った」状態を扱えなければならないため、
+	// その場合のエラーは errors.Is(err, fs.ErrNotExist) が真になる
+	// ものでなければならない(実装は os のエラーを %w で包む)。
+	Read() ([]byte, error)
+
+	// Backup は data を settings.json と同じディレクトリへ退避し、
+	// 作成したファイルのパスを返す。
+	Backup(data []byte) (string, error)
+
+	// Write は settings.json を data で原子的に置き換える。
+	Write(data []byte) error
+
+	// LatestBackup は最も新しいバックアップのパスと内容を返す。
+	// 1 つも無い場合は found=false を返す(エラーにはしない)。
+	LatestBackup() (path string, data []byte, found bool, err error)
+}
+
+// MdevBinaryLocator は切り替え後の hooks が呼ぶことになる mdev バイナリの
+// 所在を調べる。実装は internal/infra/store にある。
+//
+// hooks のコマンド文字列は `${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev`
+// という形のまま残す(mdev-test の worktree 隔離を効かせるため)ので、
+// 実際にどのファイルが呼ばれるかは hook 実行時の CONDUCTOR_HOME で決まる。
+// この port はその解決を担い、ユースケースは結果だけを受け取る。
+type MdevBinaryLocator interface {
+	// MdevBinary は hooks が呼ぶ mdev のパスと、それが実在するかを返す。
+	MdevBinary() (path string, exists bool)
+}

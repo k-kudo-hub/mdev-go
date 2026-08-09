@@ -44,5 +44,23 @@ func main() {
 		Clock:      infra.SystemClock{},
 	}
 
-	os.Exit(cli.Execute(cli.Deps{Hooks: hooks, Record: record, Getenv: os.Getenv}))
+	// settings.json は CONDUCTOR_HOME ではなく Claude Code の設定であるため
+	// ホーム直下の ~/.claude/settings.json を見る。MDEV_SETTINGS_FILE を
+	// 指定すると別のファイルを対象にできる(実環境へ適用する前の試行用)。
+	// 切り替え先のバイナリは hooks のコマンド文字列と同じ規約で
+	// CONDUCTOR_HOME 配下を見る。
+	hookSettings := &app.HookSwitcher{
+		Settings: store.NewSettingsStore(
+			store.SettingsPath(home, os.Getenv("MDEV_SETTINGS_FILE")),
+			infra.SystemClock{},
+		),
+		Binary: store.NewMdevBinaryStore(conductorHome),
+	}
+
+	os.Exit(cli.Execute(cli.Deps{
+		Hooks:        hooks,
+		Record:       record,
+		HookSettings: hookSettings,
+		Getenv:       os.Getenv,
+	}))
 }

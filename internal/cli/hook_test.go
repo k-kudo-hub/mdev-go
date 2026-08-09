@@ -196,3 +196,37 @@ func TestHookEnvReadsAllVariables(t *testing.T) {
 		t.Errorf("hookEnv() = %+v, want ゼロ値", got)
 	}
 }
+
+func TestHookFailureExitCodeIsNonBlocking(t *testing.T) {
+	t.Parallel()
+
+	// Claude Code の hook 仕様(https://code.claude.com/docs/en/hooks)では
+	// 終了コード 2 が「ブロッキングエラー」で、Stop では会話が止まらなくなり、
+	// UserPromptSubmit ではユーザーの入力が消える。mdev の hook は pending と
+	// レジストリの更新という補助的な副作用であり、失敗しても会話を止めては
+	// ならないため、2 以外(= 非ブロッキング)を返す。
+	if exitError == exitBlocking {
+		t.Fatalf("exitError = %d: ブロッキング扱いになる終了コードは使えない", exitError)
+	}
+
+	for _, name := range []string{"notify", "post-tool", "resolve"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			hooks := &fakeHookService{err: errors.New("pending を書けない")}
+			code, stderr := runCLI(t, newTestDeps(hooks), `{"session_id":"s"}`, "hook", name)
+
+			if code != exitError {
+				t.Errorf("終了コード = %d, want %d", code, exitError)
+			}
+			if code == exitBlocking {
+				t.Errorf("終了コード = %d: 会話をブロックしてしまう", code)
+			}
+			// 失敗に気付けるよう、原因は stderr に出す
+			// (transcript には stderr の 1 行目が出る)。
+			if !strings.Contains(stderr, "pending を書けない") {
+				t.Errorf("stderr = %q, want 原因を含む", stderr)
+			}
+		})
+	}
+}

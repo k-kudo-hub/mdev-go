@@ -19,6 +19,12 @@ GO_TEST_COVERAGE := go run github.com/vladopajic/go-test-coverage/v2@$(GO_TEST_C
 COVERAGE_PROFILE := cover.out
 BIN := bin/mdev
 
+# install の配置先。現行 Shell 版と同じ `${CONDUCTOR_HOME:-$HOME/.claude-conductor}`
+# の規約に合わせる(`?=` なので環境変数の CONDUCTOR_HOME が優先される)。
+# hooks が呼ぶコマンドも同じ規約で書かれているため、CONDUCTOR_HOME を
+# worktree へ向ければ mdev の実体も hooks の呼び出し先も同時に隔離できる。
+CONDUCTOR_HOME ?= $(HOME)/.claude-conductor
+
 .PHONY: help
 help: ## このヘルプを表示する
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -58,6 +64,12 @@ cover: test ## カバレッジ閾値を検査する
 .PHONY: build
 build: ## バイナリをビルドする
 	go build -o $(BIN) ./cmd/mdev
+
+.PHONY: install
+install: ## $(CONDUCTOR_HOME)/bin/mdev へビルドして配置する
+	@mkdir -p "$(CONDUCTOR_HOME)/bin"
+	go build -o "$(CONDUCTOR_HOME)/bin/mdev" ./cmd/mdev
+	@echo "installed: $(CONDUCTOR_HOME)/bin/mdev"
 
 .PHONY: check
 check: fmt-check lint arch cover build ## CI と同じ検査を一括実行する
