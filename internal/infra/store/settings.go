@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 )
@@ -122,7 +123,7 @@ func (s *SettingsStore) LatestBackup() (string, []byte, bool, error) {
 	prefix := s.backupPrefix()
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+		if e.IsDir() || !isBackupName(e.Name(), prefix) {
 			continue
 		}
 		names = append(names, e.Name())
@@ -139,6 +140,23 @@ func (s *SettingsStore) LatestBackup() (string, []byte, bool, error) {
 		return "", nil, false, fmt.Errorf("バックアップ %s の読み取りに失敗しました: %w", path, err)
 	}
 	return path, data, true, nil
+}
+
+// isBackupName は name が mdev の作ったバックアップの名前かどうかを返す。
+//
+// 前置きの一致だけでは足りない。writeFileAtomicMode の一時ファイルは
+// <対象名>.tmp-<乱数> という名前で、バックアップ書き込み中のクラッシュで
+// settings.json.mdev-backup-<ts>.tmp-<乱数> が残ると、前置きが一致し
+// 辞書順でも大きいため「最新のバックアップ」に選ばれてしまう。
+// 書きかけの内容で settings.json を復元しては復旧手段が壊れる。
+// 前置きを除いた残りがタイムスタンプそのものである名前だけを候補にする。
+func isBackupName(name, prefix string) bool {
+	rest, ok := strings.CutPrefix(name, prefix)
+	if !ok {
+		return false
+	}
+	_, err := time.Parse(settingsBackupTimeLayout, rest)
+	return err == nil
 }
 
 // mode は settings.json の現在のパーミッションを返す。

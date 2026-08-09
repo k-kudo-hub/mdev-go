@@ -274,6 +274,46 @@ func TestSettingsStoreLatestBackupPicksNewest(t *testing.T) {
 	}
 }
 
+func TestSettingsStoreLatestBackupIgnoresNonTimestampNames(t *testing.T) {
+	t.Parallel()
+
+	// writeFileAtomicMode の一時ファイルは <対象名>.tmp-<乱数> という名前で
+	// 作られる。バックアップ書き込み中のクラッシュで
+	// settings.json.mdev-backup-<ts>.tmp-<乱数> が残ると、前置きが一致し
+	// 辞書順でも大きいため「最新のバックアップ」として選ばれてしまう。
+	// 書きかけの内容で settings.json を復元しては壊す側になる。
+	s, path := newSettingsFile(t, `{"a":1}`)
+	dir := filepath.Dir(path)
+
+	files := map[string]string{
+		"settings.json.mdev-backup-20260810T000000Z":            `{"good":true}`,
+		"settings.json.mdev-backup-20260810T000000Z.tmp-123456": `{"partial":true}`,
+		"settings.json.mdev-backup-20260811T000000Z.tmp-999999": `{"partial":true}`,
+		"settings.json.mdev-backup-":                            `{"empty":true}`,
+		"settings.json.mdev-backup-20260812":                    `{"short":true}`,
+		"settings.json.mdev-backup-manual":                      `{"manual":true}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s) = %v", name, err)
+		}
+	}
+
+	gotPath, data, found, err := s.LatestBackup()
+	if err != nil {
+		t.Fatalf("LatestBackup() = %v", err)
+	}
+	if !found {
+		t.Fatal("found = false, want true")
+	}
+	if want := filepath.Join(dir, "settings.json.mdev-backup-20260810T000000Z"); gotPath != want {
+		t.Errorf("パス = %q, want %q", gotPath, want)
+	}
+	if string(data) != `{"good":true}` {
+		t.Errorf("内容 = %q", data)
+	}
+}
+
 func TestSettingsStoreLatestBackupWithoutDirectory(t *testing.T) {
 	t.Parallel()
 
