@@ -33,7 +33,7 @@
 
 - [x] app: `RecordOutput` ユースケースのテストを作成(tab 空で no-op / pending 不在で no-op / 最初の 1 件選択 / pending を削除しない)→ port(`PendingFinder` / `DailyAppender` / `TranscriptReader`)と共に実装
 - [x] infra: pending の tab 検索(glob 辞書順で最初の 1 件)のテストを作成 → PendingStore を拡張
-- [ ] infra: daily ストアのテストを作成(append 1 行 / mkdir ロック 2 秒 fail-open / ディレクトリ作成)→ 既存 lock を使って実装
+- [x] infra: daily ストアのテストを作成(append 1 行 / mkdir ロック 2 秒 fail-open / ディレクトリ作成)→ 既存 lock を使って実装
 - [ ] cli: `mdev record <tab>` サブコマンドを実装(config から pricing 読み込み。壊れ config の扱いは現行挙動 = 空 pricing で続行に合わせるか evidence に記録して判断)
 - [ ] ゴールデンテスト: 現行 record-output.sh を隔離環境で実行して fixture を生成(claude 正常 / fast / codex / parse 失敗 / transcript 無しの各ケース)し、Go 版出力と JSON 等価比較
 - [ ] `make check` 緑を確認
