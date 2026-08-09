@@ -82,6 +82,49 @@ Go の `hash/crc32`(IEEE, 反転あり)とは別物なので、CRC-32/CKSUM
 - **News の ITEM_COUNT**: ファイルが無い経路では `render` が早期 return するので
   `ITEM_COUNT` が更新されない(前回値が残る)。ONCE 経路では render のみなので影響なし。
 
-## 5. Shell 版との意図的な差異
+## 5. Dashboard 実測(隔離環境)
 
-(実装しながら追記する)
+`env -i` で HOME / CONDUCTOR_HOME を一時ディレクトリへ向け、zellij はスタブに
+差し替えて ONCE 出力を採取した。
+
+```
+env -i PATH="$SB/bin:/usr/bin:/bin:..." HOME="$SB/home" CONDUCTOR_HOME="$SB/conductor" \
+  LC_ALL=C TERM=dumb MOCK_TABS="beta alpha" ZELLIJ_SESSION_NAME=s1 \
+  CONDUCTOR_DASHBOARD_ONCE=1 bash dashboard-loop.sh
+```
+
+得られた出力(`cat -v`):
+
+```
+^[[1m  Current Tasks^[[0m ^[[2m[s1]^[[0m
+^[[2m  ──(26 本)──^[[0m
+
+  ^[[0;33m[1]^[[0m ^[[0;32m■^[[0m ^[[1mbeta^[[0m ^[[2m[10:01:00]^[[0m done
+      turn finished
+
+  ^[[0;33m[2]^[[0m ^[[0;31m■^[[0m ^[[1malpha^[[0m ^[[2m[10:00:00]^[[0m
+      needs permission
+
+^[[2m  ──(26 本)──^[[0m
+  ^[[1mPending: 2^[[0m  ^[[2m[num]: jump / d+[num]: delete^[[0m
+^[[2m  ──(26 本)──^[[0m
+```
+
+MOCK_TABS の順(beta → alpha)がそのまま表示順になり、タブ順が pending の
+ファイル名順(a.json = alpha, b.json = beta)より優先されることを確認した。
+
+`domain.RenderDashboard` の戻り値をこの実測ファイルとバイト比較するテストを
+一時的に置いて一致を確認済み(恒久版はゴールデンテストが担う)。
+
+## 6. Shell 版との意図的な差異
+
+- **message のバックスラッシュ解釈**: 現行は `echo -e "      $msg"` なので
+  message 中の `\n` `\t` 等がエスケープとして解釈される。Go 版は解釈せず
+  そのまま出す。hook が書く message は transcript の 1 行で、バックスラッシュ列を
+  意図的に含める経路が無いため。
+- **pending の値が配列・オブジェクトのとき**: jq -r は複数行の整形済み JSON を
+  出すが、Go 版は 1 行の compact JSON を返す。hook は必ず文字列として書くため
+  到達しない経路。
+- **glob の並び順**: 現行の `for f in "$PENDING_DIR"/*.json` はロケール依存の
+  照合順序で並ぶ。Go 版はバイト昇順で固定する。ゴールデン生成時は `LC_ALL=C` を
+  与えて両者を一致させる。
