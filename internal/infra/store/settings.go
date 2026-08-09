@@ -34,6 +34,18 @@ func ClaudeSettingsPath(home string) string {
 	return filepath.Join(home, claudeDirName, settingsFileName)
 }
 
+// SettingsPath は書き換え対象の settings.json のパスを返す。
+//
+// envValue(MDEV_SETTINGS_FILE)が空でなければそれを使う。実環境の
+// ~/.claude/settings.json へ適用する前に、コピーに対して切り替えと復元を
+// 試せるようにするための逃げ道である。
+func SettingsPath(home, envValue string) string {
+	if envValue != "" {
+		return envValue
+	}
+	return ClaudeSettingsPath(home)
+}
+
 // SettingsStore は settings.json を読み書きする app.SettingsStore の実装である。
 //
 // 書き込みは同一ディレクトリでの原子的な置き換えで行い、既存ファイルの

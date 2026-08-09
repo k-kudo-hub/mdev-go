@@ -309,3 +309,25 @@ func TestHookSwitchRoundTripOnRealFiles(t *testing.T) {
 		t.Errorf("2 回目の Restore() = %+v, want Found=true / Changed=false", twice)
 	}
 }
+
+func TestSettingsPathHonorsOverride(t *testing.T) {
+	t.Parallel()
+
+	// 実環境へ適用する前にコピーで試せるよう、パスを差し替えられる。
+	tests := []struct {
+		name     string
+		envValue string
+		want     string
+	}{
+		{name: "MDEV_SETTINGS_FILE を優先", envValue: "/tmp/copy.json", want: "/tmp/copy.json"},
+		{name: "空ならホーム直下", envValue: "", want: filepath.Join("/Users/x", ".claude", "settings.json")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := store.SettingsPath("/Users/x", tt.envValue); got != tt.want {
+				t.Errorf("SettingsPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
