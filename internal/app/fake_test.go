@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -191,3 +193,71 @@ func testPricing(t *testing.T) domain.Pricing {
 	}
 	return pricing
 }
+
+// hooks 切り替え用の fake。
+var _ app.SettingsStore = (*fakeSettingsStore)(nil)
+
+// fakeSettingsStore はメモリ上の settings.json を模す。
+// バックアップは作った順に積み、最後の 1 件を「最新」として返す。
+type fakeSettingsStore struct {
+	content string
+	// backups は Backup に渡された内容、backupPaths はそのパス。
+	backups     []string
+	backupPaths []string
+	// calls は呼ばれたメソッド名を順に記録する。
+	calls []string
+
+	readErr   error
+	backupErr error
+	writeErr  error
+	latestErr error
+}
+
+func newFakeSettingsStore(content string) *fakeSettingsStore {
+	return &fakeSettingsStore{content: content}
+}
+
+func (s *fakeSettingsStore) Path() string { return "/tmp/fake/.claude/settings.json" }
+
+func (s *fakeSettingsStore) Read() ([]byte, error) {
+	s.calls = append(s.calls, "Read")
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	return []byte(s.content), nil
+}
+
+func (s *fakeSettingsStore) Backup(data []byte) (string, error) {
+	s.calls = append(s.calls, "Backup")
+	if s.backupErr != nil {
+		return "", s.backupErr
+	}
+	path := fmt.Sprintf("%s.mdev-backup-%d", s.Path(), len(s.backups))
+	s.backups = append(s.backups, string(data))
+	s.backupPaths = append(s.backupPaths, path)
+	return path, nil
+}
+
+func (s *fakeSettingsStore) Write(data []byte) error {
+	s.calls = append(s.calls, "Write")
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	s.content = string(data)
+	return nil
+}
+
+func (s *fakeSettingsStore) LatestBackup() (string, []byte, bool, error) {
+	s.calls = append(s.calls, "LatestBackup")
+	if s.latestErr != nil {
+		return "", nil, false, s.latestErr
+	}
+	if len(s.backups) == 0 {
+		return "", nil, false, nil
+	}
+	last := len(s.backups) - 1
+	return s.backupPaths[last], []byte(s.backups[last]), true, nil
+}
+
+// equalStrings は呼び出し順の比較に使う。
+func equalStrings(got, want []string) bool { return slices.Equal(got, want) }

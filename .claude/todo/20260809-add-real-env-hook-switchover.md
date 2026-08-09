@@ -18,7 +18,7 @@
 ## TODO
 
 - [x] domain: settings.json の hooks 書き換えロジックのテストを作成(4 コマンドの置換 / mdev 以外の hook・他キーの保全 / 冪等性 = 2 回実行しても同じ / 復元)→ 純粋関数(JSON in/out)として実装
-- [ ] app: `SwitchHooks` / `RestoreHooks` ユースケースのテストを作成(バックアップファイル作成 → 書き換え → 検証、バックアップからの復元)→ 実装
+- [x] app: `SwitchHooks` / `RestoreHooks` ユースケースのテストを作成(バックアップファイル作成 → 書き換え → 検証、バックアップからの復元)→ 実装
 - [ ] infra: settings ファイルストアのテストを作成(原子書き込み / バックアップ命名 `settings.json.mdev-backup-{timestamp}` / settings.json 不在時のエラー)→ 実装
 - [ ] cli: `mdev hooks switch` / `mdev hooks restore` を実装(`--dry-run` で差分表示のみ。実行時は変更前後の hook 設定を表示)
 - [ ] hook 失敗時の終了コード方針を決めて evidence に記録(PR #3 持ち越し: 現状 exit 1。Claude Code の hook 仕様では 0/2 以外は非ブロッキングであることをドキュメントで確認して確定する)
