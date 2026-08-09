@@ -237,3 +237,92 @@ input_tokens が文字列 / response_item の payload.type が数値 / turn_cont
 3. **`pricing` が JSON オブジェクト以外**(5 節に既述)。現行版はフォールバック、Go 版は空 pricing で続行
 4. **モデルの単価に `input` などのキーが無い**。現行版は `$in * null` で落ちるが、
    Go 版は `ModelPricing` のゼロ値(0)として計算する
+
+## 9. ゴールデンテストと変異テスト
+
+### fixture の作り方
+
+`scripts/gen-golden-record.sh` が現行 record-output.sh を隔離環境
+(`env -i` + `HOME` / `CONDUCTOR_HOME` を `mktemp -d` 配下へ)で実行し、
+追記された daily log を `internal/infra/store/testdata/golden-record/<case>/expected/daily/`
+に保存する。実環境のファイルには一切触れない(hook 側の `scripts/gen-golden.sh` と同じ方式)。
+
+transcript の絶対パスは実行のたびに変わるため、pending には `{{TRANSCRIPT_DIR}}` という
+プレースホルダを書き、実行直前に実パスへ、保存時にプレースホルダへ往復させる。
+Go 側のテストも同じ置換を行う。
+
+完了時刻は fixture の最後の行の `completed_at` から復元して固定クロックに与える。
+日付をまたいだ瞬間に生成されると再現できない fixture になるため、
+daily のファイル名と `completed_at` の日付が一致するまで生成をやり直す。
+
+### ケース一覧(26 件)
+
+| case | 何を固定するか |
+|---|---|
+| claude-full | 正常系(turns / tool_calls / tools_used / markers / 任意フィールド) |
+| claude-cache-cost | キャッシュトークン込みの料金(0.082) |
+| claude-fast-multiplier | speed=fast の 6 倍(0.18) |
+| claude-sonnet | sonnet の単価(0.018) |
+| pricing-fallback-sonnet | 未知モデル → claude-sonnet-4-6 |
+| pricing-fallback-hardcoded | sonnet も無い → ハードコード既定単価 |
+| pricing-no-config | 設定ファイルが 1 つも無い |
+| pricing-broken-user-config | 壊れた config.json → config.default.json |
+| claude-merge-mcp / claude-merge-bash / claude-no-merge | markers.merged の 2 経路と偽 |
+| codex-full | codex の集計と gpt の単価(9.5) |
+| codex-unknown-model | 単価未知は cost null |
+| claude-parse-failure / -empty-message / codex-parse-failure | 解析失敗の 3 パターン |
+| no-transcript / -empty-message / transcript-file-missing | transcript 無しの 3 パターン |
+| agent-carried | transcript 無しでも agent が残る |
+| minimal-pending | 空の任意フィールドはキーごと省略 |
+| duplicate-tab-picks-first | 同一タブはファイル名の昇順で最初の 1 件 |
+| broken-pending-skipped | 壊れた pending を読み飛ばす |
+| no-pending | 該当が無ければ何も書かない |
+| outside-zellij | セッション名は unknown |
+| existing-daily-appended | 既存行を保って末尾に追記する |
+
+### 変異テスト(31 件すべて検出)
+
+実装に 1 箇所ずつ誤りを入れ、ゴールデンテストが必ず落ちることを確認した
+(scratchpad の `mutate.sh` / `mutate2.sh`。毎回 `git checkout` で戻す)。
+ビルドが通らない変異は「変異として無効」として除外し、振る舞いだけが変わる形へ書き直してある。
+
+| 変異 | 落ちた case 数 |
+|---|---|
+| cost の丸めを切り捨てにする | 1 |
+| fast_multiplier の既定値を 6 → 1 | 1 |
+| fast の倍率を無視する | 12 |
+| sonnet へのフォールバックを消す | 1 |
+| ハードコード既定単価を変える | 3 |
+| codex でも claude の単価へフォールバックする | 2 |
+| codex の input からキャッシュ分を引かない | 3 |
+| codex の usage を最初の token_count にする | 1 |
+| codex の model を最初の turn_context にする | 1 |
+| codex の speed を standard 以外にする | 3 |
+| claude の model を最後の 1 件にする | 1 |
+| tools_used を降順に並べる | 2 |
+| tools_used の重複を除かない | 3 |
+| merged の正規表現を先頭一致にする | 3 |
+| doc の拡張子から md を外す | 2 |
+| slack の判定を部分一致にする | 1 |
+| codex で slack / doc も判定する | 3 |
+| Parse failed の既定文言を変える | 3 |
+| No summary available の既定文言を変える | 3 |
+| 成功時にも既定文言を当てる | 1 |
+| 空の任意フィールドを省略しない | 24 |
+| agent を落とす | 5 |
+| completed_at の書式を RFC3339 にする | 26 |
+| pending をファイル名の降順で探す | 2 |
+| 壊れた pending でも探索を打ち切る | 2 |
+| daily を追記でなく上書きにする | 2 |
+| pricing のフォールバック順を逆にする | 1 |
+| 空の pricing でも次のファイルへ落ちる | 1 |
+
+## 10. その他の差異(仕様ではなく実装都合)
+
+1. **pending の並び順**: 現行版の glob はロケールの照合順、Go の `os.ReadDir` はバイト順。
+   セッション ID(UUID 相当)では一致する。
+2. **daily ディレクトリの先行作成**: 現行版は pending の有無に関わらず
+   `mkdir -p "$DAILY_DIR"` を実行するため、何も書かない場合でも空ディレクトリが残る。
+   Go 版は追記するときだけ作る。ゴールデンテストはファイルの集合で比較するため差は出ない。
+3. **pending ディレクトリを読めない場合**: 現行版は glob が何も返さず黙って exit 0 するが、
+   Go 版はエラーを返す。原因の分かる失敗を握り潰さないためである。

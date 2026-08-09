@@ -124,6 +124,9 @@ run_case() {
     # 生成物を集める(実パスをプレースホルダへ戻す)。
     rm -rf "$out_dir"
     mkdir -p "$out_dir/daily"
+    # 何も追記されない case では daily が空になる。git は空ディレクトリを
+    # 追跡しないため、目印を置いて「fixture が未生成」と区別できるようにする。
+    touch "$out_dir/daily/.gitkeep"
     if [ -d "$sandbox/conductor/daily" ]; then
         while IFS= read -r -d '' f; do
             local rel dest
