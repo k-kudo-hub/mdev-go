@@ -34,9 +34,12 @@ func NewDoneModel(pane DoneService) DoneModel {
 	return DoneModel{pane: pane}
 }
 
-// Init は最初の集計を行う。
+// Init は最初の集計を行い、ポーリングを開始する。
+//
+// ポーリングのチェーンを張り出すのはここだけである(張り直しは tickMsg の
+// ハンドラに一元化している)。
 func (m DoneModel) Init() tea.Cmd {
-	return m.refreshCmd()
+	return tea.Batch(m.refreshCmd(), tickCmd(DoneInterval))
 }
 
 // Once は 1 回だけ描画した結果を返す(--once)。
@@ -51,11 +54,12 @@ func (m DoneModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case doneRefreshedMsg:
+		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.snapshot = msg.snapshot
-		return m, tickCmd(DoneInterval)
+		return m, nil
 
 	case tickMsg:
-		return m, m.refreshCmd()
+		return m, tea.Batch(m.refreshCmd(), tickCmd(DoneInterval))
 
 	case promptExpiredMsg:
 		if msg.token == m.token {

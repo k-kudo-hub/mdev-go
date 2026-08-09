@@ -67,8 +67,17 @@ func NewDashboardModel(pane DashboardService, env app.PaneEnv) DashboardModel {
 	return DashboardModel{pane: pane, env: env}
 }
 
-// Init は起動時の復元と最初の一覧の組み立てを行う。
+// Init は起動時の復元と最初の一覧の組み立てを行い、ポーリングを開始する。
+//
+// ポーリングのチェーンを張り出すのはここだけである。読み直しの完了で張り直すと
+// tick 以外の生成元のぶんだけチェーンが増え続けるため、張り直しは tickMsg の
+// ハンドラに一元化している。
 func (m DashboardModel) Init() tea.Cmd {
+	return tea.Batch(m.startupCmd(), tickCmd(DashboardInterval))
+}
+
+// startupCmd は起動時の復元をしてから最初の一覧を組み立てる。
+func (m DashboardModel) startupCmd() tea.Cmd {
 	return func() tea.Msg {
 		m.pane.Startup()
 		snapshot, err := m.pane.Refresh(m.env)
@@ -96,8 +105,9 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case dashboardRefreshedMsg:
+		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.snapshot, m.err = msg.snapshot, msg.err
-		return m, tickCmd(DashboardInterval)
+		return m, nil
 
 	case tickMsg:
 		if m.busy {
@@ -105,7 +115,7 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 次のポーリングへ進まない。
 			return m, tickCmd(DashboardInterval)
 		}
-		return m, m.refreshCmd()
+		return m, tea.Batch(m.refreshCmd(), tickCmd(DashboardInterval))
 
 	case promptExpiredMsg:
 		if msg.token == m.token {

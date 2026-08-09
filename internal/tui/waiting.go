@@ -34,9 +34,12 @@ func NewWaitingModel(pane WaitingService, env app.PaneEnv) WaitingModel {
 	return WaitingModel{pane: pane, env: env}
 }
 
-// Init は最初の一覧を読む。
+// Init は最初の一覧を読み、ポーリングを開始する。
+//
+// ポーリングのチェーンを張り出すのはここだけである(張り直しは tickMsg の
+// ハンドラに一元化している)。
 func (m WaitingModel) Init() tea.Cmd {
-	return m.refreshCmd()
+	return tea.Batch(m.refreshCmd(), tickCmd(WaitingInterval))
 }
 
 // Once は 1 回だけ描画した結果を返す(--once)。
@@ -58,11 +61,12 @@ func (m WaitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case waitingRefreshedMsg:
+		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.text, m.err = msg.text, msg.err
-		return m, tickCmd(WaitingInterval)
+		return m, nil
 
 	case tickMsg:
-		return m, m.refreshCmd()
+		return m, tea.Batch(m.refreshCmd(), tickCmd(WaitingInterval))
 	}
 	return m, nil
 }

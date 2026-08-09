@@ -34,9 +34,12 @@ func NewNewsModel(pane NewsService) NewsModel {
 	return NewsModel{pane: pane}
 }
 
-// Init は最初のニュースを読む。
+// Init は最初のニュースを読み、ポーリングを開始する。
+//
+// ポーリングのチェーンを張り出すのはここだけである(張り直しは tickMsg の
+// ハンドラに一元化している)。
 func (m NewsModel) Init() tea.Cmd {
-	return m.refreshCmd()
+	return tea.Batch(m.refreshCmd(), tickCmd(NewsInterval))
 }
 
 // Once は 1 回だけ描画した結果を返す(--once)。
@@ -51,8 +54,9 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case newsRefreshedMsg:
+		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.snapshot, m.fetching = msg.snapshot, false
-		return m, tickCmd(NewsInterval)
+		return m, nil
 
 	case newsReloadMsg:
 		// 取得は同期で走る。終わったら読み直して通常の画面へ戻る。
@@ -65,7 +69,7 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fetching {
 			return m, tickCmd(NewsInterval)
 		}
-		return m, m.refreshCmd()
+		return m, tea.Batch(m.refreshCmd(), tickCmd(NewsInterval))
 	}
 	return m, nil
 }

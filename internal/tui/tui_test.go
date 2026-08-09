@@ -104,21 +104,39 @@ func itoa(n int) string { return string(rune('0' + n)) }
 func run(t *testing.T, m tea.Model, msg tea.Msg) (tea.Model, tea.Msg) {
 	t.Helper()
 	next, cmd := m.Update(msg)
+	return next, exec(t, cmd)
+}
+
+// exec はコマンドを 1 回実行してメッセージを返す。
+//
+// Init が返す tea.Batch は「最初の読み直し」と「ポーリングの開始」を束ねて
+// いる。後者は tea.Tick のタイマーで、実行すると間隔ぶん実時間を待つことに
+// なるため、束のうち先頭(読み直し)だけを実行する。
+func exec(t *testing.T, cmd tea.Cmd) tea.Msg {
+	t.Helper()
 	if cmd == nil {
-		return next, nil
+		return nil
 	}
-	return next, cmd()
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return msg
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+	return exec(t, batch[0])
 }
 
 // load は Init のコマンドを 1 回実行し、その結果を反映したモデルを返す
 // (= 最初の描画が済んだ状態)。
 func load(t *testing.T, m tea.Model) tea.Model {
 	t.Helper()
-	cmd := m.Init()
-	if cmd == nil {
-		t.Fatal("Init がコマンドを返していない")
+	msg := exec(t, m.Init())
+	if msg == nil {
+		t.Fatal("Init が最初の読み直しを返していない")
 	}
-	next, _ := m.Update(cmd())
+	next, _ := m.Update(msg)
 	return next
 }
 
@@ -147,6 +165,82 @@ func TestPaneIntervalsMatchShellVersion(t *testing.T) {
 	// 2 打鍵目の待ち時間(現行版の read -t 3)。
 	if tui.PromptTimeout != 3*time.Second {
 		t.Error("2 打鍵目の待ち時間が 3 秒ではない")
+	}
+}
+
+// ---- ポーリングの張り直し -------------------------------------------------
+
+// ポーリングを張り直すのは tickMsg のハンドラだけである。
+//
+// 読み直しの完了(refreshedMsg)で張り直すと、tick 以外の生成元(Init /
+// ジャンプ / 削除の完了 / 通知の期限切れ / restore / reload)のぶんだけ
+// チェーンが増える。キー操作のたびに 1 本ずつ恒久的に増えていき、
+// bash と zellij のプロセス生成がその本数ぶん多重に走ることになる。
+
+// paneModel は 4 ペインを同じ形で回すためのテーブルの 1 行である。
+type paneModel struct {
+	name  string
+	model tea.Model
+}
+
+// paneModels は 4 ペインのモデルを作って返す。
+func paneModels() []paneModel {
+	return []paneModel{
+		{"dashboard", tui.NewDashboardModel(&stubDashboard{
+			snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}},
+		}, testEnv)},
+		{"waiting", tui.NewWaitingModel(&stubWaiting{text: "待ち画面"}, testEnv)},
+		{"done", tui.NewDoneModel(&stubDone{
+			snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1},
+		})},
+		{"news", tui.NewNewsModel(&stubNews{
+			snapshot: app.NewsSnapshot{Text: "ニュース画面", Count: 1},
+		})},
+	}
+}
+
+func TestPaneInitStartsPollingOnce(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range paneModels() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd := tt.model.Init()
+			if cmd == nil {
+				t.Fatal("Init がコマンドを返していない")
+			}
+			// Init は「最初の読み直し」と「ポーリングの開始」の 2 つだけを返す。
+			batch, ok := cmd().(tea.BatchMsg)
+			if !ok {
+				t.Fatal("Init が読み直しとポーリングの開始を束ねていない")
+			}
+			if len(batch) != 2 {
+				t.Errorf("Init のコマンド数 = %d, want 2", len(batch))
+			}
+		})
+	}
+}
+
+func TestPaneRefreshDoesNotReschedulePolling(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range paneModels() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// 読み直しの完了を何度流してもコマンドは返らない。返してしまうと
+			// tick 以外の生成元のぶんだけポーリングが増殖する。
+			msg := exec(t, tt.model.Init())
+			model := tt.model
+			for i := range 3 {
+				next, cmd := model.Update(msg)
+				if cmd != nil {
+					t.Fatalf("%d 回目の読み直しでポーリングを張り直している", i+1)
+				}
+				model = next
+			}
+		})
 	}
 }
 
