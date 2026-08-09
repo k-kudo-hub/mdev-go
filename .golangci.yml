@@ -23,8 +23,10 @@ linters:
             - $gostd
             - github.com/k-kudo-hub/mdev-go
             - github.com/spf13/cobra
-            - github.com/charmbracelet/bubbletea/v2
-            - github.com/charmbracelet/bubbles/v2
+            # bubbletea v2 のモジュールパスは github.com/... ではなく charm.land/... である
+            # (v2 系は alpha から一貫してこのパスを宣言している。ADR-0002 を参照)。
+            - charm.land/bubbletea/v2
+            - charm.land/bubbles/v2
             - golang.org/x
 
         # domain は標準ライブラリと domain 自身以外に依存しない(ADR-0002)。

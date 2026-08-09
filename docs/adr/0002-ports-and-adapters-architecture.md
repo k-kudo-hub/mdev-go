@@ -51,10 +51,21 @@ cmd/mdev ─→ 全パッケージ(組み立てのみ)
 | 用途 | ライブラリ | 選定理由 |
 |------|-----------|----------|
 | CLI フレームワーク | [spf13/cobra](https://github.com/spf13/cobra) | サブコマンド多数(hook / dashboard / task / restore / update)の構成に適し、Go CLI で最大の採用実績を持つ |
-| TUI | [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) v2 | Model-Update-View 構造が「状態を純粋に持ち、描画と分離する」本設計と一致する。v2 が 2026-02-23 にリリース済みで、fzf 相当の選択 UI も [bubbles](https://github.com/charmbracelet/bubbles) で実装できる |
+| TUI | [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) v2 — **import パスは `charm.land/bubbletea/v2`** | Model-Update-View 構造が「状態を純粋に持ち、描画と分離する」本設計と一致する。v2 が 2026-02-23 にリリース済みで、fzf 相当の選択 UI も [bubbles](https://github.com/charmbracelet/bubbles) で実装できる |
 | JSON / 正規表現 / HTTP | 標準ライブラリ | jq を置き換える。スキーマは struct で定義する |
 
 ライブラリの追加はこの表(および今後の ADR)に載せたものだけを許可する(機械的な強制は ADR-0003 の depguard で行う)。
+
+bubbletea v2 のモジュールパスは `github.com/charmbracelet/bubbletea/v2` ではなく
+`charm.land/bubbletea/v2` である(v2 系は alpha から一貫してこのパスを宣言している)。
+`github.com/...` で要求すると「module declares its path as: charm.land/bubbletea/v2」で
+取得に失敗するため、depguard の許可リストも `charm.land/bubbletea/v2` を指す。
+実測の記録は `.claude/todo/20260809-panes-evidence.md` を参照。
+
+画面の装飾に [lipgloss](https://github.com/charmbracelet/lipgloss) は使わない。
+移行期はダッシュボード系ペインの出力を現行 Shell 版と 1 バイトも違わない形で保つ
+必要があり、端末の能力に応じた減色や幅計算が挟まると保証できなくなるためである。
+ANSI のエスケープ列は domain の純粋関数が文字列として組み立てる。
 
 ### 状態機械を domain に集約する
 
