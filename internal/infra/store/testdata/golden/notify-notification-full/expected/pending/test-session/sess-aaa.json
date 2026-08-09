@@ -1,0 +1,12 @@
+{
+  "tab": "api-feature",
+  "session": "test-session",
+  "claude_session_id": "sess-aaa",
+  "message": "Permission needed",
+  "event": "Notification",
+  "time": "00:18:30",
+  "agent": "claude",
+  "transcript_path": "/tmp/t-aaa.jsonl",
+  "dir": "/tmp/myapp",
+  "task_type": "dev"
+}

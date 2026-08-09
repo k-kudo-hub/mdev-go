@@ -1,0 +1,8 @@
+{
+  "tab": "review-pr",
+  "session": "test-session",
+  "claude_session_id": "sess-bbb",
+  "updated_at": "2026-08-09T00:18:30+0900",
+  "dir": "/tmp/myapp",
+  "agent": "claude"
+}

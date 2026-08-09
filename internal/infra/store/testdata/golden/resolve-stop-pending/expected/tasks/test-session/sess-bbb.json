@@ -1,0 +1,10 @@
+{
+  "tab": "review-pr",
+  "session": "test-session",
+  "claude_session_id": "sess-bbb",
+  "updated_at": "2026-08-09T00:18:32+0900",
+  "dir": "/tmp/myapp",
+  "task_type": "review",
+  "agent": "claude",
+  "transcript_path": "/tmp/t-bbb.jsonl"
+}

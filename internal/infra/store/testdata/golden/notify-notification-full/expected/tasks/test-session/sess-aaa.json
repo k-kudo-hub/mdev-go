@@ -1,0 +1,10 @@
+{
+  "tab": "api-feature",
+  "session": "test-session",
+  "claude_session_id": "sess-aaa",
+  "updated_at": "2026-08-09T00:18:30+0900",
+  "dir": "/tmp/myapp",
+  "task_type": "dev",
+  "agent": "claude",
+  "transcript_path": "/tmp/t-aaa.jsonl"
+}
