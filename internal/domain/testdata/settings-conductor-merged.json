@@ -1,0 +1,62 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)"
+    ]
+  },
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "MSG=$(cat | jq -r '.message // \"Needs attention\"' 2>/dev/null); REPO=$(basename \"$(pwd)\"); terminal-notifier -title \"Claude Code: $REPO\" -message \"$MSG\" -sound default"
+          },
+          {
+            "type": "command",
+            "command": "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "MSG=$(cat | jq -r '.message // \"Task complete\"' 2>/dev/null); REPO=$(basename \"$(pwd)\"); terminal-notifier -title \"Claude Code: $REPO\" -message \"Done: $MSG\" -sound default"
+          },
+          {
+            "type": "command",
+            "command": "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-post-tool.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-resolve.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "model": "opus"
+}
