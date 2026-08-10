@@ -406,5 +406,18 @@
     "transcripts": {
       "t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"go\"},\"cwd\":\"/tmp\",\"sessionId\":\"s\",\"uuid\":\"u1\",\"timestamp\":\"2026-04-20T10:00:00Z\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":1000,\"output_tokens\":1000}},\"uuid\":\"a1\",\"timestamp\":\"2026-04-20T10:00:01Z\"}\n"
     }
+  },
+  {
+    "name": "retry-replaces-entry",
+    "description": "アップロード失敗の再試行: 同じ (tab, claude_session_id) の未 restore 行は置換され、restored:true と別 sid の行は残る",
+    "tab": "retry-tab",
+    "runs": 2,
+    "env": {
+      "ZELLIJ_SESSION_NAME": "test-session"
+    },
+    "existing_daily": "{\"tab\":\"retry-tab\",\"session\":\"test-session\",\"completed_at\":\"2026-01-01T00:00:00+0900\",\"message\":\"restored-history\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"claude_session_id\":\"sess-retry\",\"restored\":true}\n{\"tab\":\"retry-tab\",\"session\":\"test-session\",\"completed_at\":\"2026-01-01T00:00:01+0900\",\"message\":\"stale-attempt\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"claude_session_id\":\"sess-retry\"}\n{\"tab\":\"other-tab\",\"session\":\"test-session\",\"completed_at\":\"2026-01-01T00:00:02+0900\",\"message\":\"other-task\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"claude_session_id\":\"sess-other\"}\n",
+    "pending": {
+      "test-session/sess-retry.json": "{\"tab\": \"retry-tab\", \"session\": \"test-session\", \"claude_session_id\": \"sess-retry\", \"message\": \"latest attempt\", \"event\": \"Stop\", \"time\": \"10:00:01\"}\n"
+    }
   }
 ]

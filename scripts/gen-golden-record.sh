@@ -16,6 +16,10 @@
 # transcript_path は実行のたびに変わる絶対パスなので、pending には
 # {{TRANSCRIPT_DIR}} というプレースホルダを書いておき、実行直前に実パスへ
 # 置換する。保存時は逆向きに置換して戻す(Go 側も同じ置換を行う)。
+#
+# case に "runs": N を書くと、同じ sandbox のまま record-output.sh を N 回続けて
+# 走らせる。アップロードの失敗でタスク削除が中止され、同じ pending に対して
+# record が何度も走る状況(daily の重複を置換で防ぐ挙動)を再現するためである。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -64,12 +68,13 @@ replace_in_file() {
 # run_case <case json> <出力先ディレクトリ>
 run_case() {
     local case_json="$1" out_dir="$2"
-    local name tab session sandbox transcripts_dir
+    local name tab session sandbox transcripts_dir runs run
 
     name=$(field "$case_json" '.name')
     tab=$(field "$case_json" '.tab')
     session=$(field "$case_json" '.env.ZELLIJ_SESSION_NAME')
     session="${session:-unknown}"
+    runs=$(printf '%s' "$case_json" | jq -r '.runs // 1')
 
     sandbox="$WORK/run/$name"
     rm -rf "$sandbox"
@@ -114,12 +119,15 @@ run_case() {
         env_args+=("$kv")
     done < <(printf '%s' "$case_json" | jq -r '.env | to_entries[] | "\(.key)=\(.value)"')
 
-    env -i \
-        PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin" \
-        HOME="$sandbox/home" \
-        CONDUCTOR_HOME="$sandbox/conductor" \
-        ${env_args[@]+"${env_args[@]}"} \
-        bash "$sandbox/conductor/scripts/record-output.sh" "$tab"
+    # runs 回続けて走らせる(pending も daily も持ち越す = 再試行そのもの)。
+    for ((run = 0; run < runs; run++)); do
+        env -i \
+            PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin" \
+            HOME="$sandbox/home" \
+            CONDUCTOR_HOME="$sandbox/conductor" \
+            ${env_args[@]+"${env_args[@]}"} \
+            bash "$sandbox/conductor/scripts/record-output.sh" "$tab"
+    done
 
     # 生成物を集める(実パスをプレースホルダへ戻す)。
     rm -rf "$out_dir"
