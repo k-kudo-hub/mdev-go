@@ -43,8 +43,8 @@ zellij 駆動には確立済みの防御(登録待ち・stdout 検証フォー�
 
 - [x] `mdev pane task-create` / `mdev pane task-control <tab>` を登録
 - [x] ゴールデン: task-control バーの ONCE 出力を Shell と比較(通常 / WAITING)。waiting-toggle は同一 pending 入力での出力ファイル比較(Shell を隔離実行)
-- [ ] ユーザーテスト手順書 `docs/user-test-03-task-create.md`(multi.kdl の TaskCreate 差し替え、n フロー全経路・キャンセル・w・dd のチェックリスト、復元手順)
-- [ ] `make check` 緑
+- [x] ユーザーテスト手順書 `docs/user-test-03-task-create.md`(multi.kdl の TaskCreate 差し替え、n フロー全経路・キャンセル・w・dd のチェックリスト、復元手順)
+- [x] `make check` 緑
 
 ## 完了条件
 

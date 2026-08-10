@@ -84,3 +84,136 @@ screen-state 削除
   出力ファイルを **JSON 等価**で比較する。jq はプリティ出力(2 スペース)、
   Go は compact なのでバイト比較はできない。等価比較でキーと値の一致を見る
 - 既存 39 ケース(`cmd/mdev/testdata/golden-panes`)は不変
+
+## 6. 実装中に確認したこと
+
+### 6-1. create_task の呼び出し列(Shell 実測)
+
+モック zellij(`query-tab-names` は Main と対象タブを返し、
+`go-to-tab-name` は index を返す)を PATH の先頭に置き、
+`create_task /tmp/proj dev my-task "" codex` を走らせた結果:
+
+```
+1: action new-tab -n my-task --cwd /tmp/proj -- env TASK_TAB_NAME=my-task TASK_TYPE=dev TASK_AGENT=codex codex
+2: action query-tab-names
+3: action go-to-tab-name my-task
+4: action new-pane --direction down --cwd /tmp/proj -- bash <CONDUCTOR_HOME>/scripts/task-control.sh my-task
+5-34: action resize decrease up            (30 回)
+35: action focus-previous-pane
+36: action new-pane --direction right --cwd /tmp/proj -- nvim
+37: action new-pane --direction down --cwd /tmp/proj -- lazygit
+38: action move-focus left
+```
+
+Go 版(`TestCreateTaskSequence` / `TestApplyLayoutDev`)はこの並びを
+そのまま固定している。**唯一違うのは 4 行目**で、Go 版は
+`<CONDUCTOR_HOME>/bin/mdev pane task-control my-task` を起動する。
+
+### 6-2. task-control バーのバイト一致(実バイナリで確認)
+
+隔離した HOME / CONDUCTOR_HOME で、空白を含むタブ名 `my task` を与えて
+実バイナリと Shell を比較した。
+
+```
+$ diff <($MDEV pane task-control "my task" --once) \
+       <(CONDUCTOR_TASKCTL_ONCE=1 bash .../task-control.sh "my task")
+(差分なし)
+```
+
+通常表示・WAITING 表示とも `od -c` でバイト一致。ゴールデンにも
+4 ケース(通常 / WAITING / Notification / 別タブの Waiting)を追加した。
+
+### 6-3. タスク作成メニューのバイト一致
+
+`domain.RenderTaskCreateMenu` は `task-create-loop.sh` の main_loop 冒頭と
+バイト一致する(`od -c` で確認済み)。区切り線は 26 本で
+Dashboard / Waiting / Done と同じ。
+
+### 6-4. Bubble Tea v2 のキー名
+
+`tea.KeyPressMsg.String()` の実測値(v2.0.8)。選択 UI の分岐がこの
+文字列に依存するため記録する。
+
+| 構成 | String() |
+|------|----------|
+| `{Code: 'c', Mod: tea.ModCtrl}` | `ctrl+c` |
+| `{Code: tea.KeyEscape}` | `esc` |
+| `{Code: tea.KeyEnter}` | `enter` |
+| `{Code: tea.KeyBackspace}` | `backspace` |
+| `{Code: tea.KeyUp}` / `{Code: tea.KeyDown}` | `up` / `down` |
+| `{Code: 'p', Mod: tea.ModCtrl}` | `ctrl+p` |
+| `{Code: 'n', Text: "n"}` | `n` |
+
+修飾キー付きは必ず 2 文字以上の名前になるので、
+「1 ルーンなら絞り込みの入力」という判定でそのまま弾ける。
+
+## 7. TODO からの設計変更
+
+### 7-1. TabActor は 1 回ごとの上限を引数で受ける
+
+TODO は「全て proc.Command + 10 秒上限」と書いていたが、固定 10 秒だと
+全体予算を超えたところで撃った 1 本が最大 10 秒はみ出す(予算 30 秒に対して
+最悪 40 秒)。Shell の `_zj_budget_cap` は「残り予算」と「1 回の上限」の
+小さいほうを渡してこれを防いでいる。
+
+そこで `app.TabActor` の各メソッドは先頭に `timeout time.Duration` を取る形に
+した。10 秒(`commandTimeout`)は**上限の頭打ち**として実装側に残っている。
+`TestTabControllerClampsTheCap` がこれを固定している。
+
+### 7-2. 削除フローは TaskDeleter として抽出した
+
+TODO は「既存の PrepareDelete / CommitDelete に統合」と書いていた。
+`DashboardPane` のメソッドをそのまま task-control から呼ぶと、Dashboard 用の
+port(PendingLister など task-control には要らないもの)まで組み立てる必要が
+あり、`close-tab` フォールバックの有無も分けられない。
+
+削除フローだけを `app.TaskDeleter` に切り出し、`DashboardPane` は
+そこへ委譲する形にした。外から見たメソッド(`PrepareDelete` /
+`CommitDelete`)は変えていないので、tui と既存テストは無変更である。
+
+`CloseActiveOnMissingID` が 2 経路の非対称を表す。
+
+- Dashboard: false。Main タブの中で動いているため、`close-tab` へ落ちると
+  Main を閉じてしまう
+- task-control: true。自分のタブの中で動いているので「今のタブ」でよい
+
+### 7-3. DirLister に IsDir を足した
+
+現行版は「起点が 1 つも実在しない」と「起点はあるが配下が空」を区別して
+いる(前者だけが赤字 + 2 秒、後者は黙ってメニューへ戻る)。列挙結果だけでは
+区別できないため、`[[ -d ]]` に対応する `IsDir` を port に足した。
+
+## 8. TODO の項目とコミットの対応
+
+1 項目 = 1 コミットを原則にしたが、次の 3 か所はまとめた。分けると
+コンパイルが通らない、または片方だけでは意味を成さないためである。
+
+| コミット | まとめた TODO 項目 | 理由 |
+|---|---|---|
+| 名前の既定値 + 部分列フィルタ | 2 項目 | 同じ n フローの純粋関数で、単独では使い道が無い |
+| task-control のユースケース | ToggleWaiting + 削除ユースケース統合 | TaskDeleter の抽出を先に入れないと TaskControlPane を組み立てられない |
+| tui + cli | Model 2 つ + --once + コマンド登録 + ゴールデン | Panes への登録と CLI の引数追加は分けるとコンパイルが通らない |
+
+また `ApplyLayout` は TODO の順(CreateTask が先)とは逆に先へ入れた。
+CreateTask が呼ぶ側であるため。
+
+## 9. TDD の自己評価
+
+- **赤を確認できた**: Config 拡張 / 名前解決 / 部分列フィルタ /
+  waiting-toggle の遷移 / task-control バー / TabController 拡張 /
+  ApplyLayout / PendingStore の生読み書き / cli の引数
+- **赤が「コンパイル失敗」止まりだった**: `CreateTask.Execute`。
+  ApplyLayout と同じファイルに書いたため、テストを足した時点で実装が
+  既に存在した。代わりに**変異テスト**で契約が効いていることを確かめた
+  (下記)
+- **後追いになった**: tui の 2 モデル。実装を書いてからテストを足した
+
+### CreateTask の変異テスト
+
+実装を 3 通りに壊し、いずれもテストが落ちることを確認した。
+
+| 変異 | 落ちたテスト |
+|---|---|
+| フォーカス検証の失敗を無視して先へ進む | 4 件(ペインを 1 枚も作らない契約) |
+| screen-state の削除を new-tab の後ろへ移す | 3 件(順序と失敗時の中止) |
+| resize ループの予算チェックを外す | 1 件(30 回回りきり、経過が予算を超える) |
