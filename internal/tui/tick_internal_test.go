@@ -396,11 +396,63 @@ func TestPaneTickSkipsRefreshWhileForcedRefreshInFlight(t *testing.T) {
 	}
 }
 
+func TestPaneTickWaitsForForcedRefreshAfterPollArrives(t *testing.T) {
+	t.Parallel()
+
+	// キー操作の読み直しとポーリングの読み直しが同時に走り、**ポーリングの
+	// ほうが先に着弾する**交錯ケース。実行中かどうかを真偽値で持つと、先に
+	// 着弾したポーリングが印を下ろしてしまい、まだ走っているキー操作の
+	// 読み直しへ次のポーリングが重なる(CLI が 2 本並行する)。本数で数えて
+	// いるのでそうならないことを固定する。
+	for _, tt := range forceCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// 起動時の読み直しが着弾 → チェーンはタイマー。
+			m, cmd := update(t, tt.model, tt.landed(true))
+			wantTimerOnly(t, cmd)
+
+			// タイマーが発火してポーリングの読み直しが走り出す(1 本目)。
+			m, cmd = update(t, m, tickMsg{})
+			wantRefreshOnly(t, cmd)
+
+			// その最中にキー操作の読み直しも走り出す(2 本目)。
+			m, cmd = update(t, m, tt.trigger)
+			wantRefreshOnly(t, cmd)
+			if tt.refreshes() != 2 {
+				t.Fatalf("読み直しの回数 = %d, want 2", tt.refreshes())
+			}
+
+			// 先にポーリングのほうが着弾する。次の合図は張られるが、キー操作の
+			// 読み直しはまだ走っている。
+			m, cmd = update(t, m, tt.landed(true))
+			wantTimerOnly(t, cmd)
+
+			// その合図で読み直しを出してはいけない(まだ 1 本走っている)。
+			m, cmd = update(t, m, tickMsg{})
+			wantTimerOnly(t, cmd)
+			if tt.refreshes() != 2 {
+				t.Fatalf("走っている読み直しに重ねた: %d 回", tt.refreshes())
+			}
+
+			// キー操作のほうが着弾して初めて 0 本になる。
+			m, cmd = update(t, m, tt.landed(false))
+			wantNoContinuation(t, cmd)
+
+			_, cmd = update(t, m, tickMsg{})
+			wantRefreshOnly(t, cmd)
+			if tt.refreshes() != 3 {
+				t.Errorf("読み直しの回数 = %d, want 3", tt.refreshes())
+			}
+		})
+	}
+}
+
 func TestPaneRefreshErrorReleasesInFlightAndRearms(t *testing.T) {
 	t.Parallel()
 
-	// エラーで返ってきた着弾でも、印を下ろして次の合図を張る。どちらかを
-	// 忘れると、一度失敗しただけでポーリングが二度と回らなくなる。
+	// エラーで返ってきた着弾でも、実行中の数を減らして次の合図を張る。
+	// どちらかを忘れると、一度失敗しただけでポーリングが二度と回らなくなる。
 	tests := []struct {
 		name   string
 		model  tea.Model

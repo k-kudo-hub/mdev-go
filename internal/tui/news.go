@@ -31,8 +31,8 @@ type NewsModel struct {
 
 	// fetching は fetch-news.sh の実行中で、取得中の画面を出している状態。
 	fetching bool
-	// gate は読み直しの逐次化。前回が着弾するまでポーリングで重ねて出さない。
-	gate refreshGate
+	// polling はポーリングの回し方(完了起点・重なりの防止)。
+	polling poller
 }
 
 var (
@@ -41,11 +41,8 @@ var (
 )
 
 // NewNewsModel は News のモデルを作る。
-//
-// 逐次化の印は実行中で始める(Init が最初の読み直しを必ず発行するため。
-// refreshGate を参照)。
 func NewNewsModel(pane NewsService) NewsModel {
-	return NewsModel{pane: pane, gate: refreshGate{inFlight: true}}
+	return NewsModel{pane: pane, polling: newPoller(NewsInterval)}
 }
 
 // Init は最初のニュースを読み、ポーリングを開始する。
@@ -68,18 +65,16 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case newsRefreshedMsg:
-		// 逐次化の印はここで必ず下ろす。
-		m.gate.release()
-		// ポーリング起源ならここで次の合図を張る(完了起点のペーシング)。
-		next := rearmCmd(msg.poll, NewsInterval)
+		// 必ずここを通す(実行中の数を減らし、ポーリング起源なら次の合図を張る)。
+		next := m.polling.arrive(msg.poll)
 		m.snapshot, m.fetching = msg.snapshot, false
 		return m, next
 
 	case newsReloadMsg:
 		// 取得は同期で走る。終わったら読み直して通常の画面へ戻る。
-		// このコマンドも最後に newsRefreshedMsg を返すので、印を立てる。
+		// このコマンドも最後に newsRefreshedMsg を返すので実行中として数える。
 		// キー操作起源なので poll は立てない(着弾しても合図は張らない)。
-		m.gate.force()
+		m.polling.force()
 		return m, func() tea.Msg {
 			m.pane.Reload()
 			return newsRefreshedMsg{snapshot: m.pane.Refresh()}
@@ -87,15 +82,11 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		if m.fetching {
-			return m, tickCmd(NewsInterval)
+			// 取得中は読み直さない(取得中の画面を出したままにする)。
+			return m, m.polling.rearm()
 		}
-		if !m.gate.take() {
-			// キー操作で出した読み直しがまだ着弾していない。重ねて発行せず、
-			// 次の合図だけを予約する。
-			return m, tickCmd(NewsInterval)
-		}
-		// 次の合図はこの読み直しの着弾で張るため、ここでは張らない。
-		return m, m.refreshCmd(true)
+		cmd := m.polling.tick(m.refreshCmd)
+		return m, cmd
 	}
 	return m, nil
 }

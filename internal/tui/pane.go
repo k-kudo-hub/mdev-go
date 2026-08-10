@@ -67,55 +67,81 @@ func tickCmd(d time.Duration) tea.Cmd {
 // キー操作で出した読み直し(force 起源)はこのチェーンの一部ではなく、着弾しても
 // 何も予約しない。予約するとチェーンが 1 本ずつ恒久的に増えていく。
 
-// refreshGate は読み直しの重なりを防ぐ印である。
+// poller は 4 ペイン共通のポーリングの回し方である。
 //
-// 完了起点のペーシングでは、ポーリングの読み直しが走っている間はタイマーが
-// 存在しないため tickMsg 自体が来ない。この印が実際に効くのは、キー操作で出した
-// 読み直し(force 起源)が走っている最中にタイマーが発火した場合である。
-// そのときは読み直しを重ねず、次の合図だけを予約し直す。
+// 状態を変える入口を tick / arrive / force の 3 つに絞ってある。とくに arrive は
+// 「実行中の数を減らす」と「次の合図を張る」を 1 つの操作にまとめてあり、片方
+// だけを行うことができない。分けて書ける形にしておくと、分岐が増えたときに
+// どこかで片方を落とし、ポーリングが二度と回らなくなる(または 1 本ずつ
+// 増えていく)。
 //
-// ゼロ値は「実行中ではない」である。ただし各ペインの New*Model は実行中で
-// 始める。Init が必ず 1 回目の読み直しを発行するのに対し、Init は値レシーバで
-// モデルを書き換えられず、そこで印を立てられないためである。
-type refreshGate struct {
-	// inFlight は発行済みでまだ着弾していない読み直しがあることを表す。
-	inFlight bool
+// tick / arrive / force はモデルを書き換えるため、呼び出し側は必ず
+//
+//	cmd := m.polling.tick(m.refreshCmd)
+//	return m, cmd
+//
+// のように別の文へ分けること。`return m, m.polling.tick(...)` と書くと、返り値の
+// m を評価する時点と呼び出しの時点の順序が Go の仕様で決まっておらず、数え上げが
+// 反映されていないモデルが返りうる。
+type poller struct {
+	interval time.Duration
+	// inFlight は発行済みでまだ着弾していない読み直しの本数である。
+	//
+	// 真偽値ではなく本数なのは、キー操作の読み直し(force 起源)とポーリングの
+	// 読み直しが同時に走りうるためである。真偽値だと、先に着弾したほうが印を
+	// 下ろしてしまい、まだ走っているほうへ次のポーリングが重なる。
+	inFlight int
 }
 
-// take は読み直しを発行してよいかを返す。発行できるときは印を立てる。
-// ポーリング(tickMsg)だけが使う。
-func (g *refreshGate) take() bool {
-	if g.inFlight {
-		return false
+// newPoller は間隔 d のポーリングを返す。
+//
+// 生成直後を 1 本実行中として始めるのは、どのペインも Init で最初の読み直しを
+// 発行するためである。Init は値レシーバでモデルを書き換えられないため、そこで
+// 数えられない。
+func newPoller(d time.Duration) poller {
+	return poller{interval: d, inFlight: 1}
+}
+
+// tick はポーリングの合図に対する応答を返す。
+//
+// 実行中の読み直しが 1 本も無いときだけ refresh を呼んで読み直しを発行する。
+// このとき次の合図は張らない(その読み直しの着弾で張る = 完了起点)。実行中の
+// ものがあれば重ねず、次の合図だけを予約する。
+//
+// refresh は読み直しのコマンドを組み立てるだけで、ポーリングの状態は見ない。
+func (p *poller) tick(refresh func(poll bool) tea.Cmd) tea.Cmd {
+	if p.inFlight > 0 {
+		return tickCmd(p.interval)
 	}
-	g.inFlight = true
-	return true
+	p.inFlight++
+	return refresh(true)
 }
 
-// force は完了を待たずに読み直しを発行するときに印を立てる。
+// rearm は読み直しを出さずに次の合図だけを予約する。
+// 凍結中(削除の途中・2 打鍵目の待ち受け中・取得中)の tick が使う。
 //
-// キー操作と削除・取得の後始末が使う。利用者の操作に対する反応は遅らせずに
-// 出したいので、実行中でも発行する(そのぶん重なるのは押した瞬間だけである)。
-func (g *refreshGate) force() { g.inFlight = true }
+// 実行中の数を変えないので、凍結が解けた後の tick は通常どおり発行できる。
+func (p poller) rearm() tea.Cmd { return tickCmd(p.interval) }
 
-// release は読み直しの着弾で印を下ろす。
+// arrive は読み直しの着弾に対する応答を返す。
 //
-// 呼ぶのは *RefreshedMsg のハンドラの先頭だけである。エラーで返ってきた場合も、
-// 待ち受け中で内容を捨てる場合も必ず通す。下ろし忘れるとポーリングが二度と
-// 読み直さなくなる。
-func (g *refreshGate) release() { g.inFlight = false }
-
-// rearmCmd は着弾がポーリング起源のときだけ次の合図を予約する。
-//
-// *RefreshedMsg のハンドラは、内容を捨てる場合もエラーで返った場合も必ず
-// ここを通す。チェーンを絶やすとポーリングが二度と回らない。逆に force 起源の
-// 着弾で予約するとチェーンが増えるため、そのときは何も返さない。
-func rearmCmd(poll bool, d time.Duration) tea.Cmd {
+// 実行中の本数を 1 つ減らし、ポーリング起源ならば次の合図を張る。エラーで
+// 返ってきた場合も、待ち受け中で内容を捨てる場合も必ず通すこと。
+func (p *poller) arrive(poll bool) tea.Cmd {
+	if p.inFlight > 0 {
+		p.inFlight--
+	}
 	if !poll {
 		return nil
 	}
-	return tickCmd(d)
+	return tickCmd(p.interval)
 }
+
+// force はキー操作起源の読み直しを実行中として数える。
+//
+// 利用者の操作への反応は前回の完了を待たずに出す。数えるのは、その読み直しが
+// 走っている間にポーリングが重ならないようにするためである。
+func (p *poller) force() { p.inFlight++ }
 
 // promptExpiredMsg は 2 打鍵目の待ち受けが時間切れになったことを表す。
 // token は世代番号で、待ち受けをやり直した後に古いタイマーが効かないようにする。

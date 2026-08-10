@@ -27,8 +27,8 @@ type WaitingModel struct {
 	text string
 	err  error
 
-	// gate は読み直しの逐次化。前回が着弾するまでポーリングで重ねて出さない。
-	gate refreshGate
+	// polling はポーリングの回し方(完了起点・重なりの防止)。
+	polling poller
 }
 
 var (
@@ -37,11 +37,8 @@ var (
 )
 
 // NewWaitingModel は Waiting のモデルを作る。
-//
-// 逐次化の印は実行中で始める(Init が最初の読み直しを必ず発行するため。
-// refreshGate を参照)。
 func NewWaitingModel(pane WaitingService, env app.PaneEnv) WaitingModel {
-	return WaitingModel{pane: pane, env: env, gate: refreshGate{inFlight: true}}
+	return WaitingModel{pane: pane, env: env, polling: newPoller(WaitingInterval)}
 }
 
 // Init は最初の一覧を読み、ポーリングを開始する。
@@ -71,11 +68,9 @@ func (m WaitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case waitingRefreshedMsg:
-		// 失敗していても逐次化の印はここで必ず下ろす。
-		m.gate.release()
-		// ポーリング起源ならここで次の合図を張る(完了起点のペーシング)。
-		// エラーでも張る。絶やすと二度と回らない。
-		next := rearmCmd(msg.poll, WaitingInterval)
+		// 失敗していても必ずここを通す(実行中の数を減らし、ポーリング起源なら
+		// 次の合図を張る)。
+		next := m.polling.arrive(msg.poll)
 		if msg.err != nil {
 			// 直前の一覧を残したままエラーだけを足す。空文字で上書きすると
 			// 何も出ていない画面になり、何が起きたのか分からなくなる。
@@ -86,13 +81,8 @@ func (m WaitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, next
 
 	case tickMsg:
-		if !m.gate.take() {
-			// 前回の読み直しがまだ着弾していない。重ねて発行せず、次の合図
-			// だけを予約する。
-			return m, tickCmd(WaitingInterval)
-		}
-		// 次の合図はこの読み直しの着弾で張るため、ここでは張らない。
-		return m, m.refreshCmd(true)
+		cmd := m.polling.tick(m.refreshCmd)
+		return m, cmd
 	}
 	return m, nil
 }

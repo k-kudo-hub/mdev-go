@@ -58,8 +58,8 @@ type DashboardModel struct {
 	notice string
 	// busy は削除の処理中で、ポーリングによる再描画を止める状態。
 	busy bool
-	// gate は読み直しの逐次化。前回が着弾するまでポーリングで重ねて出さない。
-	gate refreshGate
+	// polling はポーリングの回し方(完了起点・重なりの防止)。
+	polling poller
 }
 
 var (
@@ -68,11 +68,8 @@ var (
 )
 
 // NewDashboardModel は Dashboard のモデルを作る。
-//
-// 逐次化の印は実行中で始める。Init が最初の読み直しを必ず発行するためで、
-// これがないと起動直後の 1 回だけがガードの外へ漏れる(refreshGate を参照)。
 func NewDashboardModel(pane DashboardService, env app.PaneEnv) DashboardModel {
-	return DashboardModel{pane: pane, env: env, gate: refreshGate{inFlight: true}}
+	return DashboardModel{pane: pane, env: env, polling: newPoller(DashboardInterval)}
 }
 
 // Init は起動時の復元と最初の一覧の組み立てを行い、ポーリングを開始する。
@@ -115,11 +112,9 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dashboardRefreshedMsg:
 		// 発行した読み直しが 1 つ片付いた。内容を使うかどうかに関わらず、
-		// また失敗していても、逐次化の印はここで必ず下ろす。
-		m.gate.release()
-		// ポーリング起源ならここで次の合図を張る(完了起点のペーシング)。
-		// 内容を捨てる場合もエラーの場合も張る。絶やすと二度と回らない。
-		next := rearmCmd(msg.poll, DashboardInterval)
+		// また失敗していても、必ずここを通す(実行中の数を減らし、ポーリング
+		// 起源なら次の合図を張る)。
+		next := m.polling.arrive(msg.poll)
 		if m.awaiting {
 			// 待ち受けに入る前に発行した読み直しが着弾した。ここで一覧を
 			// 差し替えると押した番号が別のタブを指すため、捨てる。
@@ -139,21 +134,17 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 削除の途中と 2 打鍵目の待ち受け中は読み直さない。現行版は
 			// `read -t 3` がループを止めるため、この間は表示も番号の対応も
 			// 動かない。同じ意味になるようポーリングだけを空回りさせる。
-			return m, tickCmd(DashboardInterval)
+			return m, m.polling.rearm()
 		}
-		if !m.gate.take() {
-			// キー操作で出した読み直しがまだ着弾していない。重ねて発行せず、
-			// 次の合図だけを予約する。
-			return m, tickCmd(DashboardInterval)
-		}
-		// 次の合図はこの読み直しの着弾で張るため、ここでは張らない。
-		return m, m.refreshCmd(true)
+		cmd := m.polling.tick(m.refreshCmd)
+		return m, cmd
 
 	case promptExpiredMsg:
 		if msg.token == m.token {
 			// 凍結を解いて、止めていた間の変化に表示を追いつかせる。
 			m.awaiting = false
-			return m, m.forceRefreshCmd()
+			cmd := m.forceRefreshCmd()
+			return m, cmd
 		}
 		return m, nil
 
@@ -174,12 +165,14 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, noticeCmd(m.token)
 		}
 		m.busy, m.notice = false, ""
-		return m, m.forceRefreshCmd()
+		cmd := m.forceRefreshCmd()
+		return m, cmd
 
 	case noticeExpiredMsg:
 		if msg.token == m.token {
 			m.busy, m.notice = false, ""
-			return m, m.forceRefreshCmd()
+			cmd := m.forceRefreshCmd()
+			return m, cmd
 		}
 		return m, nil
 	}
@@ -202,11 +195,13 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		m.awaiting = false
 		number, ok := keyIndex(key)
 		if !ok {
-			return m, m.forceRefreshCmd()
+			cmd := m.forceRefreshCmd()
+			return m, cmd
 		}
 		if number > len(m.snapshot.Tabs) {
 			// 範囲外の番号は何もしない(現行版も同じ)。
-			return m, m.forceRefreshCmd()
+			cmd := m.forceRefreshCmd()
+			return m, cmd
 		}
 		tab := m.snapshot.Tabs[number-1]
 		m.busy, m.notice = true, uploadingLabel
@@ -230,9 +225,9 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	snapshot := m.snapshot
-	// このコマンドも最後に dashboardRefreshedMsg を返すので、逐次化の印を立てる。
+	// このコマンドも最後に dashboardRefreshedMsg を返すので実行中として数える。
 	// キー操作起源なので poll は立てない(着弾しても合図は張らない)。
-	m.gate.force()
+	m.polling.force()
 	return m, func() tea.Msg {
 		if err := m.pane.Jump(m.env, snapshot, number); err != nil {
 			return dashboardRefreshedMsg{snapshot: snapshot, err: err}
@@ -273,13 +268,16 @@ func (m DashboardModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cm
 	})
 }
 
-// forceRefreshCmd は逐次化の印を立ててから読み直しのコマンドを返す。
+// forceRefreshCmd は実行中として数えてから読み直しのコマンドを返す。
 //
 // キー操作と後始末(削除の完了・通知の期限切れ)が使う。利用者の操作への
-// 反応は前回の完了を待たずに出す(refreshGate.force を参照)。ポーリングの
-// チェーンとは別なので、着弾しても次の合図は張らない。
+// 反応は前回の完了を待たずに出す(poller.force を参照)。ポーリングのチェーンとは
+// 別なので、着弾しても次の合図は張らない。
+//
+// モデルを書き換えるため、呼び出し側は `cmd := m.forceRefreshCmd()` と
+// 別の文に分けてから return すること(poller の注記を参照)。
 func (m *DashboardModel) forceRefreshCmd() tea.Cmd {
-	m.gate.force()
+	m.polling.force()
 	return m.refreshCmd(false)
 }
 
