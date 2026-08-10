@@ -248,7 +248,6 @@ func TestConfigTaskKeysIgnoreBrokenShapes(t *testing.T) {
 	const raw = `{
 	  "search_dirs": "not-an-array",
 	  "search_depth": "not-a-number",
-	  "skip_task_name_input": "true",
 	  "agents": [],
 	  "task_types": 3
 	}`
@@ -263,11 +262,124 @@ func TestConfigTaskKeysIgnoreBrokenShapes(t *testing.T) {
 	if cfg.SearchDepth() != 1 {
 		t.Errorf("SearchDepth() = %d, want 1", cfg.SearchDepth())
 	}
-	// jq の比較は文字列 "true" と真偽値 true を区別するため、文字列は false。
-	if cfg.SkipTaskNameInput {
-		t.Error("SkipTaskNameInput は文字列 \"true\" では立たない")
-	}
 	if len(cfg.TaskTypes) != 0 || len(cfg.AgentNames()) != 0 {
 		t.Errorf("TaskTypes = %+v / AgentNames = %v, want どちらも空", cfg.TaskTypes, cfg.AgentNames())
+	}
+}
+
+func TestConfigSkipTaskNameInputAcceptsStringTrue(t *testing.T) {
+	t.Parallel()
+
+	// 現行版は `[[ "$(jq -r '.skip_task_name_input // false' ...)" == "true" ]]`
+	// で判定する。`jq -r` は文字列を引用符なしで出すため、真偽値 true と
+	// 文字列 "true" が同じ `true` という出力になり、**どちらも有効**である
+	// (実測で確認済み)。
+	tests := []struct {
+		raw  string
+		want bool
+	}{
+		{`{"skip_task_name_input": true}`, true},
+		{`{"skip_task_name_input": "true"}`, true},
+		{`{"skip_task_name_input": false}`, false},
+		{`{"skip_task_name_input": "false"}`, false},
+		{`{"skip_task_name_input": null}`, false},
+		{`{"skip_task_name_input": 1}`, false},
+		{`{"skip_task_name_input": "TRUE"}`, false},
+		{`{}`, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Parallel()
+			var cfg domain.Config
+			if err := json.Unmarshal([]byte(tc.raw), &cfg); err != nil {
+				t.Fatalf("設定の解釈に失敗: %v", err)
+			}
+			if cfg.SkipTaskNameInput != tc.want {
+				t.Errorf("SkipTaskNameInput = %v, want %v", cfg.SkipTaskNameInput, tc.want)
+			}
+		})
+	}
+}
+
+func TestConfigKeepsGoodAgentsBesideABrokenOne(t *testing.T) {
+	t.Parallel()
+
+	// 現行版はキー単位で読む(`keys_unsorted` は値を見ず、command は
+	// エージェント 1 つぶんしか読まない)ため、1 件壊れても他は無事である。
+	//
+	// まとめて空にすると Config.Agents が空になり、
+	// HasScreenDetectionAgent() が偽を返してダッシュボードがスクリーン検出を
+	// 止める。codex のタスクが一覧から無言で消える一番気づきにくい壊れ方に
+	// なるため、per-entry で読み飛ばす。
+	const raw = `{"agents": {
+	  "claude": {"command": "claude", "resume_args": "--resume", "detection": "hooks"},
+	  "broken": 5,
+	  "codex":  {"command": "codex", "resume_args": "resume", "detection": "screen"}
+	}}`
+
+	var cfg domain.Config
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("設定の解釈に失敗: %v", err)
+	}
+
+	// 名前の一覧には壊れたキーも残る(現行の keys_unsorted と同じ)。
+	if want := []string{"claude", "broken", "codex"}; !reflect.DeepEqual(cfg.AgentNames(), want) {
+		t.Errorf("AgentNames() = %v, want %v", cfg.AgentNames(), want)
+	}
+	if got := cfg.AgentCommand("codex"); !reflect.DeepEqual(got, []string{"codex"}) {
+		t.Errorf("AgentCommand(codex) = %v, want [codex]", got)
+	}
+	if got := cfg.AgentResumeArgs("codex"); !reflect.DeepEqual(got, []string{"resume"}) {
+		t.Errorf("AgentResumeArgs(codex) = %v, want [resume]", got)
+	}
+	// 壊れたエントリは既定へ落ちる(名前自身がコマンドになる)。
+	if got := cfg.AgentCommand("broken"); !reflect.DeepEqual(got, []string{"broken"}) {
+		t.Errorf("AgentCommand(broken) = %v, want [broken]", got)
+	}
+
+	// これがこの修正の要点。壊れたエントリがあっても codex の
+	// detection=screen が生きていなければ、ダッシュボードは
+	// スクリーン検出そのものを止めてしまう。
+	if cfg.AgentDetection("codex") != domain.DetectionScreen {
+		t.Errorf("AgentDetection(codex) = %q, want screen", cfg.AgentDetection("codex"))
+	}
+	if !cfg.HasScreenDetectionAgent() {
+		t.Error("HasScreenDetectionAgent() が偽になっている" +
+			"(ダッシュボードがスクリーン検出を止め、codex のタスクが一覧から消える)")
+	}
+}
+
+func TestConfigKeepsGoodTaskTypesBesideABrokenOne(t *testing.T) {
+	t.Parallel()
+
+	// 1 つの設定ミスで選択肢が全部消えるより、その 1 つだけが説明なしで
+	// 並ぶほうが直しやすい。レイアウト適用は現行版も型ごとに読む。
+	const raw = `{"task_types": {
+	  "dev":    {"description": "d", "layout": [{"action": "move-focus", "direction": "left"}]},
+	  "broken": 5,
+	  "k8s":    {"description": "k", "layout": [{"action": "new-pane", "direction": "right"}]}
+	}}`
+
+	var cfg domain.Config
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("設定の解釈に失敗: %v", err)
+	}
+
+	wantNames := []string{"dev", "broken", "k8s"}
+	gotNames := make([]string, 0, len(cfg.TaskTypes))
+	for _, tt := range cfg.TaskTypes {
+		gotNames = append(gotNames, tt.Name)
+	}
+	if !reflect.DeepEqual(gotNames, wantNames) {
+		t.Errorf("TaskTypes の並び = %v, want %v", gotNames, wantNames)
+	}
+	if got := cfg.Layout("k8s"); len(got) != 1 || got[0].Action != "new-pane" {
+		t.Errorf("Layout(k8s) = %+v", got)
+	}
+	if got := cfg.Layout("broken"); len(got) != 0 {
+		t.Errorf("Layout(broken) = %+v, want 空", got)
+	}
+	if cfg.TaskTypes[1].Description != "" {
+		t.Errorf("壊れたエントリの description = %q, want 空", cfg.TaskTypes[1].Description)
 	}
 }

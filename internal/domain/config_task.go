@@ -151,8 +151,7 @@ func (c *Config) unmarshalTaskKeys(data []byte) {
 	_ = json.Unmarshal(raw.SearchDirs, &c.SearchDirs)
 	_ = json.Unmarshal(raw.Agent, &c.Agent)
 	c.searchDepth = jqInt(raw.SearchDepth, 0)
-	// jq の `== "true"` は真偽値 true にだけ一致する(文字列 "true" は別物)。
-	c.SkipTaskNameInput = bytes.Equal(bytes.TrimSpace(raw.SkipTaskNameInput), []byte("true"))
+	c.SkipTaskNameInput = jqEqualsTrue(raw.SkipTaskNameInput)
 	c.agentNames, c.Agents = parseAgents(raw.Agents)
 	c.TaskTypes = parseTaskTypes(raw.TaskTypes)
 }
@@ -161,44 +160,80 @@ func (c *Config) unmarshalTaskKeys(data []byte) {
 //
 // detection(スクリーン検出が使う)と command / resume_args(タスク起動が
 // 使う)は同じ AgentConfig にまとめて入れる。
+//
+// **壊れたエントリはそれ 1 つだけを読み飛ばし、他は生かす。** 現行版は
+// `jq -r '.agents // {} | keys_unsorted[]'`(キーだけ)と
+// `jq -r '.agents[$a].command'`(1 つだけ)というキー単位の読み方をするため、
+// 1 つが壊れても他のエージェントは無事である。まとめて空にすると
+// Config.Agents が空になり、HasScreenDetectionAgent() が偽を返して
+// ダッシュボードがスクリーン検出そのものを止める。codex のタスクが
+// 一覧から無言で消えるという、最も気づきにくい壊れ方になる。
 func parseAgents(raw json.RawMessage) ([]string, map[string]AgentConfig) {
 	names := objectKeys(raw)
 	if len(names) == 0 {
 		return nil, nil
 	}
 
-	var entries map[string]AgentConfig
+	var entries map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil, nil
 	}
-	return names, entries
+
+	agents := make(map[string]AgentConfig, len(entries))
+	for name, entryRaw := range entries {
+		var agent AgentConfig
+		// オブジェクトでないエントリはこの 1 件だけ既定値のまま残す。
+		// 名前の一覧には現行版と同じく残る(keys_unsorted は値を見ない)。
+		if err := json.Unmarshal(entryRaw, &agent); err != nil {
+			agent = AgentConfig{}
+		}
+		agents[name] = agent
+	}
+	return names, agents
 }
 
 // parseTaskTypes は .task_types を記述順の配列にする。
+//
+// parseAgents と同じく、**壊れたエントリはそれ 1 つだけを読み飛ばす**。
+// 現行版の一覧表示(`to_entries[] | "\(.key)  \(.value.description)"`)は
+// オブジェクトでない値に当たるとそこで止まってしまうが、レイアウト適用
+// (`.task_types[$t].layout[]`)は型ごとに読むため他の型は無事である。
+// 1 つの設定ミスで選択肢が全部消えるより、その 1 つだけが説明なしで並ぶ
+// ほうが直しやすい。
 func parseTaskTypes(raw json.RawMessage) []TaskType {
 	names := objectKeys(raw)
 	if len(names) == 0 {
 		return nil
 	}
 
-	var entries map[string]struct {
-		Description string            `json:"description"`
-		Layout      []json.RawMessage `json:"layout"`
-	}
+	var entries map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil
 	}
 
 	types := make([]TaskType, 0, len(names))
 	for _, name := range names {
-		e := entries[name]
-		steps := make([]LayoutStep, 0, len(e.Layout))
-		for _, stepRaw := range e.Layout {
-			steps = append(steps, parseLayoutStep(stepRaw))
-		}
-		types = append(types, TaskType{Name: name, Description: e.Description, Layout: steps})
+		types = append(types, parseTaskType(name, entries[name]))
 	}
 	return types
+}
+
+// parseTaskType は task_types の 1 エントリを読む。
+// オブジェクトでない値は説明もレイアウトも無い型として扱う。
+func parseTaskType(name string, raw json.RawMessage) TaskType {
+	var entry struct {
+		Description string            `json:"description"`
+		Layout      []json.RawMessage `json:"layout"`
+	}
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return TaskType{Name: name}
+	}
+
+	steps := make([]LayoutStep, 0, len(entry.Layout))
+	for _, stepRaw := range entry.Layout {
+		steps = append(steps, parseLayoutStep(stepRaw))
+	}
+	return TaskType{Name: name, Description: entry.Description, Layout: steps}
 }
 
 // parseLayoutStep は layout の 1 要素を読む。
@@ -226,6 +261,19 @@ func jqOptionalString(raw json.RawMessage) string {
 		return ""
 	}
 	return jqRawString(raw)
+}
+
+// jqEqualsTrue は `[[ "$(jq -r '.key // false' ...)" == "true" ]]` を再現する。
+//
+// `jq -r` は文字列を引用符なしで出すため、**真偽値の true と文字列の "true" が
+// どちらも `true` という同じ出力になる**。したがって設定に
+// `"skip_task_name_input": "true"` と書いても現行版では有効になる
+// (実測で確認済み)。逆に数値の 1 や文字列 "false" は無効である。
+func jqEqualsTrue(raw json.RawMessage) bool {
+	if !JSONTruthy(raw) {
+		return false
+	}
+	return jqRawString(raw) == "true"
 }
 
 // jqInt は `jq -r '.key // def'` の結果を bash の算術で使ったときの値を返す。
