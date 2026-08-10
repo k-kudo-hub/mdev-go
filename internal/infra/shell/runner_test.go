@@ -7,13 +7,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recordedCall は run に渡された引数の記録。
 type recordedCall struct {
-	name string
-	args []string
-	env  []string
+	name    string
+	args    []string
+	env     []string
+	timeout time.Duration
 }
 
 // newTestRunner は外部コマンドを実行しない Runner と呼び出しの記録を返す。
@@ -22,8 +24,8 @@ func newTestRunner(out string, err error) (*Runner, *[]recordedCall) {
 	r := &Runner{
 		conductorHome: "/ch",
 		env:           []string{"CONDUCTOR_HOME=/ch", "ZELLIJ_SESSION_NAME=s1"},
-		run: func(env []string, name string, args ...string) (string, error) {
-			*calls = append(*calls, recordedCall{name: name, args: args, env: env})
+		run: func(timeout time.Duration, env []string, name string, args ...string) (string, error) {
+			*calls = append(*calls, recordedCall{name: name, args: args, env: env, timeout: timeout})
 			return out, err
 		},
 	}
@@ -213,5 +215,90 @@ func TestNewRunnerSetsConductorHome(t *testing.T) {
 	}
 	if r.script("x.sh") != "/custom/home/scripts/x.sh" {
 		t.Errorf("script() = %q", r.script("x.sh"))
+	}
+}
+
+// ---- 実行時間の上限 -------------------------------------------------------
+
+func TestRunnerAppliesTimeoutPerScript(t *testing.T) {
+	t.Parallel()
+
+	// ポーリングと起動の経路にだけ上限を付ける。ここが返らないとポーリングが
+	// 止まる(完了起点なので、着弾しないと次の合図が張られない)。
+	// 利用者が起こす長時間処理は待つほうが安全なので上限を付けない。
+	tests := []struct {
+		name string
+		call func(*Runner)
+		want time.Duration
+	}{
+		{
+			name: "スクリーン検出は 15 秒",
+			call: func(r *Runner) { r.ScreenDetectTick("s1") },
+			want: 15 * time.Second,
+		},
+		{
+			name: "セッション復元は 60 秒",
+			call: func(r *Runner) { r.RestoreSession() },
+			want: 60 * time.Second,
+		},
+		{
+			name: "アップロードは上限なし",
+			call: func(r *Runner) { _, _ = r.UploadLog("alpha") },
+			want: 0,
+		},
+		{
+			name: "restore-task は上限なし",
+			call: func(r *Runner) { r.RestoreTask("alpha", "s1", "2026-08-10T10:00:00+0900") },
+			want: 0,
+		},
+		{
+			name: "ニュース取得は上限なし",
+			call: func(r *Runner) { r.FetchNews() },
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r, calls := newTestRunner("", nil)
+			tt.call(r)
+			if got := (*calls)[0].timeout; got != tt.want {
+				t.Errorf("上限 = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunCommandCutsOffAtTimeout(t *testing.T) {
+	t.Parallel()
+
+	// 返らない子プロセスは上限で切られ、エラーとして戻る。切れないと
+	// ポーリングのチェーンがそこで止まる。
+	start := time.Now()
+	out, err := runCommand(50*time.Millisecond, nil, "sleep", "30")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("上限を超えたのにエラーが返っていない")
+	}
+	if out != "" {
+		t.Errorf("出力 = %q, want 空", out)
+	}
+	if elapsed > 10*time.Second {
+		t.Errorf("上限で切れていない: %v かかった", elapsed)
+	}
+}
+
+func TestRunCommandWithoutTimeoutRuns(t *testing.T) {
+	t.Parallel()
+
+	// 上限なし(0)でも通常どおり実行できる。
+	out, err := runCommand(noTimeout, nil, "echo", "ok")
+	if err != nil {
+		t.Fatalf("runCommand() = %v", err)
+	}
+	if strings.TrimSpace(out) != "ok" {
+		t.Errorf("出力 = %q, want ok", out)
 	}
 }

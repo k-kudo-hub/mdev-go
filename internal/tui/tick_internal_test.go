@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -25,14 +26,17 @@ var errTickRefresh = errors.New("読み直しに失敗した")
 type tickDashboard struct {
 	snapshot  app.DashboardSnapshot
 	refreshes int
+	// calls は Startup と Refresh の呼び出し順。
+	calls []string
 }
 
 var _ DashboardService = (*tickDashboard)(nil)
 
-func (s *tickDashboard) Startup() {}
+func (s *tickDashboard) Startup() { s.calls = append(s.calls, "startup") }
 
 func (s *tickDashboard) Refresh(app.PaneEnv) (app.DashboardSnapshot, error) {
 	s.refreshes++
+	s.calls = append(s.calls, "refresh")
 	return s.snapshot, nil
 }
 
@@ -495,6 +499,32 @@ func settledDashboard(t *testing.T, service DashboardService) DashboardModel {
 		t.Fatalf("モデルの型 = %T", next)
 	}
 	return m
+}
+
+func TestDashboardInitProceedsToRefreshAfterStartup(t *testing.T) {
+	t.Parallel()
+
+	// Init は起動時の復元 → 最初の読み直し、の順に進む。復元(restore-session.sh)は
+	// 上限で切られることがある(internal/infra/shell の restoreSessionTimeout)が、
+	// 切られても Startup は戻るので読み直しには必ず進み、その着弾が
+	// ポーリングのチェーンを張る。
+	service := &tickDashboard{snapshot: app.DashboardSnapshot{Text: "画面"}}
+	m := NewDashboardModel(service, tickEnv)
+
+	landed, ok := wantRefreshOnly(t, m.Init()).(dashboardRefreshedMsg)
+	if !ok {
+		t.Fatal("Init が読み直しを返していない")
+	}
+	if !landed.poll {
+		t.Error("ポーリング起源として発行していない")
+	}
+	if want := []string{"startup", "refresh"}; !reflect.DeepEqual(service.calls, want) {
+		t.Errorf("呼び出し = %v, want %v", service.calls, want)
+	}
+
+	// その着弾が次の合図を張り、ポーリングが回り始める。
+	_, cmd := update(t, m, landed)
+	wantTimerOnly(t, cmd)
 }
 
 func TestDashboardTickRefreshesAndRearms(t *testing.T) {

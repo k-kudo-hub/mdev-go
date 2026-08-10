@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestTabControllerListTabs(t *testing.T) {
@@ -68,5 +69,46 @@ func TestNewTabControllerIsWired(t *testing.T) {
 	c := NewTabController()
 	if c.output == nil || c.run == nil {
 		t.Error("実コマンドの実行関数が設定されていない")
+	}
+}
+
+func TestCommandOutputCutsOffAtTimeout(t *testing.T) {
+	t.Parallel()
+
+	// 返らない zellij は上限で切られ、空文字(= タブが 1 つも無い扱い)になる。
+	// 切れないとダッシュボードのポーリングがそこで止まる。
+	start := time.Now()
+	out := commandOutput(50*time.Millisecond, "sleep", "30")
+	elapsed := time.Since(start)
+
+	if out != "" {
+		t.Errorf("出力 = %q, want 空", out)
+	}
+	if elapsed > 10*time.Second {
+		t.Errorf("上限で切れていない: %v かかった", elapsed)
+	}
+}
+
+func TestRunCommandCutsOffAtTimeout(t *testing.T) {
+	t.Parallel()
+
+	start := time.Now()
+	err := runCommand(50*time.Millisecond, "sleep", "30")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("上限を超えたのにエラーが返っていない")
+	}
+	if elapsed > 10*time.Second {
+		t.Errorf("上限で切れていない: %v かかった", elapsed)
+	}
+}
+
+func TestCommandTimeoutIsTenSeconds(t *testing.T) {
+	t.Parallel()
+
+	// ポーリングが毎周期呼ぶ list-tabs の上限。値そのものを固定しておく。
+	if commandTimeout != 10*time.Second {
+		t.Errorf("commandTimeout = %v, want 10s", commandTimeout)
 	}
 }

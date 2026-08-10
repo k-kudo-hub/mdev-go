@@ -6,17 +6,43 @@
 package shell
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 )
 
 // scriptsDirName は CONDUCTOR_HOME 直下のスクリプト置き場。
 const scriptsDirName = "scripts"
+
+// ポーリングと起動の経路に付ける実行時間の上限。
+//
+// zellij サーバが劣化して CLI が返らなくなると、この呼び出しは永久に返らない。
+// ポーリングの読み直しは着弾して初めて次の合図を張るため(完了起点。
+// internal/tui の poller を参照)、返らない呼び出しはポーリングをそこで
+// 止めてしまう。上限を付けておけばタイムアウトがエラーとして着弾し、
+// 表示が 1 回ぶん古くなるだけでポーリングは回り続ける。
+//
+// 値は「正常時の実測(スクリーン検出の内部で走る list-panes が 1.1〜1.5 秒)より
+// 十分長く、利用者が固まったと感じるより短い」ところに置いている。
+const (
+	// screenDetectTimeout はスクリーン検出 1 回の上限。
+	screenDetectTimeout = 15 * time.Second
+	// restoreSessionTimeout は起動時のセッション復元の上限。
+	// 登録済みのタスクぶんタブを作り直すため、他より長く取る。
+	restoreSessionTimeout = 60 * time.Second
+	// noTimeout は上限を設けないことを表す。
+	//
+	// 利用者が起こす長時間処理(UploadLog / RestoreTask / FetchNews)に使う。
+	// 途中で切ると作業ログを失う・復元が中途半端に終わるなど、待つほうが安全で、
+	// いずれもポーリングのチェーンを止めない経路である。
+	noTimeout = 0
+)
 
 // uploadLogPrefix は upload-log.sh が結果行の頭に付ける印。
 // 表示するときはこれを取り除く(現行版の `${upload_out#upload-log: }`)。
@@ -28,7 +54,8 @@ type Runner struct {
 	// env は子プロセスへ渡す環境変数。テストで差し替える。
 	env []string
 	// run はコマンドを実行して標準出力を返す。テストで差し替える。
-	run func(env []string, name string, args ...string) (string, error)
+	// timeout が 0 以下なら上限を設けない。
+	run func(timeout time.Duration, env []string, name string, args ...string) (string, error)
 }
 
 var _ app.ShellRunner = (*Runner)(nil)
@@ -59,7 +86,7 @@ func (r *Runner) script(name string) string {
 // ならない。戻り値の文字列は標準出力から `upload-log: ` を取り除いたもので、
 // 空なら表示するものが無い。
 func (r *Runner) UploadLog(tab string) (string, error) {
-	out, err := r.run(r.env, "bash", r.script("upload-log.sh"), tab)
+	out, err := r.run(noTimeout, r.env, "bash", r.script("upload-log.sh"), tab)
 	if err != nil {
 		return "", fmt.Errorf("upload-log.sh が失敗しました: %w", err)
 	}
@@ -70,17 +97,21 @@ func (r *Runner) UploadLog(tab string) (string, error) {
 // RestoreTask は Done のタスクをダッシュボードへ戻す。
 // 終了コードは見ない(現行版も `2>/dev/null` で握り潰している)。
 func (r *Runner) RestoreTask(tab, session, completedAt string) {
-	_, _ = r.run(r.env, "bash", r.script("restore-task.sh"), tab, session, completedAt)
+	_, _ = r.run(noTimeout, r.env, "bash", r.script("restore-task.sh"), tab, session, completedAt)
 }
 
 // FetchNews は当日のニュースを取り直す。
 func (r *Runner) FetchNews() {
-	_, _ = r.run(r.env, "bash", r.script("fetch-news.sh"), "--force")
+	_, _ = r.run(noTimeout, r.env, "bash", r.script("fetch-news.sh"), "--force")
 }
 
 // RestoreSession は登録済みタスクのタブを作り直す。
+//
+// 起動時に 1 度だけ走る。ここが返らないと最初の描画に進めないため上限を付ける
+// (restoreSessionTimeout)。切られた場合もタブが作り直されないだけで、
+// 呼び出し側はそのまま最初の読み直しへ進む。
 func (r *Runner) RestoreSession() {
-	_, _ = r.run(r.env, "bash", r.script("restore-session.sh"))
+	_, _ = r.run(restoreSessionTimeout, r.env, "bash", r.script("restore-session.sh"))
 }
 
 // screenDetectScript はスクリーン検出を 1 回走らせる bash の本文である。
@@ -98,13 +129,22 @@ const screenDetectScript = `. "$1"; screen_detect_tick "$2"`
 // ダッシュボードに出てこない。
 func (r *Runner) ScreenDetectTick(session string) {
 	// bash -c の第 1 引数は $0 になるので、$1 の手前に置き場所が要る。
-	_, _ = r.run(r.env, "bash", "-c", screenDetectScript, "_", r.script("screen-detect-lib.sh"), session)
+	_, _ = r.run(screenDetectTimeout, r.env, "bash", "-c", screenDetectScript, "_", r.script("screen-detect-lib.sh"), session)
 }
 
 // runCommand は外部コマンドを実行して標準出力を返す。
 // 標準エラー出力は捨てる(現行版の `2>/dev/null` に対応する)。
-func runCommand(env []string, name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+//
+// timeout が正の値なら、その時間で子プロセスを切る(exec.CommandContext が
+// SIGKILL を送る)。切られた場合はエラーが返る。
+func runCommand(timeout time.Duration, env []string, name string, args ...string) (string, error) {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = env
 	out, err := cmd.Output()
 	return string(out), err
