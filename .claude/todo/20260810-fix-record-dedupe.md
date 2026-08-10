@@ -45,7 +45,9 @@ claude-conductor 側で確定した「再試行時の daily 追記の置換セ�
 - [x] domain: `DailyRecord.HasDedupeKey`(空 / `screen-` 前置きはキーにしない)のテスト → 実装
 - [x] store: `screen-` の sid で 2 回実行すると 2 行になるテスト
 - [x] store: ロックを取れないとき(fail-open)は削除フィルタを飛ばして追記のみ行うテスト
-- [ ] conductor 側の確定連絡を受けてゴールデンを再生成し、`screen-` sid のケース追加を検討
+- [x] conductor 側の確定版(HEAD 433c402)でゴールデンを再生成し同一性を確認
+- [x] `screen-` sid のゴールデンケースを 2 件追加(2 回実行で 2 行 / 古い履歴が残る)
+- [x] ロック未取得時に追記のみになることの Go 側ユニットテストがあることを確認
 
 ### ゴールデン(現行 Shell 版との一致)
 
@@ -58,5 +60,5 @@ claude-conductor 側で確定した「再試行時の daily 追記の置換セ�
 
 ### 仕上げ
 
-- [ ] 各コミット前に `make check` 緑
-- [ ] evidence(`.claude/todo/20260810-record-dedupe-evidence.md`)に判断の根拠を記録
+- [x] 各コミット前に `make check` 緑
+- [x] evidence(`.claude/todo/20260810-record-dedupe-evidence.md`)に判断の根拠を記録

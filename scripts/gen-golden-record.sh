@@ -163,20 +163,44 @@ dates_consistent() {
     return 0
 }
 
+# 複数回走らせた case で、今回書かれた行の completed_at がすべて同じかを見る。
+#
+# Go 側のゴールデンテストは fixture から復元した 1 つの固定時刻で同じ回数走らせる。
+# Shell 版は実行のたびに date を呼ぶため、2 回目が秒をまたぐと再現できない fixture
+# ができてしまう。実行前から置いてある行(existing_daily)の時刻は比較から除く。
+run_timestamps_uniform() {
+    local out_dir="$1" case_json="$2" file
+    local existing_ts="$WORK/existing-ts" written_ts="$WORK/written-ts"
+
+    field "$case_json" '.existing_daily' | jq -r '.completed_at // empty' 2>/dev/null > "$existing_ts" \
+        || : > "$existing_ts"
+    : > "$written_ts"
+    while IFS= read -r -d '' file; do
+        jq -r '.completed_at // empty' "$file" >> "$written_ts"
+    done < <(find "$out_dir/daily" -name '*.jsonl' -type f -print0 2>/dev/null)
+
+    [ "$(grep -vxF -f "$existing_ts" "$written_ts" | sort -u | wc -l | tr -d ' ')" -le 1 ]
+}
+
 count=0
 while IFS= read -r case_json; do
     name=$(field "$case_json" '.name')
+    runs=$(printf '%s' "$case_json" | jq -r '.runs // 1')
     out_dir="$GOLDEN_DIR/$name/expected"
 
     attempt=0
     while :; do
         run_case "$case_json" "$out_dir"
-        if dates_consistent "$out_dir"; then
+        if ! dates_consistent "$out_dir"; then
+            reason="daily のファイル名と completed_at の日付が一致しません"
+        elif [ "$runs" -gt 1 ] && ! run_timestamps_uniform "$out_dir" "$case_json"; then
+            reason="複数回の実行が秒をまたぎ、completed_at が揃いませんでした"
+        else
             break
         fi
         attempt=$((attempt + 1))
         if [ "$attempt" -ge 5 ]; then
-            echo "$name: daily のファイル名と completed_at の日付が一致しません" >&2
+            echo "$name: $reason" >&2
             exit 1
         fi
     done

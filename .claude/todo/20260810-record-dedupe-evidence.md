@@ -107,23 +107,38 @@ daily ファイルのロックは 2 秒で諦めて処理を続ける(fail-open)
 
 ```console
 $ bash scripts/gen-golden-record.sh /Users/kazuto/projects/claude-conductor/.worktree/fix-upload-codex-record-dedupe
-30 件の fixture を .../golden-record に生成しました
+32 件の fixture を .../golden-record に生成しました
 $ go test ./internal/infra/store/ -run TestGoldenRecord -v | grep -c -- '--- PASS'
-30
+32
 ```
+
+生成元は conductor worktree の確定版(HEAD = `433c402`「dedupe対象をscreen合成IDに限定し
+ロック未取得時は追記のみにする」、conductor 側テスト 603 passed)である。
 
 `cases.json` に `"runs": N` を足し、`gen-golden-record.sh` は同じ sandbox のまま
 `record-output.sh` を N 回続けて走らせるようにした。Go 側のゴールデンテストも
-`runCount()` 回だけ `Execute` を呼ぶ。Shell 版は実行ごとに `date` を呼ぶため 1 回目と
-2 回目の `completed_at` は異なりうるが、置換で残るのは最後の 1 件だけなので、
-Go 側の固定時刻(fixture の最終行から復元)と一致する。
+`runCount()` 回だけ `Execute` を呼ぶ。
+
+### 複数回実行の fixture が固定時刻で再現できることの担保
+
+Shell 版は実行ごとに `date` を呼ぶ。置換が起きる `retry-replaces-entry` は最後の 1 件しか
+残らないので問題にならないが、置換が起きない `screen-session-appends-every-run` は
+2 行とも残るため、実行が秒をまたぐと 2 つの `completed_at` を持つ fixture ができる。
+Go 側は fixture から復元した 1 つの固定時刻で走るため、これは再現できない。
+
+そこで `gen-golden-record.sh` に `run_timestamps_uniform` を足した。`existing_daily` 由来の
+時刻を除いた「今回書かれた行」の `completed_at` が 2 種類以上あれば生成をやり直す
+(既存の `dates_consistent` と同じ再試行ループに乗せ、5 回で打ち切り)。
+実測では `record-output.sh` 1 回が数十 ms なのでやり直しは発生しなかった。
 
 ### 既存 fixture を変更しないための確認
 
 再生成すると全ケースのファイル名の日付と `completed_at` が今日の値へ変わる。
 `completed_at` を定数へ潰し、ファイル名の日付を無視して旧 fixture(`git show HEAD:<path>`)と
-突き合わせた結果、**内容が変わったケースは 0 件**だった(新規の `retry-replaces-entry` のみ追加)。
-そのうえで既存 29 ケースは `git checkout` と生成物の削除で元へ戻し、新規ケースだけを追加した。
+突き合わせた結果、**内容が変わったケースは 0 件**だった。とくに `retry-replaces-entry` は
+conductor の修正前に生成したものと確定版の出力が `completed_at` を除いて完全一致しており、
+`screen-` 除外とロック条件の追加がこのケースの経路を変えていないことを確認できた。
+そのうえで既存 30 ケースは `git checkout` と生成物の削除で元へ戻し、新規 2 ケースだけを追加した。
 
 ### 新規ケース `retry-replaces-entry`
 
@@ -141,17 +156,35 @@ Go 側の固定時刻(fixture の最終行から復元)と一致する。
 「restored は対象外」「別キーは対象外」「未変更行の相対順序」「置換行の末尾配置」
 「2 回実行で 1 行」のすべてを押さえている。
 
-## 8. 未解決 / 判断を保留した点
+### 新規ケース `screen-session-appends-every-run` / `screen-session-keeps-old-history`
 
-- **conductor 側の再確認待ち**: `screen-` 前置きの除外とロック fail-open 時の置換スキップは
-  conductor 側でも反映中である。この fixture は反映前の Shell 版から生成したが、
-  ケースの sid は `sess-retry`(`screen-` ではない)でロックも空いているため、
-  どちらの変更にも影響されない経路しか通っていない。conductor 側の確定後に再生成して
-  同一であることを確認する必要がある。
-- **`screen-` sid のゴールデンケース**: conductor 側の確定後に追加を検討する
-  (`runs: 2` + `screen-<slug>` の pending で 2 行になること)。現時点では Go 側の
-  ユニットテスト `TestDailyStoreAppendKeepsScreenSessionEntries` で固定している。
+`screen-` 前置きの sid が置換キーにならないことを Shell 版の出力で固定する 2 件。
+
+- `screen-session-appends-every-run`: `claude_session_id` が
+  `screen-screen-tab-2917289248` の pending で 2 回実行 → **daily は 2 行**。
+  同じ内容の記録が 2 つ並ぶ(重複は許容し、履歴の誤削除を避ける側の挙動)。
+- `screen-session-keeps-old-history`: 同じタブ名・同じ合成 ID で完了した
+  **無関係な古い記録**(`completed_at` が 2026-01-01)を置いた状態で 1 回実行 →
+  古い行は消えず 2 行になる。合成 ID を置換キーにしていたら消えていた行であり、
+  この除外規則が守っているものそのものである。
+
+## 8. ロック未取得時の挙動の固定
+
+conductor 側は test.sh がロックディレクトリを保持したまま `record-output.sh` を走らせて
+検証している。Go 側は `TestDailyStoreAppendSkipsReplacementWhenLockUnavailable` が同じ状況を
+作る(ロックディレクトリに自プロセスの PID を書いて「所有者が生きている」状態にし、
+`DailyLockTimeout` の 2 秒を空振りさせる)。置換対象の行が残ったまま追記されること、
+fail-open の警告が出ることの両方を確認している。ゴールデンでは再現しない
+(gen スクリプトは実 Shell を素で走らせるため、ロックは常に取得できる)。
+
+## 9. 未解決 / 判断を保留した点
+
 - **app 層のテストは赤を先に出せていない**: `RecordOutput` 自体の振る舞いは変わらない
   (dedupe キーは pending から素通しで渡るだけ)ため、
   `TestRecordOutputRepeatsTheSameDedupeKeyOnRetry` は退行防止の characterization テストである。
   赤から始めたのは domain と store のテストである。
+- **Shell の既知の制約はそのまま移植した**: 確定版の `record-output.sh` が
+  「Known limitations」として明記している 2 点(再試行の合間に pending の sid が
+  実 ID と `screen-<slug>` の間で入れ替わると 2 行残る / 毎回 `completed_at` を
+  打ち直すため `restore-task.sh` の (tab, completed_at) 照合が一度だけ空振りしうる)は、
+  Go 側でも同じ挙動になる。挙動互換を優先し、ここでの独自対処は行っていない。
