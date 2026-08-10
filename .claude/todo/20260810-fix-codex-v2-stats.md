@@ -31,6 +31,21 @@
 - [x] 7. 既存ゴールデンが不変であることを確認する
 - [x] 8. evidence をまとめる
 
+## 追記: conductor の code-review 対応(fe4b184)への追随
+
+仕様の正本が `scripts/codex-rollout-lib.sh` に集約され、集計精度が上がった。
+ツール集計の pick-one はそのまま(カテゴリ別 union も二重計上になることが
+実 rollout の調査で確定したため)。
+
+- [x] 9. tools_used の命名を `.name // .tool // .kind // .type` にする
+      (McpToolCall は `.tool`、Extension は `.kind`)
+- [x] 10. merged 判定を「起動したもの」だけに絞る。v1 は `.name` の
+      `merge_pull_request` 一致を追加、v2 は CommandExecution の command と
+      McpToolCall の `.tool` のみ(引数本文と出力は走査しない)
+- [x] 11. `.command` の型ガード(配列以外でも落とさず tostring する)
+- [x] 12. テストとゴールデンを fe4b184 で更新・追加(McpToolCall のマージ、
+      文字列 command、FileChange / Extension の命名)
+
 ## 完了条件
 
 - `make check` が緑

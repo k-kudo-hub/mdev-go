@@ -29,17 +29,30 @@ const (
 	codexEventItemCompleted = "item_completed"
 )
 
-// codexItemUserMessage は 1 ターンに当たる item.type である。
-const codexItemUserMessage = "UserMessage"
+// item_completed が運ぶ item.type のうち、ターンとツール呼び出しに当たるもの。
+const (
+	codexItemUserMessage      = "UserMessage"
+	codexItemCommandExecution = "CommandExecution"
+	codexItemMcpToolCall      = "McpToolCall"
+)
 
 // codexToolItemTypes はツール呼び出しに当たる item.type である。
 // Reasoning やメッセージの item はツール呼び出しではないので数えない。
 var codexToolItemTypes = map[string]struct{}{
-	"CommandExecution": {},
-	"McpToolCall":      {},
-	"FileChange":       {},
-	"Extension":        {},
+	codexItemCommandExecution: {},
+	codexItemMcpToolCall:      {},
+	"FileChange":              {},
+	"Extension":               {},
 }
+
+// codexMergeToolSubstring は MCP 経由の PR マージを見分ける。
+//
+// 現行版(codex-rollout-lib.sh の codex_merged)は `test("merge_pull_request")`
+// で照合する。メタ文字を含まない正規表現なので部分一致そのものである。
+// claude 側(markers.go)がツール名の完全一致で見るのに対し、codex は
+// mcp__github__merge_pull_request(呼び出しビュー)と merge_pull_request
+// (item ビューの .tool)の両方を 1 つの式で拾うため部分一致になっている。
+const codexMergeToolSubstring = "merge_pull_request"
 
 // codexToolCallPattern はツール呼び出しの response_item を見分ける。
 //
@@ -51,18 +64,26 @@ var codexToolCallPattern = regexp.MustCompile(`_call\n?$`)
 
 // CodexToolCall は rollout 中のツール呼び出し 1 件である。
 type CodexToolCall struct {
-	// Name はツール名。name が無ければ type を使う(現行版の `.name // .type`)。
-	// item ビューではツール名のフィールドが無いため、item の型がそのまま名前になる。
+	// Name は tools_used に出す表示名で、現行版の codex_tool_name
+	// (`.name // .tool // .kind // .type`)に対応する。呼び出しビューは .name を
+	// 持ち、item ビューは McpToolCall が .tool(実データでは "js")、Extension が
+	// .kind("web.search")を持つ。どれも無ければ item の型が名前になる。
 	Name string
-	// Input は merged 判定に使う文字列。呼び出しビューでは現行版の
-	// `((.input // .arguments // "") | tostring)`、item ビューでは
-	// `((.command // []) | join(" ")) + " " + ((.arguments // "") | tostring)`
-	// に対応する。オブジェクトなどは compact JSON の文字列になる。
-	//
-	// item ビューで実行したコマンドだけを見るのは、CommandExecution item が
-	// stdout / aggregated_output も持つためである。gh pr merge と書かれた
-	// ファイルを cat しただけのタスクを merged と誤判定する実データがある。
-	Input string
+
+	// MergeCommand と MergeTool は merged 判定の走査対象である。走査するのは
+	// 「何を起動したか」だけで、コマンドの出力や引数の本文は見ない。
+	// CommandExecution item は stdout / aggregated_output も持つため、
+	// gh pr merge と書かれたファイルを cat しただけで誤検知する実データがあり、
+	// MCP の引数本文も Slack 投稿が gh pr merge を引用しただけで誤検知する。
+
+	// MergeCommand は `gh pr merge` を探す対象。呼び出しビューは現行版の
+	// `((.input // .arguments // "") | tostring)`、item ビューは
+	// CommandExecution が実行したコマンド(codex_command_text)である。
+	// ツールを起動しない item(FileChange / Extension)では空になる。
+	MergeCommand string
+	// MergeTool は `merge_pull_request` を探す対象。呼び出しビューは `.name`、
+	// item ビューは McpToolCall の `.tool` で、それ以外では空になる。
+	MergeTool string
 }
 
 // CodexTranscript は codex の rollout から集計した値である。
@@ -255,21 +276,43 @@ func codexToolOf(payload map[string]json.RawMessage) (tool CodexToolCall, isCall
 		return CodexToolCall{}, false, true
 	}
 
-	tool = CodexToolCall{Name: payloadType}
-	if raw := payload["name"]; jsonTruthy(raw) {
-		name, isString := jsonString(raw)
-		if !isString {
-			return CodexToolCall{}, false, false
-		}
-		tool.Name = name
+	name, named := codexToolName(payload, payloadType)
+	if !named {
+		return CodexToolCall{}, false, false
 	}
+	tool = CodexToolCall{Name: name}
 	for _, key := range []string{"input", "arguments"} {
 		if raw := payload[key]; jsonTruthy(raw) {
-			tool.Input = jsonToString(raw)
+			tool.MergeCommand = jsonToString(raw)
 			break
 		}
 	}
+	// MCP 経由のマージは引数の本文ではなく呼び出したツール名で見分ける。
+	if raw := payload["name"]; jsonTruthy(raw) {
+		tool.MergeTool = jsonToString(raw)
+	}
 	return tool, true, true
+}
+
+// codexToolName は現行版の codex_tool_name(`.name // .tool // .kind // .type`)
+// を再現する。fallback は呼び出しビューでは payload.type、item ビューでは
+// item.type である。
+//
+// 最初に見つかった非偽値が文字列でなければ ok=false を返す。これは現行仕様との
+// 意図的な差異である(CodexTranscript のコメントを参照)。
+func codexToolName(fields map[string]json.RawMessage, fallback string) (string, bool) {
+	for _, key := range []string{"name", "tool", "kind"} {
+		raw := fields[key]
+		if !jsonTruthy(raw) {
+			continue
+		}
+		name, isString := jsonString(raw)
+		if !isString {
+			return "", false
+		}
+		return name, true
+	}
+	return fallback, true
 }
 
 // codexItemOf は item_completed の item を読む。
@@ -293,69 +336,55 @@ func codexItemOf(rawItem json.RawMessage) (isTurn bool, tool CodexToolCall, isTo
 		return false, CodexToolCall{}, false, true
 	}
 
-	tool = CodexToolCall{Name: itemType}
-	if raw := item["name"]; jsonTruthy(raw) {
-		name, isString := jsonString(raw)
-		if !isString {
-			return false, CodexToolCall{}, false, false
-		}
-		tool.Name = name
-	}
-
-	command, joined := codexJoinCommand(item["command"])
-	if !joined {
+	name, named := codexToolName(item, itemType)
+	if !named {
 		return false, CodexToolCall{}, false, false
 	}
-	arguments := ""
-	if raw := item["arguments"]; jsonTruthy(raw) {
-		arguments = jsonToString(raw)
+	tool = CodexToolCall{Name: name}
+
+	// 走査対象は item の種類ごとに決まっている。CommandExecution は実行した
+	// コマンド、McpToolCall は呼び出したツール名で、FileChange と Extension は
+	// マージの手段になり得ないので何も走査しない。
+	switch itemType {
+	case codexItemCommandExecution:
+		tool.MergeCommand = codexCommandText(item["command"])
+	case codexItemMcpToolCall:
+		if raw := item["tool"]; jsonTruthy(raw) {
+			tool.MergeTool = jsonToString(raw)
+		}
 	}
-	tool.Input = command + " " + arguments
 	return false, tool, true, true
 }
 
-// codexJoinCommand は item の command を jq の `(.command // []) | join(" ")`
-// と同じ形で 1 本の文字列にする。
+// codexCommandText は CommandExecution item が実行したコマンドを 1 本の文字列に
+// する。現行版の codex_command_text に対応する。
 //
-// 偽値(null や false)は空配列と同じ扱いになり、配列でなければ join が反復に
-// 失敗するため ok=false を返す(現行版は「Cannot iterate over ...」で落ちる)。
-func codexJoinCommand(raw json.RawMessage) (string, bool) {
-	if !jsonTruthy(raw) {
-		return "", true
-	}
-	var elements []json.RawMessage
-	if err := json.Unmarshal(raw, &elements); err != nil {
-		return "", false
-	}
-	parts := make([]string, 0, len(elements))
-	for _, element := range elements {
-		part, ok := codexJoinElement(element)
-		if !ok {
-			return "", false
-		}
-		parts = append(parts, part)
-	}
-	return strings.Join(parts, " "), true
-}
-
-// codexJoinElement は join が要素 1 つを文字列にする規則を再現する。
+//	if (.command | type) == "array" then (.command | map(tostring) | join(" "))
+//	else ((.command // "") | tostring) end
 //
-// null は空文字になり、数値と真偽値は表記になり、オブジェクトと配列は連結
-// できずにエラーになる(現行版は「string と object cannot be added」で落ちる)。
+// 型で分岐するのは、形の揺れでレコードを丸ごと落とさないためである。ここで
+// jq が落ちると daily レコードが summary: null へ退避してしまう。配列なら
+// 要素ごとに tostring して空白で繋ぎ(null は "null" になる)、配列でなければ
+// 文字列や数値やオブジェクトをそのまま tostring する。偽値は空文字になる。
+//
 // 数値の表記は jq の正規化(1.0 を 1 にする)までは真似ていない。実在の rollout
 // の command は文字列の配列だけで、数値が入る例が無いためである。
-func codexJoinElement(raw json.RawMessage) (string, bool) {
-	if !jsonNonNull(raw) {
-		return "", true
+func codexCommandText(raw json.RawMessage) string {
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
+		var elements []json.RawMessage
+		if err := json.Unmarshal(raw, &elements); err != nil {
+			return ""
+		}
+		parts := make([]string, 0, len(elements))
+		for _, element := range elements {
+			parts = append(parts, jsonToString(element))
+		}
+		return strings.Join(parts, " ")
 	}
-	if value, isString := jsonString(raw); isString {
-		return value, true
+	if !jsonTruthy(raw) {
+		return ""
 	}
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
-		return "", false
-	}
-	return jsonToString(raw), true
+	return jsonToString(raw)
 }
 
 // CodexMarkers は codex のツール呼び出しから markers を判定する。
@@ -371,7 +400,8 @@ func CodexMarkers(transcript CodexTranscript) DailyMarkers {
 	var markers DailyMarkers
 	for _, tools := range [][]CodexToolCall{transcript.Tools, transcript.ItemTools} {
 		for _, tool := range tools {
-			if mergeCommandPattern.MatchString(tool.Input) {
+			if mergeCommandPattern.MatchString(tool.MergeCommand) ||
+				strings.Contains(tool.MergeTool, codexMergeToolSubstring) {
 				markers.Merged = true
 			}
 		}
@@ -434,7 +464,13 @@ func jsonNonNull(raw json.RawMessage) bool {
 
 // jsonToString は jq の tostring を再現する。
 // 文字列はそのまま、それ以外は compact JSON の表記にする。
+//
+// null を先に弾くのは、Go の json.Unmarshal が JSON の null を文字列へ入れても
+// エラーにせず空文字を残すためである。jq の `null | tostring` は "null" になる。
 func jsonToString(raw json.RawMessage) string {
+	if !jsonNonNull(raw) {
+		return "null"
+	}
 	if value, ok := jsonString(raw); ok {
 		return value
 	}
