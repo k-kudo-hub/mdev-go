@@ -67,6 +67,13 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case newsRefreshedMsg:
 		// 必ずここを通す(実行中の数を減らし、ポーリング起源なら次の合図を張る)。
 		next := m.polling.arrive(msg.poll)
+		if m.fetching && msg.poll {
+			// 取得に入る前に発行したポーリングの読み直しが着弾した。ここで
+			// 差し替えると取得中の画面が消え、まだ走っている取得が終わったように
+			// 見える。r も再び効くようになり、取得が二重に走る。表示は取得の
+			// 完了(force 起源の着弾)まで据え置く。
+			return m, next
+		}
 		m.snapshot, m.fetching = msg.snapshot, false
 		return m, next
 

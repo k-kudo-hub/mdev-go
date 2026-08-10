@@ -787,6 +787,54 @@ func TestDoneTickIsFrozenWhileAwaiting(t *testing.T) {
 
 // ---- News -----------------------------------------------------------------
 
+func TestNewsKeepsFetchingScreenWhenPollArrives(t *testing.T) {
+	t.Parallel()
+
+	// 取得(r)に入る前に発行したポーリングの読み直しが、取得中に着弾する。
+	// 表示を差し替えると取得中の画面が消え、まだ走っている取得が終わったように
+	// 見える。さらに r が再び効くようになり、取得が二重に走る。
+	service := &tickNews{snapshot: app.NewsSnapshot{
+		Text: "ニュース画面", FetchingText: "取得中", Count: 1,
+	}}
+	next, _ := NewNewsModel(service).Update(newsRefreshedMsg{poll: true})
+	m, ok := next.(NewsModel)
+	if !ok {
+		t.Fatalf("モデルの型 = %T", next)
+	}
+	m.snapshot = service.snapshot
+
+	// r を押して取得中の画面へ入る。
+	fetching, cmd := update(t, m, tickKey('r'))
+	if cmd == nil {
+		t.Fatal("取得へ進んでいない")
+	}
+	if got := fetching.View().Content; got != "取得中" {
+		t.Fatalf("取得中の画面が出ていない: %q", got)
+	}
+
+	// 取得の裏で、先に出ていたポーリングの読み直しが着弾する。
+	during, cmd := update(t, fetching, newsRefreshedMsg{
+		snapshot: app.NewsSnapshot{Text: "新しいニュース", FetchingText: "取得中", Count: 1},
+		poll:     true,
+	})
+	wantTimerOnly(t, cmd)
+	if got := during.View().Content; got != "取得中" {
+		t.Errorf("取得中の画面が差し替わった: %q", got)
+	}
+
+	// この間に r をもう一度押しても取得は始まらない。
+	if _, cmd := update(t, during, tickKey('r')); cmd != nil {
+		t.Errorf("取得中に %T を予約している(二重の取得)", immediate(cmd))
+	}
+
+	// 取得が終わった着弾で、はじめて通常の画面へ戻る。
+	done, cmd := update(t, during, newsRefreshedMsg{snapshot: service.snapshot})
+	wantNoContinuation(t, cmd)
+	if got := done.View().Content; got != "ニュース画面" {
+		t.Errorf("取得後に通常の画面へ戻っていない: %q", got)
+	}
+}
+
 func TestNewsTickIsFrozenWhileFetching(t *testing.T) {
 	t.Parallel()
 
