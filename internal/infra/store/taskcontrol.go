@@ -17,7 +17,11 @@ var _ app.TaskControlLauncher = (*MdevBinaryStore)(nil)
 // バイナリが実在するかは見ない。ここで確かめて別のものへ切り替えると、
 // 「どの mdev が動いているか分からない」状態を作ってしまう。実在しなければ
 // zellij がペインの起動に失敗し、その事実がそのまま画面に出る。
+//
+// タブ名の手前に `--` を置くのは、`-` で始まる名前をフラグと解釈させない
+// ためである。タブ名は利用者が自由に付けられるので、`-wip` のような名前でも
+// 操作バーが起動しなければならない。
 func (s *MdevBinaryStore) TaskControlCommand(tab string) []string {
 	path, _ := s.MdevBinary()
-	return []string{path, "pane", "task-control", tab}
+	return []string{path, "pane", "task-control", "--", tab}
 }

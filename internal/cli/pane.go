@@ -26,18 +26,44 @@ type PaneService interface {
 	Once(name, arg string) (string, error)
 }
 
-// validPaneName は第 1 引数がペイン名として正しいかを検証する。
-func validPaneName(_ *cobra.Command, args []string) error {
-	if len(args) == 0 {
+// paneArgs は引数の数と中身を検証する。
+//
+// 第 2 引数は任意のタブ名なので、名前の検証は第 1 引数だけに掛ける
+// (cobra.OnlyValidArgs は全引数を検証してしまう)。数はペインごとに
+// 厳密に見る。範囲だけで受けると `mdev pane dashboard 余計な引数` のような
+// 打ち間違いを黙って捨ててしまい、利用者は指定が効いたと誤解する。
+func paneArgs(cmd *cobra.Command, args []string) error {
+	if err := cobra.RangeArgs(1, 2)(cmd, args); err != nil {
+		return err
+	}
+	if err := validPaneName(args[0]); err != nil {
+		return err
+	}
+
+	if args[0] != paneTaskControl {
+		if len(args) != 1 {
+			return fmt.Errorf("ペイン %s は引数を取りません(%q が余計です)", args[0], args[1])
+		}
 		return nil
 	}
-	for _, name := range paneNames {
-		if args[0] == name {
+	if len(args) != 2 {
+		return fmt.Errorf("%s はタブ名を引数に取ります", paneTaskControl)
+	}
+	if args[1] == "" {
+		return fmt.Errorf("%s のタブ名が空です", paneTaskControl)
+	}
+	return nil
+}
+
+// validPaneName はペイン名として正しいかを検証する。
+func validPaneName(name string) error {
+	for _, valid := range paneNames {
+		if name == valid {
 			return nil
 		}
 	}
 	return fmt.Errorf("不正な引数 %q です。使えるのは %s のいずれかです",
-		args[0], strings.Join(paneNames, ", "))
+		name, strings.Join(paneNames, ", "))
 }
 
 // newPaneCommand は `mdev pane <name> [タブ名] [--once]` を組み立てる。
@@ -54,19 +80,16 @@ func newPaneCommand(deps Deps) *cobra.Command {
 			"  news          AI 関連ニュース([番号] で開く / r で取得し直す)\n" +
 			"  task-create   タスク作成(n で開始)\n" +
 			"  task-control  タスクタブの操作バー(m: Main / w: Waiting / dd: 削除)\n" +
-			"                第 2 引数にタブ名を取る",
-		// 第 2 引数は任意のタブ名なので、名前の検証は第 1 引数だけに掛ける
-		// (cobra.OnlyValidArgs は全引数を検証してしまう)。
-		Args:      cobra.MatchAll(cobra.RangeArgs(1, 2), validPaneName),
+			"                第 2 引数にタブ名を取る\n\n" +
+			"タブ名が `-` で始まる場合は `--` で区切る:\n" +
+			"  mdev pane task-control -- -my-tab",
+		Args:      paneArgs,
 		ValidArgs: paneNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			arg := ""
 			if len(args) > 1 {
 				arg = args[1]
-			}
-			if name == paneTaskControl && arg == "" {
-				return fmt.Errorf("%s はタブ名を引数に取ります", paneTaskControl)
 			}
 			if !once {
 				return deps.Panes.Run(name, arg)

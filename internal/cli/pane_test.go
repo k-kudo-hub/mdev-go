@@ -182,3 +182,61 @@ func TestPaneCommandHelpListsAllPanes(t *testing.T) {
 		}
 	}
 }
+
+func TestPaneCommandAcceptsDashPrefixedTabName(t *testing.T) {
+	t.Parallel()
+
+	// タブ名は利用者が自由に付けられる。`-` で始まる名前は `--` で区切れば
+	// フラグと解釈されずに通る(create_task が組み立てる起動コマンドも
+	// この形にしてある)。
+	panes := &stubPanes{}
+	if _, err := runPaneCommand(t, panes, paneTaskControl, "--", "-wip"); err != nil {
+		t.Fatalf("pane task-control -- -wip = %v", err)
+	}
+	if len(panes.ran) != 1 || panes.ran[0] != "task-control -wip" {
+		t.Errorf("起動したペイン = %v, want [task-control -wip]", panes.ran)
+	}
+}
+
+func TestPaneCommandAcceptsDashPrefixedTabNameWithOnce(t *testing.T) {
+	t.Parallel()
+
+	// --once は `--` より前に置けば効く。
+	panes := &stubPanes{output: "バー\n"}
+	out, err := runPaneCommand(t, panes, paneTaskControl, "--once", "--", "-wip")
+	if err != nil {
+		t.Fatalf("pane task-control --once -- -wip = %v", err)
+	}
+	if out != "バー\n" {
+		t.Errorf("出力 = %q", out)
+	}
+	if len(panes.onced) != 1 || panes.onced[0] != "task-control -wip" {
+		t.Errorf("単発描画したペイン = %v, want [task-control -wip]", panes.onced)
+	}
+}
+
+func TestPaneCommandRejectsSurplusArguments(t *testing.T) {
+	t.Parallel()
+
+	// 余計な引数を黙って捨てると、利用者は指定が効いたと誤解する。
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "タブ名を取らないペインに引数", args: []string{"dashboard", "余計"}},
+		{name: "task-control に引数が 2 つ", args: []string{paneTaskControl, "tab1", "tab2"}},
+		{name: "task-control のタブ名が空", args: []string{paneTaskControl, ""}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			panes := &stubPanes{}
+			if _, err := runPaneCommand(t, panes, tc.args...); err == nil {
+				t.Error("余計な引数がエラーにならない")
+			}
+			if len(panes.ran) != 0 {
+				t.Errorf("起動している: %v", panes.ran)
+			}
+		})
+	}
+}
