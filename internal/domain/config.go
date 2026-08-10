@@ -4,13 +4,51 @@ import "encoding/json"
 
 // Config は conductor の設定ファイル(config.json / config.default.json)を表す。
 //
-// フェーズごとに必要になったキーを追加していく。現時点で解釈するのは pricing
-// と agents だけで、未知のキーは読み飛ばされる(書き戻しは行わないため失われない)。
+// フェーズごとに必要になったキーを追加していく。未知のキーは読み飛ばされる
+// (書き戻しは行わないため失われない)。
 type Config struct {
-	Pricing Pricing `json:"pricing"`
+	Pricing Pricing
 	// Agents は名前付きエージェントの設定(`.agents`)である。
 	// ダッシュボードがジャンプ時に pending を消すかどうかの判断に使う。
-	Agents map[string]AgentConfig `json:"agents"`
+	Agents map[string]AgentConfig
+	// Agent は旧来の単一エージェント設定(`.agent`)である。
+	// 名前付きエージェントを選ばなかったタスクの起動コマンドになる。
+	Agent AgentSpec
+	// SearchDirs はタスク作成のディレクトリ候補を掘る起点(`search_dirs`)。
+	// 先頭の `~` だけがホームへ展開される。
+	SearchDirs []string
+	// SkipTaskNameInput はタスク名の入力を省いて既定名で作るかどうか。
+	SkipTaskNameInput bool
+	// TaskTypes は選択肢に並ぶタスク種別を**記述順**で保持する。
+	TaskTypes []TaskType
+
+	// searchDepth は設定に書かれていた探索の深さ。0 は未設定を表し、
+	// 参照は SearchDepth() を通す(既定 1 の適用があるため)。
+	searchDepth int
+	// agentNames は .agents のキーを記述順で保持する。参照は AgentNames()。
+	agentNames []string
+}
+
+// configTagged は Config のうち標準のタグ解釈で足りる部分である。
+// Config が UnmarshalJSON を持つため、再帰を避ける入れ物として使う。
+type configTagged struct {
+	Pricing Pricing `json:"pricing"`
+}
+
+// UnmarshalJSON は設定を読む。
+//
+// pricing はタグ付きの構造体で読み、それ以外(記述順を保つ必要があるもの、
+// jq のフォールバック規則を写すもの)は unmarshalTaskKeys が別途読む。
+// 型の合わないキーはいずれも既定へ落とすため、ここで error を返すのは
+// JSON として壊れている場合だけである。
+func (c *Config) UnmarshalJSON(data []byte) error {
+	var base configTagged
+	if err := json.Unmarshal(data, &base); err != nil {
+		return err
+	}
+	*c = Config{Pricing: base.Pricing}
+	c.unmarshalTaskKeys(data)
+	return nil
 }
 
 // 単価表のキー名。ModelPricing.Missing と cost 計算の必須キー判定で使う。

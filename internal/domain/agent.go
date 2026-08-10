@@ -12,9 +12,14 @@ const (
 
 // AgentConfig は設定の `.agents.<name>` のうち mdev が使う値である。
 //
-// command / resume_args / patterns はタスク生成とスクリーン検出が使うもので、
-// どちらもまだ Shell 側に残っているためここでは持たない。
+// patterns(スクリーン検出の正規表現)はまだ Shell 側の
+// screen-detect-lib.sh が持っているためここには無い。
 type AgentConfig struct {
+	// Command はエージェントの起動コマンド。空なら名前自身が使われる。
+	Command string `json:"command"`
+	// ResumeArgs は再開時にコマンドとセッション ID の間へ挿す引数。
+	ResumeArgs string `json:"resume_args"`
+	// Detection は状態検出の方式("hooks" / "screen")。
 	Detection string `json:"detection"`
 }
 

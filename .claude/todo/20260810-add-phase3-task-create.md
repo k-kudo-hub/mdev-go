@@ -18,7 +18,7 @@ zellij 駆動には確立済みの防御(登録待ち・stdout 検証フォー�
 
 ### domain
 
-- [ ] Config 拡張のテスト → 実装(`search_dirs` / `search_depth`(既定 1)/ `skip_task_name_input` / `task_types`(description + layout steps)/ `agents.command`・`resume_args`(word-split は strings.Fields 相当))
+- [x] Config 拡張のテスト → 実装(`search_dirs` / `search_depth`(既定 1)/ `skip_task_name_input` / `task_types`(description + layout steps)/ `agents.command`・`resume_args`(word-split は strings.Fields 相当))
 - [ ] デフォルト名・名前解決のテスト → 実装(`generate_default_name` = basename+type / `resolve_name` = 空なら default。末尾スラッシュの basename 挙動含む)
 - [ ] 選択リストのフィルタ(部分列マッチ)のテスト → 実装(純粋関数)
 - [ ] waiting-toggle の event 遷移のテスト → 実装(prev_event 退避 / 復元(欠落時 Notification)/ time 更新。純粋変換)
