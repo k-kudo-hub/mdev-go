@@ -79,10 +79,24 @@ func (p *DashboardPane) Startup() {
 // 先頭でスクリーン検出を走らせてから pending を読む。順序が逆だと、その回に
 // 観測した状態が一覧に反映されず、screen 方式のエージェント(codex)のタスクが
 // 出てこなくなる。
+//
+// ただし検出を走らせるのは、設定に screen 方式のエージェントが 1 つでも
+// ある場合だけである。1 つも無ければ検出しても見つかるものが無く、中で走る
+// `zellij action list-panes`(実測 1.1〜1.5 秒)の負荷だけが残る。2 秒ごとの
+// ポーリングでは zellij サーバをほぼ占有し続けることになるため、設定を見て
+// 静的に省く。
+//
+// 省くのは「設定を読めて、そこに screen 方式が 1 つも無かった」場合だけである。
+// 読めなかった場合は従来どおり走らせる。読めない原因(CONDUCTOR_HOME の指し先が
+// 違う・ファイルが壊れている)は codex を設定している利用者にも起こりうるので、
+// 黙って検出を止めると codex のタスクが一覧から消え、原因の分からない不具合に
+// なる。負荷を減らすために表示を落とすほうが害が大きい。
 func (p *DashboardPane) Refresh(env PaneEnv) (DashboardSnapshot, error) {
 	session := env.Session()
 
-	p.Shell.ScreenDetectTick(session)
+	if config, ok := p.Config.Load(); !ok || config.HasScreenDetectionAgent() {
+		p.Shell.ScreenDetectTick(session)
+	}
 
 	views, err := p.Pending.List(session)
 	if err != nil {
@@ -127,7 +141,11 @@ func (p *DashboardPane) jump(env PaneEnv, item domain.PendingView) error {
 	if agent == domain.DefaultAgent {
 		return nil
 	}
-	if p.Config.Load().AgentDetection(agent) == domain.DetectionScreen {
+	// 設定が読めなかった場合はゼロ値から既定の hooks が返る。現行 task-lib.sh の
+	// agent_detection も `jq ... 2>/dev/null` で同じ既定へ落ちるため、ここでは
+	// 読めたかどうかを区別しない。
+	config, _ := p.Config.Load()
+	if config.AgentDetection(agent) == domain.DetectionScreen {
 		return nil
 	}
 

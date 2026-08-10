@@ -76,8 +76,13 @@ type NewsReader interface {
 // 読めなかった場合もエラーを返さずゼロ値を返す。現行版が
 // `jq ... 2>/dev/null` で失敗を握り潰し、検出方式を既定の "hooks" に
 // 落としているのに合わせている。
+//
+// ok は設定を実際に読めたかどうかである。ゼロ値の設定は「エージェントが 1 つも
+// 設定されていない」とも「設定が読めなかった」とも取れるが、この 2 つは判断が
+// 逆になる場面がある(DashboardPane.Refresh のスクリーン検出)。読めなかった
+// ことを黙って「無い」と扱わないよう、区別して返す。
 type ConfigLoader interface {
-	Load() domain.Config
+	Load() (config domain.Config, ok bool)
 }
 
 // URLOpener は既定のブラウザで URL を開く。
@@ -109,7 +114,10 @@ type ShellRunner interface {
 	RestoreSession()
 
 	// ScreenDetectTick は screen-detect-lib.sh の screen_detect_tick を呼ぶ。
-	// Dashboard の毎ポーリングの先頭で走らせる。省略すると screen 方式の
-	// エージェント(codex)のタスクが一覧に出てこない。
+	//
+	// Dashboard のポーリングの先頭で走らせる。設定に screen 方式のエージェント
+	// (codex)がある場合に限り毎回呼ぶ。呼ばないとそのエージェントのタスクが
+	// 一覧に出てこない。1 つも設定されていない場合は呼ばない
+	// (DashboardPane.Refresh を参照)。
 	ScreenDetectTick(session string)
 }

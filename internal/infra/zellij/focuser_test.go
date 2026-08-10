@@ -42,10 +42,10 @@ func TestNewFocuserUsesRealCommand(t *testing.T) {
 
 	// 既定の実行関数が実プロセスを起動することを、確実に存在する
 	// コマンドと存在しないコマンドで確認する。
-	if err := runCommand("true"); err != nil {
+	if err := runCommand(commandTimeout, "true"); err != nil {
 		t.Errorf("runCommand(true) = %v, want nil", err)
 	}
-	if err := runCommand("mdev-no-such-command-for-test"); err == nil {
+	if err := runCommand(commandTimeout, "mdev-no-such-command-for-test"); err == nil {
 		t.Error("存在しないコマンドで nil が返った")
 	}
 

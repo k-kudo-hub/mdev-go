@@ -10,6 +10,10 @@ import (
 type waitingRefreshedMsg struct {
 	text string
 	err  error
+	// poll はこの読み直しがポーリング起源かどうかを表す。真のときだけ着弾で
+	// 次の合図を張る(pane.go の「完了起点」の説明を参照)。Waiting はキー
+	// 操作を受け付けないため、実際に来るのはポーリング起源だけである。
+	poll bool
 }
 
 // WaitingModel は Waiting ペインの Bubble Tea モデルである。
@@ -22,6 +26,9 @@ type WaitingModel struct {
 
 	text string
 	err  error
+
+	// polling はポーリングの回し方(完了起点・重なりの防止)。
+	polling poller
 }
 
 var (
@@ -31,15 +38,15 @@ var (
 
 // NewWaitingModel は Waiting のモデルを作る。
 func NewWaitingModel(pane WaitingService, env app.PaneEnv) WaitingModel {
-	return WaitingModel{pane: pane, env: env}
+	return WaitingModel{pane: pane, env: env, polling: newPoller(WaitingInterval)}
 }
 
 // Init は最初の一覧を読み、ポーリングを開始する。
 //
-// ポーリングのチェーンを張り出すのはここだけである(張り直しは tickMsg の
-// ハンドラに一元化している)。
+// 返すのは最初の読み直しだけである。次の合図はその着弾で張る(完了起点の
+// ペーシング。pane.go を参照)。
 func (m WaitingModel) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), tickCmd(WaitingInterval))
+	return m.refreshCmd(true)
 }
 
 // Once は 1 回だけ描画した結果を返す(--once)。
@@ -61,27 +68,31 @@ func (m WaitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case waitingRefreshedMsg:
+		// 失敗していても必ずここを通す(実行中の数を減らし、ポーリング起源なら
+		// 次の合図を張る)。
+		next := m.polling.arrive(msg.poll)
 		if msg.err != nil {
 			// 直前の一覧を残したままエラーだけを足す。空文字で上書きすると
 			// 何も出ていない画面になり、何が起きたのか分からなくなる。
 			m.err = msg.err
-			return m, nil
+			return m, next
 		}
-		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.text, m.err = msg.text, nil
-		return m, nil
+		return m, next
 
 	case tickMsg:
-		return m, tea.Batch(m.refreshCmd(), tickCmd(WaitingInterval))
+		cmd := m.polling.tick(m.refreshCmd)
+		return m, cmd
 	}
 	return m, nil
 }
 
 // refreshCmd は一覧を読み直す。
-func (m WaitingModel) refreshCmd() tea.Cmd {
+// poll はポーリング起源かどうかで、着弾で次の合図を張るかを決める。
+func (m WaitingModel) refreshCmd(poll bool) tea.Cmd {
 	return func() tea.Msg {
 		text, err := m.pane.Refresh(m.env)
-		return waitingRefreshedMsg{text: text, err: err}
+		return waitingRefreshedMsg{text: text, err: err, poll: poll}
 	}
 }
 

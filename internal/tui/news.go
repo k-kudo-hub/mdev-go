@@ -9,7 +9,12 @@ import (
 // News のメッセージ。
 type (
 	// newsRefreshedMsg はニュースの読み直しが終わったことを表す。
-	newsRefreshedMsg struct{ snapshot app.NewsSnapshot }
+	newsRefreshedMsg struct {
+		snapshot app.NewsSnapshot
+		// poll はこの読み直しがポーリング起源かどうかを表す。真のときだけ
+		// 着弾で次の合図を張る(pane.go の「完了起点」の説明を参照)。
+		poll bool
+	}
 	// newsReloadMsg は取得中の画面を出した後に実際の取得へ進む合図である。
 	newsReloadMsg struct{}
 )
@@ -26,6 +31,8 @@ type NewsModel struct {
 
 	// fetching は fetch-news.sh の実行中で、取得中の画面を出している状態。
 	fetching bool
+	// polling はポーリングの回し方(完了起点・重なりの防止)。
+	polling poller
 }
 
 var (
@@ -35,15 +42,15 @@ var (
 
 // NewNewsModel は News のモデルを作る。
 func NewNewsModel(pane NewsService) NewsModel {
-	return NewsModel{pane: pane}
+	return NewsModel{pane: pane, polling: newPoller(NewsInterval)}
 }
 
 // Init は最初のニュースを読み、ポーリングを開始する。
 //
-// ポーリングのチェーンを張り出すのはここだけである(張り直しは tickMsg の
-// ハンドラに一元化している)。
+// 返すのは最初の読み直しだけである。次の合図はその着弾で張る(完了起点の
+// ペーシング。pane.go を参照)。
 func (m NewsModel) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), tickCmd(NewsInterval))
+	return m.refreshCmd(true)
 }
 
 // Once は 1 回だけ描画した結果を返す(--once)。
@@ -58,12 +65,23 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case newsRefreshedMsg:
-		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
+		// 必ずここを通す(実行中の数を減らし、ポーリング起源なら次の合図を張る)。
+		next := m.polling.arrive(msg.poll)
+		if m.fetching && msg.poll {
+			// 取得に入る前に発行したポーリングの読み直しが着弾した。ここで
+			// 差し替えると取得中の画面が消え、まだ走っている取得が終わったように
+			// 見える。r も再び効くようになり、取得が二重に走る。表示は取得の
+			// 完了(force 起源の着弾)まで据え置く。
+			return m, next
+		}
 		m.snapshot, m.fetching = msg.snapshot, false
-		return m, nil
+		return m, next
 
 	case newsReloadMsg:
 		// 取得は同期で走る。終わったら読み直して通常の画面へ戻る。
+		// このコマンドも最後に newsRefreshedMsg を返すので実行中として数える。
+		// キー操作起源なので poll は立てない(着弾しても合図は張らない)。
+		m.polling.force()
 		return m, func() tea.Msg {
 			m.pane.Reload()
 			return newsRefreshedMsg{snapshot: m.pane.Refresh()}
@@ -71,9 +89,11 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		if m.fetching {
-			return m, tickCmd(NewsInterval)
+			// 取得中は読み直さない(取得中の画面を出したままにする)。
+			return m, m.polling.rearm()
 		}
-		return m, tea.Batch(m.refreshCmd(), tickCmd(NewsInterval))
+		cmd := m.polling.tick(m.refreshCmd)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -105,9 +125,10 @@ func (m NewsModel) handleKey(key string) (tea.Model, tea.Cmd) {
 }
 
 // refreshCmd はニュースを読み直す。
-func (m NewsModel) refreshCmd() tea.Cmd {
+// poll はポーリング起源かどうかで、着弾で次の合図を張るかを決める。
+func (m NewsModel) refreshCmd(poll bool) tea.Cmd {
 	return func() tea.Msg {
-		return newsRefreshedMsg{snapshot: m.pane.Refresh()}
+		return newsRefreshedMsg{snapshot: m.pane.Refresh(), poll: poll}
 	}
 }
 

@@ -21,6 +21,9 @@ type (
 	dashboardRefreshedMsg struct {
 		snapshot app.DashboardSnapshot
 		err      error
+		// poll はこの読み直しがポーリング起源かどうかを表す。真のときだけ
+		// 着弾で次の合図を張る(pane.go の「完了起点」の説明を参照)。
+		poll bool
 	}
 	// deletePreparedMsg は record と upload-log が終わったことを表す。
 	deletePreparedMsg struct {
@@ -55,6 +58,8 @@ type DashboardModel struct {
 	notice string
 	// busy は削除の処理中で、ポーリングによる再描画を止める状態。
 	busy bool
+	// polling はポーリングの回し方(完了起点・重なりの防止)。
+	polling poller
 }
 
 var (
@@ -64,24 +69,25 @@ var (
 
 // NewDashboardModel は Dashboard のモデルを作る。
 func NewDashboardModel(pane DashboardService, env app.PaneEnv) DashboardModel {
-	return DashboardModel{pane: pane, env: env}
+	return DashboardModel{pane: pane, env: env, polling: newPoller(DashboardInterval)}
 }
 
 // Init は起動時の復元と最初の一覧の組み立てを行い、ポーリングを開始する。
 //
-// ポーリングのチェーンを張り出すのはここだけである。読み直しの完了で張り直すと
-// tick 以外の生成元のぶんだけチェーンが増え続けるため、張り直しは tickMsg の
-// ハンドラに一元化している。
+// 返すのは最初の読み直しだけである。次の合図はその着弾で張る(完了起点の
+// ペーシング。pane.go を参照)。ここでタイマーも一緒に張ると、チェーンが
+// 2 本になってしまう。
 func (m DashboardModel) Init() tea.Cmd {
-	return tea.Batch(m.startupCmd(), tickCmd(DashboardInterval))
+	return m.startupCmd()
 }
 
 // startupCmd は起動時の復元をしてから最初の一覧を組み立てる。
+// チェーンの起点なのでポーリング起源として返す。
 func (m DashboardModel) startupCmd() tea.Cmd {
 	return func() tea.Msg {
 		m.pane.Startup()
 		snapshot, err := m.pane.Refresh(m.env)
-		return dashboardRefreshedMsg{snapshot: snapshot, err: err}
+		return dashboardRefreshedMsg{snapshot: snapshot, err: err, poll: true}
 	}
 }
 
@@ -105,35 +111,40 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case dashboardRefreshedMsg:
+		// 発行した読み直しが 1 つ片付いた。内容を使うかどうかに関わらず、
+		// また失敗していても、必ずここを通す(実行中の数を減らし、ポーリング
+		// 起源なら次の合図を張る)。
+		next := m.polling.arrive(msg.poll)
 		if m.awaiting {
 			// 待ち受けに入る前に発行した読み直しが着弾した。ここで一覧を
 			// 差し替えると押した番号が別のタブを指すため、捨てる。
-			return m, nil
+			return m, next
 		}
 		if msg.err != nil {
 			// 直前の一覧を残したままエラーだけを足す。ゼロ値で上書きすると
 			// 何も出ていない画面になり、何が起きたのか分からなくなる。
 			m.err = msg.err
-			return m, nil
+			return m, next
 		}
-		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.snapshot, m.err = msg.snapshot, nil
-		return m, nil
+		return m, next
 
 	case tickMsg:
 		if m.busy || m.awaiting {
 			// 削除の途中と 2 打鍵目の待ち受け中は読み直さない。現行版は
 			// `read -t 3` がループを止めるため、この間は表示も番号の対応も
 			// 動かない。同じ意味になるようポーリングだけを空回りさせる。
-			return m, tickCmd(DashboardInterval)
+			return m, m.polling.rearm()
 		}
-		return m, tea.Batch(m.refreshCmd(), tickCmd(DashboardInterval))
+		cmd := m.polling.tick(m.refreshCmd)
+		return m, cmd
 
 	case promptExpiredMsg:
 		if msg.token == m.token {
 			// 凍結を解いて、止めていた間の変化に表示を追いつかせる。
 			m.awaiting = false
-			return m, m.refreshCmd()
+			cmd := m.forceRefreshCmd()
+			return m, cmd
 		}
 		return m, nil
 
@@ -154,12 +165,14 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, noticeCmd(m.token)
 		}
 		m.busy, m.notice = false, ""
-		return m, m.refreshCmd()
+		cmd := m.forceRefreshCmd()
+		return m, cmd
 
 	case noticeExpiredMsg:
 		if msg.token == m.token {
 			m.busy, m.notice = false, ""
-			return m, m.refreshCmd()
+			cmd := m.forceRefreshCmd()
+			return m, cmd
 		}
 		return m, nil
 	}
@@ -179,14 +192,23 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	if m.awaiting {
 		// 凍結を解く。削除へ進まない分岐では、止めていた間の変化に表示を
 		// 追いつかせるため読み直す。
+		//
+		// 世代を進めるのは、2 打鍵目を待つ間に仕掛けた打ち切りのタイマーを
+		// 無効にするためである。進めないと、削除の処理中(busy)に古い
+		// promptExpiredMsg が発火して余計な読み直しが走る。現行版の
+		// `read -t 3` はキーを受け取った時点で終わっており、その後に
+		// 時間切れが起きることはない。
 		m.awaiting = false
+		m.token++
 		number, ok := keyIndex(key)
 		if !ok {
-			return m, m.refreshCmd()
+			cmd := m.forceRefreshCmd()
+			return m, cmd
 		}
 		if number > len(m.snapshot.Tabs) {
 			// 範囲外の番号は何もしない(現行版も同じ)。
-			return m, m.refreshCmd()
+			cmd := m.forceRefreshCmd()
+			return m, cmd
 		}
 		tab := m.snapshot.Tabs[number-1]
 		m.busy, m.notice = true, uploadingLabel
@@ -210,6 +232,9 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	snapshot := m.snapshot
+	// このコマンドも最後に dashboardRefreshedMsg を返すので実行中として数える。
+	// キー操作起源なので poll は立てない(着弾しても合図は張らない)。
+	m.polling.force()
 	return m, func() tea.Msg {
 		if err := m.pane.Jump(m.env, snapshot, number); err != nil {
 			return dashboardRefreshedMsg{snapshot: snapshot, err: err}
@@ -250,11 +275,25 @@ func (m DashboardModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cm
 	})
 }
 
+// forceRefreshCmd は実行中として数えてから読み直しのコマンドを返す。
+//
+// キー操作と後始末(削除の完了・通知の期限切れ)が使う。利用者の操作への
+// 反応は前回の完了を待たずに出す(poller.force を参照)。ポーリングのチェーンとは
+// 別なので、着弾しても次の合図は張らない。
+//
+// モデルを書き換えるため、呼び出し側は `cmd := m.forceRefreshCmd()` と
+// 別の文に分けてから return すること(poller の注記を参照)。
+func (m *DashboardModel) forceRefreshCmd() tea.Cmd {
+	m.polling.force()
+	return m.refreshCmd(false)
+}
+
 // refreshCmd は一覧を組み立て直す。
-func (m DashboardModel) refreshCmd() tea.Cmd {
+// poll はポーリング起源かどうかで、着弾で次の合図を張るかを決める。
+func (m DashboardModel) refreshCmd(poll bool) tea.Cmd {
 	return func() tea.Msg {
 		snapshot, err := m.pane.Refresh(m.env)
-		return dashboardRefreshedMsg{snapshot: snapshot, err: err}
+		return dashboardRefreshedMsg{snapshot: snapshot, err: err, poll: poll}
 	}
 }
 

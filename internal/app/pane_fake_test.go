@@ -148,9 +148,11 @@ func (f *fakeNewsReader) Read(date string) []byte {
 
 type fakeConfigLoader struct {
 	config domain.Config
+	// failed は設定を読めなかった状況を表す(ファイルが無い・壊れている)。
+	failed bool
 }
 
-func (f *fakeConfigLoader) Load() domain.Config { return f.config }
+func (f *fakeConfigLoader) Load() (domain.Config, bool) { return f.config, !f.failed }
 
 type fakeURLOpener struct {
 	opened []string

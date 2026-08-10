@@ -2,6 +2,7 @@ package zellij
 
 import (
 	"os/exec"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 )
@@ -20,8 +21,15 @@ var (
 )
 
 // NewTabController は zellij コマンドを実行する TabController を返す。
+//
+// どちらの呼び出しにも実行時間の上限を付ける(commandTimeout を参照)。
+// list-tabs はダッシュボードのポーリングが毎周期呼ぶため、返らなくなると
+// ポーリングごと止まってしまう。
 func NewTabController() *TabController {
-	return &TabController{output: commandOutput, run: runCommand}
+	return &TabController{
+		output: outputWithTimeout(commandTimeout),
+		run:    withTimeout(commandTimeout),
+	}
 }
 
 // ListTabs は `zellij action list-tabs` の標準出力をそのまま返す。
@@ -42,10 +50,17 @@ func (c *TabController) CloseTabByID(id string) {
 	_ = c.run(binaryName, "action", "close-tab-by-id", id)
 }
 
+// outputWithTimeout は上限付きでコマンドを実行し標準出力を返す関数を返す。
+func outputWithTimeout(timeout time.Duration) func(name string, args ...string) string {
+	return func(name string, args ...string) string { return commandOutput(timeout, name, args...) }
+}
+
 // commandOutput は外部コマンドを実行して標準出力を返す。
-// 失敗した場合は空文字を返す。
-func commandOutput(name string, args ...string) string {
-	out, err := exec.Command(name, args...).Output()
+// 失敗した場合(上限で切られた場合を含む)は空文字を返す。
+func commandOutput(timeout time.Duration, name string, args ...string) string {
+	ctx, cancel := commandContext(timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
 	if err != nil {
 		return ""
 	}

@@ -51,6 +51,66 @@ func TestConfigAgentDetection(t *testing.T) {
 	}
 }
 
+func TestConfigHasScreenDetectionAgent(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		configJSON string
+		want       bool
+	}{
+		{
+			name:       "screen 方式のエージェントがある",
+			configJSON: `{"agents": {"claude": {"detection": "hooks"}, "codex": {"detection": "screen"}}}`,
+			want:       true,
+		},
+		{
+			name:       "hooks 方式だけ",
+			configJSON: `{"agents": {"claude": {"detection": "hooks"}}}`,
+			want:       false,
+		},
+		{
+			name:       "detection が書かれていない",
+			configJSON: `{"agents": {"somecli": {"command": "x"}}}`,
+			want:       false,
+		},
+		{
+			name:       "agents が空",
+			configJSON: `{"agents": {}}`,
+			want:       false,
+		},
+		{
+			name:       "agents が無い",
+			configJSON: `{}`,
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var cfg domain.Config
+			if err := json.Unmarshal([]byte(tt.configJSON), &cfg); err != nil {
+				t.Fatalf("設定の解釈に失敗: %v", err)
+			}
+			if got := cfg.HasScreenDetectionAgent(); got != tt.want {
+				t.Errorf("HasScreenDetectionAgent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigHasScreenDetectionAgentOnZeroValue(t *testing.T) {
+	t.Parallel()
+
+	// 設定が読めなかった場合はゼロ値の Config から false が返る。
+	var cfg domain.Config
+	if cfg.HasScreenDetectionAgent() {
+		t.Error("HasScreenDetectionAgent() = true, want false")
+	}
+}
+
 func TestConfigAgentDetectionOnZeroValue(t *testing.T) {
 	t.Parallel()
 
