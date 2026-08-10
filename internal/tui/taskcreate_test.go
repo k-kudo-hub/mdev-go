@@ -390,3 +390,51 @@ func TestTaskCreateQuitsOnCtrlC(t *testing.T) {
 		t.Error("Ctrl+C で終了しない")
 	}
 }
+
+func TestTaskCreateAcceptsSpaceInTheName(t *testing.T) {
+	t.Parallel()
+
+	// Bubble Tea v2 はスペースの Key.String() を "space" で返すため、
+	// 「1 文字なら入力」という判定だけではスペースが無言で捨てられる。
+	// タブ名にスペースは入りうる(list-tabs のパースも対応している)。
+	pane := defaultTaskCreateStub()
+	m := startFlow(t, pane)
+	m, _ = m.Update(specialKey(tea.KeyEnter)) // ディレクトリ
+	m, _ = m.Update(specialKey(tea.KeyEnter)) // 種別
+
+	m, _ = m.Update(spaceKey())
+	m, _ = m.Update(key('2'))
+	if got := content(m); !strings.Contains(got, "default-dev 2") {
+		t.Fatalf("スペースが入力できていない: %q", got)
+	}
+
+	_, cmd := m.Update(specialKey(tea.KeyEnter))
+	if cmd == nil {
+		t.Fatal("作成が始まらない")
+	}
+	cmd()
+	if last := pane.calls[len(pane.calls)-1]; last != "create /p/alpha dev default-dev 2-uniq " {
+		t.Errorf("作成の引数 = %q", last)
+	}
+}
+
+func TestTaskCreateAcceptsSpaceInTheFilter(t *testing.T) {
+	t.Parallel()
+
+	// 絞り込みも同じ。スペースを含むディレクトリ名を選べなくなる。
+	pane := defaultTaskCreateStub()
+	pane.dirs = []string{"/p/my project", "/p/other"}
+
+	m := startFlow(t, pane)
+	m, _ = m.Update(key('y'))
+	m, _ = m.Update(spaceKey())
+	m, _ = m.Update(key('p'))
+
+	got := content(m)
+	if !strings.Contains(got, "/p/my project") {
+		t.Errorf("スペース込みの絞り込みが効いていない: %q", got)
+	}
+	if strings.Contains(got, "/p/other") {
+		t.Errorf("一致しない候補が残っている: %q", got)
+	}
+}

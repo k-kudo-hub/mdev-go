@@ -190,6 +190,12 @@ func specialKey(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} 
 // ctrlKey は Ctrl 修飾つきのキー押下メッセージを作る。
 func ctrlKey(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
 
+// spaceKey はスペースキーの押下メッセージを作る。
+//
+// Bubble Tea v2 はスペースだけ String() が "space" になるため、他の
+// 印字可能文字と同じ扱いにできない。取りこぼしを固定するために分けて作る。
+func spaceKey() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "} }
+
 var testEnv = app.PaneEnv{ZellijSession: "s1"}
 
 // ---- 共通 -----------------------------------------------------------------

@@ -117,8 +117,8 @@ func (l *selectList) step(key string) (value string, index int, done bool) {
 
 	// 1 文字ぶんの入力だけを絞り込みに使う。修飾キー付き("ctrl+a" など)は
 	// 複数文字の名前で届くため、ここで自然に弾かれる。
-	if isSingleRune(key) {
-		l.query += key
+	if text, ok := typedText(key); ok {
+		l.query += text
 		l.refilter()
 	}
 	return "", 0, false
@@ -176,9 +176,27 @@ func lastRune(s string) string {
 	return string(runes[len(runes)-1:])
 }
 
-// isSingleRune は key が 1 文字ぶんの入力かどうかを返す。
-func isSingleRune(key string) bool {
-	return len([]rune(key)) == 1
+// spaceKeyName は Bubble Tea がスペースキーに付ける名前である。
+//
+// Bubble Tea v2 は印字可能な 1 文字をその文字自身の名前で報告するが、
+// スペースだけは例外で `Key.String()` が "space" を返す(v2.0.8 実測)。
+// 名前の長さで入力かどうかを判断すると、スペースだけが無言で捨てられる。
+// タブ名にもディレクトリ名にもスペースは入りうるので、明示的に受ける。
+const spaceKeyName = "space"
+
+// typedText は key が文字入力なら、その文字を返す。
+//
+// 修飾キー付き("ctrl+a" など)や名前付きキー("enter" など)は複数文字の
+// 名前で届くため、1 文字であることを条件にすれば自然に弾かれる。
+// 唯一の例外がスペースで、名前が "space" になるため個別に受ける。
+func typedText(key string) (string, bool) {
+	if key == spaceKeyName {
+		return " ", true
+	}
+	if len([]rune(key)) == 1 {
+		return key, true
+	}
+	return "", false
 }
 
 // itoa は小さな非負整数を 10 進表記にする。

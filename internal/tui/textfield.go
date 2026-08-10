@@ -26,16 +26,20 @@ func newTextField(prompt, defaultValue string) textField {
 // handleKey は 1 打鍵ぶんの入力を処理する。
 // enter / esc は呼び出し側が先に扱うため、ここへは来ない。
 func (f *textField) handleKey(key string) {
-	switch {
-	case key == "backspace":
+	switch key {
+	case "backspace":
 		if f.value != "" {
 			f.value = f.value[:len(f.value)-len(lastRune(f.value))]
 		}
-	case key == "ctrl+u":
+	case "ctrl+u":
 		// 行ごと消す。既定値を捨てて全部打ち直したいときに使う。
 		f.value = ""
-	case isSingleRune(key):
-		f.value += key
+	default:
+		// スペースは名前が "space" で届くため 1 文字かどうかでは判定できない。
+		// タブ名にスペースは入りうるので typedText が個別に受ける。
+		if text, ok := typedText(key); ok {
+			f.value += text
+		}
 	}
 }
 
