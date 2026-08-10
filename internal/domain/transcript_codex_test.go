@@ -20,6 +20,189 @@ const codexRollout = `{"timestamp":"2026-08-07T20:44:09.850Z","type":"session_me
 {"timestamp":"2026-08-07T20:44:13.100Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"merged"}}
 `
 
+// claude-conductor の test.sh セクション 26i1b が使う新形式(v2)の rollout。
+// 会話もツール実行も event_msg / item_completed の item として記録され、
+// 旧 user_message イベントは 1 つも出ない。content 要素の type は UserMessage が
+// "text"、AgentMessage が "Text" と大文字小文字が揺れる(実データどおり)。
+const codexRolloutV2 = `{"timestamp":"2026-08-10T16:24:48.000Z","type":"session_meta","payload":{"id":"thread-cxv2","cwd":"/tmp/myapp","cli_version":"0.147.0","source":"exec"}}
+{"timestamp":"2026-08-10T16:24:48.100Z","type":"turn_context","payload":{"model":"gpt-5.6-sol","approval_policy":"never"}}
+{"timestamp":"2026-08-10T16:24:49.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}
+{"timestamp":"2026-08-10T16:24:50.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"V2USERMARKER fix the bug","text_elements":[]}]}}}
+{"timestamp":"2026-08-10T16:24:51.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","id":"r1","content":[{"type":"Text","text":"V2REASONMARKER internal deliberation"}]}}}
+{"timestamp":"2026-08-10T16:24:52.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-1","process_id":"111","command":["/bin/zsh","-lc","npm test"],"cwd":"file:///tmp/myapp","status":"completed"}}}
+{"timestamp":"2026-08-10T16:24:53.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"exec-2","server":"node_repl","tool":"js","arguments":{"code":"console.log(1)"}}}}
+{"timestamp":"2026-08-10T16:24:53.200Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","id":"exec-4","changes":{"/tmp/myapp/app.ts":{"type":"update","unified_diff":"@@ -0,0 +1 @@\n+fixed\n","move_path":null}},"status":"completed"}}}
+{"timestamp":"2026-08-10T16:24:53.400Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","kind":"web.search","id":"exec-5","query":"how to fix","action":{"type":"search","query":null,"queries":["how to fix"]},"results":[]}}}
+{"timestamp":"2026-08-10T16:24:54.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"m1","content":[{"type":"Text","text":"V2AGENTMARKER tests pass"}],"phase":"commentary"}}}
+{"timestamp":"2026-08-10T16:24:55.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u2","content":[{"type":"text","text":"now merge it","text_elements":[]}]}}}
+{"timestamp":"2026-08-10T16:24:56.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-3","process_id":"112","command":["/bin/zsh","-lc","gh pr merge 12 --squash"],"cwd":"file:///tmp/myapp","status":"completed"}}}
+{"timestamp":"2026-08-10T16:24:57.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1500000,"cached_input_tokens":500000,"cache_write_input_tokens":200000,"output_tokens":100000,"reasoning_output_tokens":0,"total_tokens":1600000}}}}
+{"timestamp":"2026-08-10T16:24:58.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"m2","content":[{"type":"Text","text":"merged"}],"phase":"final_answer"}}}
+{"timestamp":"2026-08-10T16:24:58.100Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"merged","turn_id":"t1"}}
+`
+
+// codexV2ItemTools は codexRolloutV2 が持つ item ビューのツールである。
+// 名前は `.name // .tool // .kind // .type` なので、McpToolCall は .tool の "js"、
+// Extension は .kind の "web.search"、名前を持たない item は型そのものになる。
+// merged 判定の走査対象は CommandExecution の実行コマンドと McpToolCall の
+// ツール名だけで、引数の本文も出力も入らない。
+func codexV2ItemTools() []domain.CodexToolCall {
+	return []domain.CodexToolCall{
+		{Name: "CommandExecution", MergeCommand: "/bin/zsh -lc npm test"},
+		{Name: "js", MergeTool: "js"},
+		{Name: "FileChange"},
+		{Name: "web.search"},
+		{Name: "CommandExecution", MergeCommand: "/bin/zsh -lc gh pr merge 12 --squash"},
+	}
+}
+
+func TestParseCodexTranscriptSection26i1b(t *testing.T) {
+	t.Parallel()
+
+	got, ok := domain.ParseCodexTranscript([]byte(codexRolloutV2))
+	if !ok {
+		t.Fatal("ParseCodexTranscript() ok = false, want true")
+	}
+
+	// test.sh セクション 26i1b の期待値。response_item を 1 つも持たない
+	// rollout なので、ツールは item ビューで数える(Reasoning やメッセージの
+	// item はツールではないので対象外)。turns は UserMessage item の件数。
+	want := domain.CodexTranscript{
+		TotalTurns:        2,
+		Tools:             codexV2ItemTools(),
+		ItemTools:         codexV2ItemTools(),
+		ToolsUsed:         []string{"CommandExecution", "FileChange", "js", "web.search"},
+		Model:             "gpt-5.6-sol",
+		TotalInputTokens:  1000000,
+		TotalOutputTokens: 100000,
+		CacheReadTokens:   500000,
+		CacheWriteTokens:  200000,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseCodexTranscript() =\n  %+v\nwant\n  %+v", got, want)
+	}
+
+	// CommandExecution の command に gh pr merge があるので merged が立つ。
+	if markers := domain.CodexMarkers(got); markers != (domain.DailyMarkers{Merged: true}) {
+		t.Errorf("CodexMarkers() = %+v, want {Merged:true}", markers)
+	}
+}
+
+func TestParseCodexTranscriptPrefersCallViewOverItemView(t *testing.T) {
+	t.Parallel()
+
+	// 同じ活動の別ビューなので、response_item のツール呼び出しが 1 件でもあれば
+	// そちらだけを数える(合算すると二重計上になる)。
+	raw := codexRolloutV2 +
+		`{"timestamp":"2026-08-10T16:24:59.000Z","type":"response_item","payload":{"type":"custom_tool_call","id":"c1","status":"completed","call_id":"call1","name":"exec","input":"const r = await tools.exec_command({\"cmd\":\"ls\"});"}}` + "\n"
+
+	got, ok := domain.ParseCodexTranscript([]byte(raw))
+	if !ok {
+		t.Fatal("ParseCodexTranscript() ok = false, want true")
+	}
+	wantTools := []domain.CodexToolCall{
+		{Name: "exec", MergeCommand: `const r = await tools.exec_command({"cmd":"ls"});`, MergeTool: "exec"},
+	}
+	if !reflect.DeepEqual(got.Tools, wantTools) {
+		t.Errorf("Tools = %+v, want %+v", got.Tools, wantTools)
+	}
+	if !reflect.DeepEqual(got.ToolsUsed, []string{"exec"}) {
+		t.Errorf("ToolsUsed = %v, want [exec]", got.ToolsUsed)
+	}
+	// 採用されなかった item ビューも残す。merged 判定は両ビューを走査するため。
+	if !reflect.DeepEqual(got.ItemTools, codexV2ItemTools()) {
+		t.Errorf("ItemTools = %+v, want %+v", got.ItemTools, codexV2ItemTools())
+	}
+	if markers := domain.CodexMarkers(got); markers != (domain.DailyMarkers{Merged: true}) {
+		t.Errorf("CodexMarkers() = %+v, want {Merged:true}", markers)
+	}
+}
+
+func TestParseCodexTranscriptTurnsAreNotDoubleCounted(t *testing.T) {
+	t.Parallel()
+
+	// 旧イベントと新 item が同居しても、どちらか一方だけを採る。
+	raw := codexRolloutV2 +
+		`{"timestamp":"2026-08-10T16:25:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"legacy duplicate of the same turn"}}` + "\n"
+
+	got, ok := domain.ParseCodexTranscript([]byte(raw))
+	if !ok {
+		t.Fatal("ParseCodexTranscript() ok = false, want true")
+	}
+	if got.TotalTurns != 2 {
+		t.Errorf("TotalTurns = %d, want 2", got.TotalTurns)
+	}
+}
+
+func TestCodexMarkersIgnoresCommandOutput(t *testing.T) {
+	t.Parallel()
+
+	// CommandExecution item は stdout / aggregated_output も持つ。実機には
+	// 「gh pr merge を含むファイルを cat しただけ」の item があり、item 全体を
+	// 走査すると merged マーカーが誤検知する。走査対象は実行したコマンドに限る。
+	raw := `{"timestamp":"2026-08-10T17:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}
+{"timestamp":"2026-08-10T17:00:01.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"read the docs","text_elements":[]}]}}}
+{"timestamp":"2026-08-10T17:00:02.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-1","process_id":"1","command":["/bin/zsh","-lc","cat NOTES.md"],"cwd":"file:///tmp/myapp","status":"completed","exit_code":0,"stdout":"To land a PR run: gh pr merge 12 --squash\n","aggregated_output":"To land a PR run: gh pr merge 12 --squash\n"}}}
+`
+	got, ok := domain.ParseCodexTranscript([]byte(raw))
+	if !ok {
+		t.Fatal("ParseCodexTranscript() ok = false, want true")
+	}
+	if markers := domain.CodexMarkers(got); markers != (domain.DailyMarkers{}) {
+		t.Errorf("CodexMarkers() = %+v, want すべて false", markers)
+	}
+}
+
+func TestCodexMarkersDetectsMergeByToolName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want domain.DailyMarkers
+	}{
+		{
+			// MCP 経由のマージは item の .tool で見分ける。
+			name: "item ビューの MCP マージ",
+			raw:  `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"m1","server":"github","tool":"merge_pull_request","arguments":{"pullNumber":12}}}}`,
+			want: domain.DailyMarkers{Merged: true},
+		},
+		{
+			// 呼び出しビューは .name で見分ける。
+			name: "呼び出しビューの MCP マージ",
+			raw:  `{"type":"response_item","payload":{"type":"function_call","id":"f1","call_id":"c1","name":"mcp__github__merge_pull_request","arguments":"{\"pullNumber\":12}"}}`,
+			want: domain.DailyMarkers{Merged: true},
+		},
+		{
+			// 引数の本文は走査しない。Slack 投稿が gh pr merge を引用しただけで
+			// 誤検知してしまうためである。
+			name: "MCP の引数に引用された gh pr merge は拾わない",
+			raw:  `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"m1","server":"slack","tool":"send_message","arguments":{"text":"次は gh pr merge 12 をお願いします"}}}}`,
+			want: domain.DailyMarkers{},
+		},
+		{
+			// 文字列の command でも落ちず、マージを見つけられる。
+			name: "文字列の command からマージを見つける",
+			raw:  `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"e1","command":"gh pr merge 12 --squash","status":"completed"}}}`,
+			want: domain.DailyMarkers{Merged: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := domain.ParseCodexTranscript([]byte(tt.raw))
+			if !ok {
+				t.Fatal("ParseCodexTranscript() ok = false, want true")
+			}
+			if markers := domain.CodexMarkers(got); markers != tt.want {
+				t.Errorf("CodexMarkers() = %+v, want %+v", markers, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseCodexTranscriptSection26i(t *testing.T) {
 	t.Parallel()
 
@@ -33,9 +216,10 @@ func TestParseCodexTranscriptSection26i(t *testing.T) {
 	want := domain.CodexTranscript{
 		TotalTurns: 2,
 		Tools: []domain.CodexToolCall{
-			{Name: "exec", Input: `const r = await tools.exec_command({"cmd":"npm test"});`},
-			{Name: "exec", Input: `const r = await tools.exec_command({"cmd":"gh pr merge 12 --squash"});`},
+			{Name: "exec", MergeCommand: `const r = await tools.exec_command({"cmd":"npm test"});`, MergeTool: "exec"},
+			{Name: "exec", MergeCommand: `const r = await tools.exec_command({"cmd":"gh pr merge 12 --squash"});`, MergeTool: "exec"},
 		},
+		ItemTools:         []domain.CodexToolCall{},
 		ToolsUsed:         []string{"exec"},
 		Model:             "gpt-5.6-sol",
 		TotalInputTokens:  1000000,
@@ -61,6 +245,7 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 			raw:  "",
 			want: domain.CodexTranscript{
 				Tools:     []domain.CodexToolCall{},
+				ItemTools: []domain.CodexToolCall{},
 				ToolsUsed: []string{},
 				Model:     "unknown",
 			},
@@ -76,9 +261,10 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 {"type":"response_item","payload":{"type":null}}`,
 			want: domain.CodexTranscript{
 				Tools: []domain.CodexToolCall{
-					{Name: "exec"},
-					{Name: "apply_patch"},
+					{Name: "exec", MergeTool: "exec"},
+					{Name: "apply_patch", MergeTool: "apply_patch"},
 				},
+				ItemTools: []domain.CodexToolCall{},
 				ToolsUsed: []string{"apply_patch", "exec"},
 				Model:     "unknown",
 			},
@@ -89,6 +275,7 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 			raw:  `{"type":"response_item","payload":{"type":"local_shell_call"}}`,
 			want: domain.CodexTranscript{
 				Tools:     []domain.CodexToolCall{{Name: "local_shell_call"}},
+				ItemTools: []domain.CodexToolCall{},
 				ToolsUsed: []string{"local_shell_call"},
 				Model:     "unknown",
 			},
@@ -101,6 +288,7 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 {"type":"turn_context","payload":{"model":null}}`,
 			want: domain.CodexTranscript{
 				Tools:     []domain.CodexToolCall{},
+				ItemTools: []domain.CodexToolCall{},
 				ToolsUsed: []string{},
 				Model:     "gpt-5.6-thinking",
 			},
@@ -112,6 +300,7 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 {"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":30,"cached_input_tokens":5,"cache_write_input_tokens":7,"output_tokens":3}}}}`,
 			want: domain.CodexTranscript{
 				Tools:             []domain.CodexToolCall{},
+				ItemTools:         []domain.CodexToolCall{},
 				ToolsUsed:         []string{},
 				Model:             "unknown",
 				TotalInputTokens:  25,
@@ -127,6 +316,7 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 {"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":null}}}`,
 			want: domain.CodexTranscript{
 				Tools:             []domain.CodexToolCall{},
+				ItemTools:         []domain.CodexToolCall{},
 				ToolsUsed:         []string{},
 				Model:             "unknown",
 				TotalInputTokens:  10,
@@ -141,6 +331,7 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 			want: domain.CodexTranscript{
 				TotalTurns: 1,
 				Tools:      []domain.CodexToolCall{},
+				ItemTools:  []domain.CodexToolCall{},
 				ToolsUsed:  []string{},
 				Model:      "unknown",
 			},
@@ -150,7 +341,8 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 			name: "input が無ければ arguments を使う",
 			raw:  `{"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"gh pr merge 1"}}`,
 			want: domain.CodexTranscript{
-				Tools:     []domain.CodexToolCall{{Name: "exec", Input: "gh pr merge 1"}},
+				Tools:     []domain.CodexToolCall{{Name: "exec", MergeCommand: "gh pr merge 1", MergeTool: "exec"}},
+				ItemTools: []domain.CodexToolCall{},
 				ToolsUsed: []string{"exec"},
 				Model:     "unknown",
 			},
@@ -160,9 +352,126 @@ func TestParseCodexTranscriptAggregates(t *testing.T) {
 			name: "input がオブジェクトなら JSON 文字列にする",
 			raw:  `{"type":"response_item","payload":{"type":"function_call","name":"exec","input":{"cmd":"gh pr merge 1"}}}`,
 			want: domain.CodexTranscript{
-				Tools:     []domain.CodexToolCall{{Name: "exec", Input: `{"cmd":"gh pr merge 1"}`}},
+				Tools:     []domain.CodexToolCall{{Name: "exec", MergeCommand: `{"cmd":"gh pr merge 1"}`, MergeTool: "exec"}},
+				ItemTools: []domain.CodexToolCall{},
 				ToolsUsed: []string{"exec"},
 				Model:     "unknown",
+			},
+		},
+		{
+			// item ビューでツールとして数えるのは 4 種類だけ。会話や思考の item、
+			// item が null の item_completed は数えない。
+			name: "item ビューはツール種別の item だけを数える",
+			raw: `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":null}}
+{"type":"event_msg","payload":{"type":"item_completed"}}`,
+			want: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{
+					{Name: "CommandExecution"},
+					{Name: "McpToolCall"},
+					{Name: "FileChange"},
+					{Name: "Extension"},
+				},
+				ItemTools: []domain.CodexToolCall{
+					{Name: "CommandExecution"},
+					{Name: "McpToolCall"},
+					{Name: "FileChange"},
+					{Name: "Extension"},
+				},
+				ToolsUsed: []string{"CommandExecution", "Extension", "FileChange", "McpToolCall"},
+				Model:     "unknown",
+			},
+		},
+		{
+			// 名前は `.name // .tool // .kind // .type` の順に落ちる。
+			name: "名前は name / tool / kind の順に優先する",
+			raw: `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","name":"my_ext","tool":"t","kind":"k"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","tool":"t","kind":"k"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","kind":"k"}}}`,
+			want: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{
+					{Name: "my_ext"}, {Name: "t"}, {Name: "k"},
+				},
+				ItemTools: []domain.CodexToolCall{
+					{Name: "my_ext"}, {Name: "t"}, {Name: "k"},
+				},
+				ToolsUsed: []string{"k", "my_ext", "t"},
+				Model:     "unknown",
+			},
+		},
+		{
+			// 配列の command は要素ごとに tostring して空白で繋ぐ。null は
+			// 空文字ではなく "null" になる(join ではなく map(tostring) のため)。
+			// arguments は走査しない。
+			name: "配列の command は要素を tostring して繋ぐ",
+			raw:  `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":["a",1,null,true,{"x":1}],"arguments":5}}}`,
+			want: domain.CodexTranscript{
+				Tools:     []domain.CodexToolCall{{Name: "CommandExecution", MergeCommand: `a 1 null true {"x":1}`}},
+				ItemTools: []domain.CodexToolCall{{Name: "CommandExecution", MergeCommand: `a 1 null true {"x":1}`}},
+				ToolsUsed: []string{"CommandExecution"},
+				Model:     "unknown",
+			},
+		},
+		{
+			// 配列でない command も落とさずそのまま tostring する。形が揺れても
+			// レコードを丸ごと summary: null へ退避させないための型ガードである。
+			name: "配列でない command も落とさず tostring する",
+			raw: `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":"gh pr merge 12 --squash"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":{"a":1}}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","command":false}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution"}}}`,
+			want: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{
+					{Name: "CommandExecution", MergeCommand: "gh pr merge 12 --squash"},
+					{Name: "CommandExecution", MergeCommand: `{"a":1}`},
+					{Name: "CommandExecution"},
+					{Name: "CommandExecution"},
+				},
+				ItemTools: []domain.CodexToolCall{
+					{Name: "CommandExecution", MergeCommand: "gh pr merge 12 --squash"},
+					{Name: "CommandExecution", MergeCommand: `{"a":1}`},
+					{Name: "CommandExecution"},
+					{Name: "CommandExecution"},
+				},
+				ToolsUsed: []string{"CommandExecution"},
+				Model:     "unknown",
+			},
+		},
+		{
+			// 走査対象は item の種類ごとに決まっている。CommandExecution は
+			// コマンド、McpToolCall はツール名だけで、それ以外は何も走査しない。
+			name: "走査対象は CommandExecution のコマンドと McpToolCall のツール名",
+			raw: `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","server":"github","tool":"merge_pull_request","arguments":{"pullNumber":12}}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","kind":"web.search","command":["gh","pr","merge"]}}}`,
+			want: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{
+					{Name: "merge_pull_request", MergeTool: "merge_pull_request"},
+					{Name: "web.search"},
+				},
+				ItemTools: []domain.CodexToolCall{
+					{Name: "merge_pull_request", MergeTool: "merge_pull_request"},
+					{Name: "web.search"},
+				},
+				ToolsUsed: []string{"merge_pull_request", "web.search"},
+				Model:     "unknown",
+			},
+		},
+		{
+			// UserMessage item が 1 件でもあれば turns は item ビューで数える。
+			name: "turns は UserMessage item を数える",
+			raw: `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage"}}}`,
+			want: domain.CodexTranscript{
+				TotalTurns: 1,
+				Tools:      []domain.CodexToolCall{},
+				ItemTools:  []domain.CodexToolCall{},
+				ToolsUsed:  []string{},
+				Model:      "unknown",
 			},
 		},
 	}
@@ -199,6 +508,18 @@ func TestParseCodexTranscriptRejects(t *testing.T) {
 		{name: "input_tokens が文字列", raw: `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":"x"}}}}`},
 		{name: "response_item の payload.type が数値", raw: `{"type":"response_item","payload":{"type":7}}`},
 		{name: "turn_context の model が数値", raw: `{"type":"turn_context","payload":{"model":7}}`},
+		// 現行版は item に `.type` で添字を付けるため、オブジェクトでも null でも
+		// なければ「Cannot index ... with string "type"」で落ちる。
+		{name: "item がスカラー", raw: `{"type":"event_msg","payload":{"type":"item_completed","item":5}}`},
+		{name: "item が配列", raw: `{"type":"event_msg","payload":{"type":"item_completed","item":["a"]}}`},
+		{
+			name: "item の name が数値",
+			raw:  `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","name":7}}}`,
+		},
+		{
+			name: "item の tool が数値",
+			raw:  `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","tool":7}}}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -215,33 +536,66 @@ func TestCodexMarkers(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		tools []domain.CodexToolCall
-		want  domain.DailyMarkers
+		name       string
+		transcript domain.CodexTranscript
+		want       domain.DailyMarkers
 	}{
 		{
-			name:  "gh pr merge を含むツール呼び出し",
-			tools: []domain.CodexToolCall{{Name: "exec", Input: `tools.exec_command({"cmd":"gh pr merge 12"})`}},
-			want:  domain.DailyMarkers{Merged: true},
+			name: "gh pr merge を含むツール呼び出し",
+			transcript: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{{Name: "exec", MergeCommand: `tools.exec_command({"cmd":"gh pr merge 12"})`}},
+			},
+			want: domain.DailyMarkers{Merged: true},
 		},
 		{
-			name:  "含まなければ偽",
-			tools: []domain.CodexToolCall{{Name: "exec", Input: "npm test"}},
-			want:  domain.DailyMarkers{},
+			name: "含まなければ偽",
+			transcript: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{{Name: "exec", MergeCommand: "npm test"}},
+			},
+			want: domain.DailyMarkers{},
 		},
 		{
 			// codex は slack / doc を判定しない(現行版は常に false)。
-			name:  "slack ツールでも slack は偽のまま",
-			tools: []domain.CodexToolCall{{Name: "mcp__slack__send_message", Input: "/x/a.md"}},
-			want:  domain.DailyMarkers{},
+			name: "slack ツールでも slack は偽のまま",
+			transcript: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{{Name: "mcp__slack__send_message", MergeCommand: "/x/a.md", MergeTool: "mcp__slack__send_message"}},
+			},
+			want: domain.DailyMarkers{},
 		},
-		{name: "ツールが無ければすべて偽", tools: nil, want: domain.DailyMarkers{}},
+		{
+			// 採用ビューが response_item 側でも、item ビューのコマンドまで走査する
+			// (真偽値なので二重計上にはならない)。
+			name: "採用されなかった item ビューのコマンドでも立つ",
+			transcript: domain.CodexTranscript{
+				Tools:     []domain.CodexToolCall{{Name: "exec", MergeCommand: "npm test"}},
+				ItemTools: []domain.CodexToolCall{{Name: "CommandExecution", MergeCommand: "/bin/zsh -lc gh pr merge 12"}},
+			},
+			want: domain.DailyMarkers{Merged: true},
+		},
+		{
+			// MCP 経由のマージは引数の本文ではなくツール名で見分ける。
+			name: "MCP のツール名が merge_pull_request なら立つ",
+			transcript: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{{Name: "merge_pull_request", MergeTool: "merge_pull_request"}},
+			},
+			want: domain.DailyMarkers{Merged: true},
+		},
+		{
+			// 呼び出しビューの名前は mcp__github__merge_pull_request と長いので
+			// 部分一致で拾う(claude 側は完全一致で見ている)。
+			name: "呼び出しビューの MCP マージツール名でも立つ",
+			transcript: domain.CodexTranscript{
+				Tools: []domain.CodexToolCall{{Name: "mcp__github__merge_pull_request", MergeTool: "mcp__github__merge_pull_request"}},
+			},
+			want: domain.DailyMarkers{Merged: true},
+		},
+		{name: "ツールが無ければすべて偽", transcript: domain.CodexTranscript{}, want: domain.DailyMarkers{}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := domain.CodexMarkers(tt.tools); got != tt.want {
+			if got := domain.CodexMarkers(tt.transcript); got != tt.want {
 				t.Errorf("CodexMarkers() = %+v, want %+v", got, tt.want)
 			}
 		})

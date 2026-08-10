@@ -101,7 +101,7 @@ func buildCodexDailyRecord(source DailySource, transcript []byte, pricing Pricin
 		summary.TotalCostUSD = &cost
 	}
 	record.Summary = summary
-	record.Markers = CodexMarkers(parsed.Tools)
+	record.Markers = CodexMarkers(parsed)
 	return record
 }
 
