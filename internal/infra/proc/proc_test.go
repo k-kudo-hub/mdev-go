@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -78,9 +79,9 @@ func TestCommandDoesNotWaitForGrandchildHoldingStdout(t *testing.T) {
 func TestCommandRunsNormally(t *testing.T) {
 	t.Parallel()
 
-	// 打ち切られない context では従来どおり実行できる。Go の os/exec は
-	// ctx.Done() が nil のとき Cancel も WaitDelay も参照しないため、
-	// 上限を設けない呼び出しの挙動は Setpgid を除いて変わらない。
+	// 打ち切られない context でも通常どおり実行できる(Go の os/exec は
+	// ctx.Done() が nil のとき Cancel も WaitDelay も参照しない)。
+	// なお上限を持たない呼び出しはこのパッケージを使わない決まりである。
 	out, err := Command(context.Background(), "echo", "ok").Output()
 	if err != nil {
 		t.Fatalf("Command() = %v", err)
@@ -123,11 +124,27 @@ func TestKillGroupWithoutProcess(t *testing.T) {
 	}
 }
 
+func TestKillGroupOnReapedProcess(t *testing.T) {
+	t.Parallel()
+
+	// reap 済みの相手には撃たない。os/exec は Wait4 の前に「済み」の印を立てる
+	// ので、印が立った後の PID はいつ使い回されてもおかしくない。生の
+	// syscall.Kill はこの印を見ないため、os.Process.Signal を通して確かめる。
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("下準備のコマンドが失敗: %v", err)
+	}
+	if err := killGroup(cmd.Process); !errors.Is(err, os.ErrProcessDone) {
+		t.Errorf("killGroup(reap 済み) = %v, want os.ErrProcessDone", err)
+	}
+}
+
 func TestKillGroupOnMissingGroup(t *testing.T) {
 	t.Parallel()
 
-	// 既に消えたグループへの kill は ESRCH になる。これを os.ErrProcessDone に
-	// 変換しないと、Go は「打ち切りに失敗した」とみなして別のエラーを被せる。
+	// 起動を経ていない os.Process が指す先が居ない場合。ESRCH は
+	// os.ErrProcessDone に変換される(しないと Go は「打ち切りに失敗した」と
+	// みなして別のエラーを被せる)。
 	pid := freePGID(t)
 	if err := killGroup(&os.Process{Pid: pid}); !errors.Is(err, os.ErrProcessDone) {
 		t.Errorf("killGroup(存在しないグループ) = %v, want os.ErrProcessDone", err)

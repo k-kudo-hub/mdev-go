@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
-	"github.com/k-kudo-hub/mdev-go/internal/infra/proc"
 )
 
 // TabController は zellij のタブ一覧の取得とタブの終了を担当する。
@@ -58,9 +57,9 @@ func outputWithTimeout(timeout time.Duration) func(name string, args ...string) 
 // commandOutput は外部コマンドを実行して標準出力を返す。
 // 失敗した場合(上限でプロセスグループごと切られた場合を含む)は空文字を返す。
 func commandOutput(timeout time.Duration, name string, args ...string) string {
-	ctx, cancel := commandContext(timeout)
+	cmd, cancel := command(timeout, name, args...)
 	defer cancel()
-	out, err := proc.Command(ctx, name, args...).Output()
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

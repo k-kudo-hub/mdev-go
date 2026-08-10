@@ -8,6 +8,17 @@
 // 実環境ではハングした `zellij action` が 200 個超まで蓄積し、うち 2 個が
 // 100% CPU で空転してマシン全体を劣化させた。zellij サーバの劣化は
 // タブ遷移の取りこぼしを悪化させるため、これは増幅ループになる。
+//
+// # 使いどころ
+//
+// **実行時間の上限を持つ呼び出しだけがこのパッケージを使う。**
+//
+// 上限を持たない呼び出し(UploadLog / RestoreTask / FetchNews)は素の
+// exec.Command のままにする。プロセスグループを分けると、mdev を抱えている
+// 端末が閉じたときにカーネルが送る SIGHUP が子へ連鎖しなくなるためである
+// (SIGHUP はフォアグラウンドのプロセスグループへ届く)。上限を持つ呼び出しは
+// 高々その上限で自分から片付くので分けてよいが、上限の無い呼び出しは
+// 連鎖が切れると端末が消えた後も残り続ける。
 package proc
 
 import (
@@ -38,10 +49,10 @@ const waitDelay = 2 * time.Second
 // 子を新しいプロセスグループのリーダーにしたうえで(Setpgid)、打ち切りの
 // シグナルをそのグループ全体へ送る。
 //
-// ctx が打ち切られない context(context.Background() など)の場合、Go の
-// os/exec は Cancel も WaitDelay も参照しない(Start が watchCtx を起動する
-// 条件が `ctx.Done() != nil` であるため)。上限を設けない呼び出しの挙動は
-// Setpgid を除いて従来と変わらない。
+// ctx は打ち切られるものを渡すこと(パッケージのコメントの「使いどころ」を
+// 参照)。打ち切られない context を渡した場合、Go の os/exec は Cancel も
+// WaitDelay も参照しないため(Start が watchCtx を起動する条件が
+// `ctx.Done() != nil` である)、プロセスグループを分ける副作用だけが残る。
 func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	// Setpgid は子を新しいプロセスグループのリーダーにする。子が spawn した
@@ -66,6 +77,28 @@ func killGroup(p *os.Process) error {
 		return os.ErrProcessDone
 	}
 
+	// 生の kill を撃つ前に、os.Process 越しにシグナル 0(送信はせず生存確認だけを
+	// する印)を通す。reap 済みの PID を使い回した無関係のプロセスグループを
+	// 撃たないための手当てである。
+	//
+	// Go の os/exec は Wait4 を呼ぶ前に「済み」の印を立てる。理由はソースに
+	// 書かれている(os/exec_unix.go の pidWait: "Mark the process done now,
+	// before the call to Wait4, so that Process.pidSignal will not send a
+	// signal.")。os.Process.Signal はその印を見て ErrProcessDone を返し、印を
+	// 立てる側は sigMu の書き込みロックで送信中の Signal の完了を待つ。つまり
+	// os.Process 越しなら reap 済みの相手へシグナルが飛ぶことはない。
+	// syscall.Kill を直に呼ぶとこの印が見えない。
+	if err := p.Signal(syscall.Signal(0)); err != nil {
+		// 相手が居ない場合の ESRCH もここで os.ErrProcessDone に変換済みである
+		// (os/exec_unix.go の convertESRCH)。
+		return err
+	}
+
+	// 以下の kill は sigMu の外にあるため、確認と送信の間に相手が終わって PID が
+	// 使い回される窓が理屈上は残る。実害は無視してよい。macOS の PID は順次
+	// 割り当てで、一周(既定の上限は 99998)しない限り同じ番号は戻ってこない。
+	// さらに撃つ相手はプロセスグループなので、被害が出るのは「使い回された PID の
+	// プロセスがグループリーダーでもある」場合に限られる。
 	err := syscall.Kill(-p.Pid, syscall.SIGKILL)
 	switch {
 	case err == nil:

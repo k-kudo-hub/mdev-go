@@ -2,12 +2,7 @@ package zellij
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
-	"strconv"
-	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -118,76 +113,37 @@ func TestCommandTimeoutIsTenSeconds(t *testing.T) {
 	}
 }
 
-// ---- 孫プロセスまで止まること ---------------------------------------------
+// ---- 起動方法の使い分け ---------------------------------------------------
 
-// grandchildScript は孫プロセスを 1 つ spawn して自分も待ち続ける bash の本文。
-//
-// $1 に孫の PID を書き出すファイルのパスを取る。孫は SIGTERM を無視し、待ち方も
-// 外部コマンド任せにしない(while ループ)ため、止めるにはプロセスグループ全体への
-// SIGKILL しか手が無い。zellij CLI 自体は孫を作らないが、上限で切る経路は
-// すべて同じ止め方でなければならないため、ここでも実プロセスで確かめる。
-const grandchildScript = `
-trap "" TERM
-bash -c 'trap "" TERM; echo $$ > "$1"; while :; do sleep 1; done' _ "$1" </dev/null >/dev/null 2>&1 &
-while :; do sleep 1; done
-`
-
-func TestRunCommandKillsGrandchildren(t *testing.T) {
+func TestCommandUsesProcessGroupOnlyWithTimeout(t *testing.T) {
 	t.Parallel()
 
-	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
-	if err := runCommand(time.Second, "bash", "-c", grandchildScript, "_", pidFile); err == nil {
-		t.Fatal("上限を超えたのにエラーが返っていない")
+	// 上限つきの呼び出しは proc.Command を通す(プロセスグループごと切るため)。
+	// 孫まで止まることの実証は internal/infra/proc のテストが持つ。
+	// zellij CLI はすべて上限つきなので、実際に通るのは上の枝だけである。
+	tests := []struct {
+		name       string
+		timeout    time.Duration
+		wantPgroup bool
+	}{
+		{name: "上限つきはプロセスグループを分ける", timeout: commandTimeout, wantPgroup: true},
+		{name: "上限なしは分けない", timeout: 0, wantPgroup: false},
 	}
 
-	pid := readPID(t, pidFile)
-	if err := waitProcessGone(pid); err != nil {
-		t.Errorf("孫プロセス(pid %d)が生き残っている: %v", pid, err)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-func TestCommandOutputKillsGrandchildren(t *testing.T) {
-	t.Parallel()
+			cmd, cancel := command(tt.timeout, "true")
+			defer cancel()
 
-	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
-	if out := commandOutput(time.Second, "bash", "-c", grandchildScript, "_", pidFile); out != "" {
-		t.Errorf("出力 = %q, want 空", out)
-	}
-
-	pid := readPID(t, pidFile)
-	if err := waitProcessGone(pid); err != nil {
-		t.Errorf("孫プロセス(pid %d)が生き残っている: %v", pid, err)
-	}
-}
-
-// readPID は pidFile に書かれた PID を読む。テストが失敗して孫が生き残った
-// 場合に備え、後始末で必ず SIGKILL を送る。
-func readPID(t *testing.T, pidFile string) int {
-	t.Helper()
-
-	b, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatalf("孫の PID が書かれていない: %v", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil {
-		t.Fatalf("PID の解釈に失敗: %v", err)
-	}
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	return pid
-}
-
-// waitProcessGone は pid のプロセスが消えるまで待つ。消えなければエラーを返す。
-// シグナル 0 の kill は生存確認で、シグナルは送らない(`kill -0` と同じ)。
-func waitProcessGone(pid int) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if err := syscall.Kill(pid, 0); err != nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return errors.New("5 秒待っても消えなかった")
-		}
-		time.Sleep(20 * time.Millisecond)
+			gotPgroup := cmd.SysProcAttr != nil && cmd.SysProcAttr.Setpgid
+			if gotPgroup != tt.wantPgroup {
+				t.Errorf("Setpgid = %v, want %v", gotPgroup, tt.wantPgroup)
+			}
+			if got := cmd.Cancel != nil; got != tt.wantPgroup {
+				t.Errorf("Cancel の差し替え = %v, want %v", got, tt.wantPgroup)
+			}
+		})
 	}
 }

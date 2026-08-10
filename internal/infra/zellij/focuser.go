@@ -4,6 +4,7 @@ package zellij
 
 import (
 	"context"
+	"os/exec"
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
@@ -54,18 +55,25 @@ func withTimeout(timeout time.Duration) func(name string, args ...string) error 
 }
 
 // runCommand は実際に外部コマンドを実行する。
-// timeout が正の値なら、その時間でプロセスグループごと切る
-// (直接の子だけを切ると孫が残る。internal/infra/proc を参照)。
 func runCommand(timeout time.Duration, name string, args ...string) error {
-	ctx, cancel := commandContext(timeout)
+	cmd, cancel := command(timeout, name, args...)
 	defer cancel()
-	return proc.Command(ctx, name, args...).Run()
+	return cmd.Run()
 }
 
-// commandContext は上限付きの context を返す。timeout が 0 以下なら上限なし。
-func commandContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+// command は timeout の有無で起動方法を変えた exec.Cmd を返す。
+//
+// timeout が正の値なら proc.Command を使い、その時間でプロセスグループごと切る。
+// 直接の子だけを切ると孫が残るためである(internal/infra/proc を参照)。
+//
+// timeout が無いときは素の exec.Command を使う。プロセスグループを分けると
+// 端末が閉じたときの SIGHUP が子へ連鎖しなくなり、上限で自分から片付く保証も
+// 無いまま残り続けるためである。zellij CLI の呼び出しはすべて上限つき
+// (commandTimeout)なので、現状この枝を通るものは無い。
+func command(timeout time.Duration, name string, args ...string) (*exec.Cmd, context.CancelFunc) {
 	if timeout <= 0 {
-		return context.WithCancel(context.Background())
+		return exec.Command(name, args...), func() {}
 	}
-	return context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return proc.Command(ctx, name, args...), cancel
 }
