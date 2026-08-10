@@ -480,3 +480,61 @@ func TestDailyStoreAppendReleasesLockAfterReplace(t *testing.T) {
 		t.Errorf("ロックが残っている: %s", lockDir)
 	}
 }
+
+func TestDailyStoreAppendKeepsScreenSessionEntries(t *testing.T) {
+	t.Parallel()
+
+	// スクリーン検出の claude_session_id はタブ名から作った合成値で、同じ名前の
+	// タブなら別のタスクでも同じになる。これを置換キーにすると過去のタスクの
+	// 記録まで消えるため、置換せず追記する(重複は残るが履歴は失わない)。
+	root := t.TempDir()
+	daily := store.NewDailyStore(root, io.Discard)
+
+	sid := domain.ScreenSessionIDPrefix + "dedupe-tab-2917289248"
+	for _, message := range []string{"first", "second"} {
+		if err := daily.Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", sid, message)); err != nil {
+			t.Fatalf("Append() = %v", err)
+		}
+	}
+
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	if got, want := dailyMessages(t, path), []string{"first", "second"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v", got, want)
+	}
+}
+
+func TestDailyStoreAppendSkipsReplacementWhenLockUnavailable(t *testing.T) {
+	t.Parallel()
+
+	// ロックを取れないまま置換すると、ファイル全体の書き直しが並行する restore の
+	// 結果(restored: true の付与)を巻き戻しかねない。追記だけなら失うものは
+	// 無いため、fail-open のときは置換をあきらめて追記に徹する。
+	root := t.TempDir()
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	writeExistingDaily(t, path,
+		`{"tab":"dedupe-tab","claude_session_id":"sid-A","message":"old"}`,
+	)
+	lockDir := path + ".lock"
+	if err := os.MkdirAll(lockDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() = %v", err)
+	}
+	// 自プロセスの PID を置くと「所有者は生きている」と判定され、待ち時間を
+	// 過ぎるまでロックは空かない。
+	if err := os.WriteFile(filepath.Join(lockDir, "pid"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		t.Fatalf("WriteFile() = %v", err)
+	}
+
+	var warn bytes.Buffer
+	err := store.NewDailyStore(root, &warn).
+		Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "sid-A", "new"))
+	if err != nil {
+		t.Fatalf("Append() = %v", err)
+	}
+
+	if got, want := dailyMessages(t, path), []string{"old", "new"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v(ロック無しでは置換しない)", got, want)
+	}
+	if !strings.Contains(warn.String(), "ロック") {
+		t.Errorf("警告 = %q, want ロックに触れた警告", warn.String())
+	}
+}

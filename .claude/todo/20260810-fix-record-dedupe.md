@@ -11,12 +11,15 @@ claude-conductor 側で確定した「再試行時の daily 追記の置換セ�
 ## 確定仕様(一次情報: claude-conductor の scripts/record-output.sh 末尾 + test.sh セクション 26i2)
 
 - **対象**: 当日の daily ファイルのみ(追記先と同じファイル)
-- **dedupe キー**: `tab` + `claude_session_id` の完全一致。`claude_session_id` が空なら削除せず
-  無条件追記(従来動作)
+- **dedupe キー**: `tab` + `claude_session_id` の完全一致。ただし `claude_session_id` が
+  **空、または `screen-` で始まる場合はキーとして使わず無条件追記**(従来動作)。
+  スクリーン検出の合成 ID `screen-<slug>` はタブ名の純関数であり、同名タブの別タスクの
+  履歴まで一致してしまうため(conductor 側 code-review で確定)
 - **対象条件**: `restored != true` の行のみ削除対象(`restored: true` は復元済みの履歴として残す)
 - **置換位置**: 一致行を**すべて削除**してから**末尾へ追記**(削除されなかった行の相対順序は不変)
-- **排他**: 既存 lock(2 秒 fail-open)を保持したまま、削除フィルタ → 同一ディレクトリ temp →
-  rename → 追記
+- **排他**: 既存 lock(2 秒 fail-open)を取れたときだけ削除フィルタ →
+  同一ディレクトリ temp → rename → 追記。**ロックを取れなかった場合は削除をあきらめて
+  追記のみ**(非ロックの全体書き換えは並行 restore の `restored: true` を巻き戻すため)
 - **フェイルセーフ**: 既存 daily の解析に失敗したら削除せずそのまま追記(重複は回復できるが
   切り詰めは回復できない)
 
@@ -37,14 +40,21 @@ claude-conductor 側で確定した「再試行時の daily 追記の置換セ�
 - [x] store: 置換後にロックが残らないテスト
 - [x] `DailyStore.Append` に置換セマンティクスを実装(`writeFileAtomic` を使用)
 
+### 仕様変更(conductor 側 code-review で確定)への追随
+
+- [x] domain: `DailyRecord.HasDedupeKey`(空 / `screen-` 前置きはキーにしない)のテスト → 実装
+- [x] store: `screen-` の sid で 2 回実行すると 2 行になるテスト
+- [x] store: ロックを取れないとき(fail-open)は削除フィルタを飛ばして追記のみ行うテスト
+- [ ] conductor 側の確定連絡を受けてゴールデンを再生成し、`screen-` sid のケース追加を検討
+
 ### ゴールデン(現行 Shell 版との一致)
 
-- [ ] `cases.json` に実行回数を表現する項目を足し、`scripts/gen-golden-record.sh` を対応させる
-- [ ] 再試行置換のゴールデンケースを追加(同一 pending で record を 2 回走らせ、期待 daily が
+- [x] `cases.json` に実行回数を表現する項目を足し、`scripts/gen-golden-record.sh` を対応させる
+- [x] 再試行置換のゴールデンケースを追加(同一 pending で record を 2 回走らせ、期待 daily が
       1 行になる)
-- [ ] `gen-golden-record.sh` を conductor worktree のパスで実行し fixture 再生成。
+- [x] `gen-golden-record.sh` を conductor worktree のパスで実行し fixture 再生成。
       変更のない既存 fixture は `git checkout` で戻す(completed_at 変化のノイズ回避)
-- [ ] ゴールデンテスト全件通過を確認
+- [x] ゴールデンテスト全件通過を確認
 
 ### 仕上げ
 

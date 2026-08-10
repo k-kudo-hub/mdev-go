@@ -97,9 +97,10 @@ type DailyAppender interface {
 	//   - claude_session_id が record.ClaudeSessionID と一致する
 	//   - restored が true ではない(復元済みの履歴は残す)
 	//
-	// record.ClaudeSessionID が空の場合は dedupe キーが無いため、何も取り除かず
-	// 追記する。同じ引数で 2 回呼んでも daily log の行数が増えないことが、この
-	// ポートの利用者(RecordOutput)が頼っている性質である。
+	// 置換キーを持たないレコード(domain.DailyRecord.HasDedupeKey が false)は、
+	// 何も取り除かずに追記する。同じ引数で 2 回呼んでも daily log の行数が
+	// 増えないことが、キーを持つ場合にこのポートの利用者(RecordOutput)が
+	// 頼っている性質である。
 	Append(session, date string, record domain.DailyRecord) error
 }
 

@@ -16,6 +16,9 @@ import (
 // エントリを増やさないよう、daily log への書き込みは (tab, claude_session_id) を
 // dedupe キーとした置換になっている(DailyAppender.Append を参照)。このユースケースは
 // 再実行でも同じキーを渡し続けることでその置換を成立させる。
+//
+// ただしスクリーン検出の合成セッション ID など、タスクを一意に指さない ID の場合は
+// 置換されず追記のままになる(domain.DailyRecord.HasDedupeKey を参照)。
 type RecordOutput struct {
 	Pending    PendingFinder
 	Transcript TranscriptReader

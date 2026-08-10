@@ -76,13 +76,18 @@ func (s *DailyStore) Append(session, date string, record domain.DailyRecord) err
 	if acquired {
 		// 解放の失敗は追記の成否に影響しない(残っても次回 stale として回収される)。
 		defer func() { _ = lock.Release() }()
-	}
 
-	// 置換は「消してから末尾へ足す」で行う。残った行の相対順序は変わらず、
-	// 置き換えられた行だけが最終行へ移る。daily log は書かれた順に読まれるため、
-	// 更新した記録が最新として扱われる形になる。
-	if record.ClaudeSessionID != "" {
-		removeSupersededDaily(path, record.Tab, record.ClaudeSessionID)
+		// 置換は「消してから末尾へ足す」で行う。残った行の相対順序は変わらず、
+		// 置き換えられた行だけが最終行へ移る。daily log は書かれた順に読まれるため、
+		// 更新した記録が最新として扱われる形になる。
+		//
+		// 置換はロックを取れたときだけ行う。ファイル全体の書き直しは、並行する
+		// restore が付けた restored: true を巻き戻しかねないためである。追記は
+		// O_APPEND なので競合しても行を失わない。ロックを取れなかったときに
+		// 重複が残るのは、履歴を壊すことに比べれば軽い。
+		if record.HasDedupeKey() {
+			removeSupersededDaily(path, record.Tab, record.ClaudeSessionID)
+		}
 	}
 
 	return appendLine(path, append(b, '\n'))
@@ -92,8 +97,8 @@ func (s *DailyStore) Append(session, date string, record domain.DailyRecord) err
 //
 // 消すのは tab と claude_session_id の両方が一致し、かつ restored が true でない行
 // である。restored: true はダッシュボードへ戻したタスクの履歴であり、同じタブと
-// セッション ID で作業が再開されても残さなければならない。claude_session_id を
-// 持たない記録は dedupe キーが無いため、呼び出し側がここを通さず素通しで追記する。
+// セッション ID で作業が再開されても残さなければならない。置換キーを持たない記録
+// (domain.DailyRecord.HasDedupeKey が false)は、呼び出し側がここを通さず追記する。
 //
 // 途中で失敗しても呼び出し側へは伝えない。読めない・書けない場合は元のファイルを
 // そのままにして追記へ進む。重複した記録は後から消せるが、切り詰めた記録は

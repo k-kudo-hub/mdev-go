@@ -223,3 +223,32 @@ func TestDailyDefaultMessages(t *testing.T) {
 		t.Errorf("NoSummaryMessage = %q", domain.NoSummaryMessage)
 	}
 }
+
+func TestDailyRecordHasDedupeKey(t *testing.T) {
+	t.Parallel()
+
+	// daily log の置換キーとして使えるのは、タスクを一意に指す
+	// claude_session_id を持つレコードだけである。
+	for name, tc := range map[string]struct {
+		claudeSessionID string
+		want            bool
+	}{
+		"claude のセッション ID": {claudeSessionID: "0199f0e2-1234-7000-8000-abcdef012345", want: true},
+		"空":                {claudeSessionID: "", want: false},
+		// スクリーン検出はタブ名の slug から `screen-<slug>` を組み立てる。
+		// 同じタブ名なら別のタスクでも同じ値になるため、キーにすると
+		// 過去のタスクの記録を消してしまう。
+		"スクリーン検出の合成 ID":     {claudeSessionID: "screen-alpha-dev-2917289248", want: false},
+		"screen- だけ":        {claudeSessionID: "screen-", want: false},
+		"screen を含むが前置きでない": {claudeSessionID: "sess-screen-1", want: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			record := domain.DailyRecord{Tab: "t", ClaudeSessionID: tc.claudeSessionID}
+			if got := record.HasDedupeKey(); got != tc.want {
+				t.Errorf("HasDedupeKey() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
