@@ -29,9 +29,9 @@ zellij 駆動には確立済みの防御(登録待ち・stdout 検証フォー�
 - [x] TabController 拡張のテスト → 実装(`QueryTabNames` / `FocusTabVerified`(stdout 非空 = 成功)/ `NewTab` / `NewPane` / `Resize` / `MoveFocus` / `FocusPreviousPane` / `CloseActiveTab`。全て proc.Command + 10 秒上限)
 - [x] `CreateTask` ユースケースのテスト → 実装(Shell 版 v0.7.4 と同一シーケンス: screen-state 削除 → new-tab → 登録ポーリング待ち → 検証フォーカス + リトライ → 失敗なら pane 構築せず rc=3 相当のエラー種別 → task-control ペイン(予算切れでも最低 1 秒)→ resize×30 → focus-previous-pane → apply_layout(rc 無視)。全体予算 30 秒、途中打ち切りは成功扱い + 警告)
 - [x] `ApplyLayout` のテスト → 実装(new-pane / move-focus / focus-previous-pane / resize(amount 回)、command 省略時の分岐)
-- [ ] `ToggleWaiting` ユースケースのテスト → 実装(FindByTab 最初の 1 件 / 無ければ no-op / 原子書き込み)
+- [x] `ToggleWaiting` ユースケースのテスト → 実装(FindByTab 最初の 1 件 / 無ければ no-op / 原子書き込み)
 - [x] `UniqueTaskName` の existing 取得を QueryTabNames で結線(zellij 失敗時は base をそのまま = Shell 互換)
-- [ ] task-control 用の削除ユースケース統合のテスト → 実装(CommitDelete に close-tab フォールバック追加。2 打鍵タイムアウトは 2 秒の別定数)
+- [x] task-control 用の削除ユースケース統合のテスト → 実装(CommitDelete に close-tab フォールバック追加。2 打鍵タイムアウトは 2 秒の別定数)
 
 ### tui
 
