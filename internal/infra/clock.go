@@ -10,3 +10,10 @@ type SystemClock struct{}
 
 // Now は現在時刻を返す。
 func (SystemClock) Now() time.Time { return time.Now() }
+
+// Sleep は d だけ待つ(app.Sleeper の実装)。
+//
+// タスク作成のポーリング間隔とレイアウトの落ち着き待ちに使う。
+// domain と app は time.Sleep を直接呼ばないため、テストは待たない実装へ
+// 差し替えられる。
+func (SystemClock) Sleep(d time.Duration) { time.Sleep(d) }

@@ -26,16 +26,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	os.Exit(cli.Execute(buildDeps(home, os.Getenv, infra.SystemClock{})))
+	os.Exit(cli.Execute(buildDeps(home, os.Getenv, infra.SystemClock{}, infra.SystemClock{})))
 }
 
 // buildDeps は実行時の依存一式を組み立てる(ADR-0002 の DI はここだけ)。
 //
 // home は pending と settings.json の基準になるホームディレクトリ、getenv は
-// 環境変数の読み取り、clock は「今」を供給する時計である。3 つとも引数で
-// 受けるのは、ゴールデンテストが隔離したディレクトリと固定の日付で同じ
-// 依存グラフを組み立て直せるようにするためである。
-func buildDeps(home string, getenv func(string) string, clock app.Clock) cli.Deps {
+// 環境変数の読み取り、clock は「今」を供給する時計、sleeper は待ちを作るもの
+// である。いずれも引数で受けるのは、ゴールデンテストが隔離したディレクトリと
+// 固定の日付、待たない sleeper で同じ依存グラフを組み立て直せるようにする
+// ためである。
+func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper app.Sleeper) cli.Deps {
 	conductorHome := store.ConductorHome(home, getenv("CONDUCTOR_HOME"))
 
 	pending := store.NewPendingStore(store.PendingRoot(home))
@@ -77,6 +78,20 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock) cli.Dep
 	paneStore := store.NewPaneStore(store.PendingRoot(home), conductorHome)
 	tabs := zellij.NewTabController()
 	runner := shell.NewRunner(conductorHome)
+	binary := store.NewMdevBinaryStore(conductorHome)
+
+	// タスク作成(n フロー)と task-control ペイン。zellij を直接駆動するため、
+	// タブ登録待ち・フォーカス検証・全体予算の防御を持つ TaskCreator を通す。
+	// sleeper に clock をそのまま渡せないのは、clock が app.Clock として
+	// 受け取られており Sleep を持つとは限らないためである。
+	creator := &app.TaskCreator{
+		Tabs:        tabs,
+		ScreenState: paneStore,
+		Config:      paneStore,
+		Clock:       clock,
+		Sleeper:     sleeper,
+		Launcher:    binary,
+	}
 
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
@@ -98,6 +113,30 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock) cli.Dep
 			Shell:  runner,
 			Opener: shell.NewOpener(),
 			Clock:  clock,
+		},
+		TaskCreate: &app.TaskCreatePane{
+			Config:  paneStore,
+			Dirs:    paneStore,
+			Creator: creator,
+			Home:    home,
+		},
+		TaskControl: &app.TaskControlPane{
+			Pending: pending,
+			Raw:     pending,
+			Focuser: zellij.NewFocuser(),
+			Clock:   clock,
+			Deleter: &app.TaskDeleter{
+				Remover:     paneStore,
+				Registry:    store.NewRegistryStore(store.RegistryRoot(conductorHome)),
+				ScreenState: paneStore,
+				Tabs:        tabs,
+				Closer:      tabs,
+				Recorder:    record,
+				Shell:       runner,
+				// 自分のタブの中で動いているので、id が引けなければ
+				// 「今のタブ」を閉じてよい(Dashboard との非対称)。
+				CloseActiveOnMissingID: true,
+			},
 		},
 		Env: app.PaneEnv{ZellijSession: getenv("ZELLIJ_SESSION_NAME")},
 	}

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "notification-to-waiting",
+    "description": "Notification は Waiting になり prev_event に退避される",
+    "tab": "pr-review",
+    "input": "{\"tab\":\"pr-review\",\"session\":\"s1\",\"claude_session_id\":\"sid-1\",\"message\":\"review\",\"event\":\"Notification\",\"time\":\"10:00:00\",\"agent\":\"claude\"}"
+  },
+  {
+    "name": "stop-to-waiting",
+    "description": "完了(Stop)のタスクも退避される。再開時に done へ戻すため",
+    "tab": "done-task",
+    "input": "{\"tab\":\"done-task\",\"session\":\"s1\",\"claude_session_id\":\"sid-2\",\"message\":\"review completed\",\"event\":\"Stop\",\"time\":\"10:00:00\",\"agent\":\"claude\"}"
+  },
+  {
+    "name": "waiting-to-stop",
+    "description": "Waiting は prev_event へ戻り prev_event 自体は消える",
+    "tab": "done-task",
+    "input": "{\"tab\":\"done-task\",\"session\":\"s1\",\"claude_session_id\":\"sid-3\",\"message\":\"m\",\"event\":\"Waiting\",\"time\":\"10:00:00\",\"agent\":\"claude\",\"prev_event\":\"Stop\"}"
+  },
+  {
+    "name": "waiting-without-prev-event",
+    "description": "prev_event が無い Waiting は Notification へ戻る",
+    "tab": "t",
+    "input": "{\"tab\":\"t\",\"session\":\"s1\",\"claude_session_id\":\"sid-4\",\"message\":\"m\",\"event\":\"Waiting\",\"time\":\"10:00:00\",\"agent\":\"claude\"}"
+  },
+  {
+    "name": "waiting-with-null-prev-event",
+    "description": "prev_event が null の Waiting も Notification へ戻る(jq の // 相当)",
+    "tab": "t",
+    "input": "{\"tab\":\"t\",\"session\":\"s1\",\"claude_session_id\":\"sid-5\",\"event\":\"Waiting\",\"time\":\"10:00:00\",\"prev_event\":null}"
+  },
+  {
+    "name": "overwrites-existing-prev-event",
+    "description": "Waiting へ入るとき既にある prev_event は上書きされる",
+    "tab": "t",
+    "input": "{\"tab\":\"t\",\"session\":\"s1\",\"event\":\"Notification\",\"time\":\"10:00:00\",\"prev_event\":\"Stop\"}"
+  },
+  {
+    "name": "keeps-optional-keys",
+    "description": "transcript_path / dir / task_type などのキーは触らずに持ち越す",
+    "tab": "t",
+    "input": "{\"tab\":\"t\",\"session\":\"s1\",\"claude_session_id\":\"sid-6\",\"message\":\"m\",\"event\":\"Stop\",\"time\":\"10:00:00\",\"agent\":\"codex\",\"transcript_path\":\"/p/x.jsonl\",\"dir\":\"/w/proj\",\"task_type\":\"dev\"}"
+  },
+  {
+    "name": "without-event-key",
+    "description": "event キーが無い場合は prev_event が null になる(jq の .event 参照)",
+    "tab": "t",
+    "input": "{\"tab\":\"t\",\"session\":\"s1\",\"time\":\"10:00:00\"}"
+  }
+]

@@ -184,6 +184,12 @@ func key(r rune) tea.KeyPressMsg {
 // content はモデルの描画結果を文字列で返す。
 func content(m tea.Model) string { return m.View().Content }
 
+// specialKey は名前付きのキー押下メッセージを作る(esc / enter / ↑ など)。
+func specialKey(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
+
+// ctrlKey は Ctrl 修飾つきのキー押下メッセージを作る。
+func ctrlKey(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
+
 var testEnv = app.PaneEnv{ZellijSession: "s1"}
 
 // ---- 共通 -----------------------------------------------------------------

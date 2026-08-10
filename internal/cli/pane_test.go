@@ -15,14 +15,22 @@ type stubPanes struct {
 	err    error
 }
 
-func (s *stubPanes) Run(name string) error {
-	s.ran = append(s.ran, name)
+func (s *stubPanes) Run(name, arg string) error {
+	s.ran = append(s.ran, join(name, arg))
 	return s.err
 }
 
-func (s *stubPanes) Once(name string) (string, error) {
-	s.onced = append(s.onced, name)
+func (s *stubPanes) Once(name, arg string) (string, error) {
+	s.onced = append(s.onced, join(name, arg))
 	return s.output, s.err
+}
+
+// join はペイン名と引数を 1 つの記録にまとめる(引数が無ければ名前だけ)。
+func join(name, arg string) string {
+	if arg == "" {
+		return name
+	}
+	return name + " " + arg
 }
 
 // runPaneCommand は pane サブコマンドを実行し、標準出力とエラーを返す。
@@ -47,17 +55,51 @@ func TestPaneCommandRunsInteractively(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			// task-control だけはタブ名を必須で取る。
+			args := []string{name}
+			want := name
+			if name == paneTaskControl {
+				args = append(args, "my-task")
+				want = name + " my-task"
+			}
+
 			panes := &stubPanes{}
-			if _, err := runPaneCommand(t, panes, name); err != nil {
+			if _, err := runPaneCommand(t, panes, args...); err != nil {
 				t.Fatalf("pane %s = %v", name, err)
 			}
-			if len(panes.ran) != 1 || panes.ran[0] != name {
-				t.Errorf("起動したペイン = %v, want [%s]", panes.ran, name)
+			if len(panes.ran) != 1 || panes.ran[0] != want {
+				t.Errorf("起動したペイン = %v, want [%s]", panes.ran, want)
 			}
 			if len(panes.onced) != 0 {
 				t.Errorf("--once なしで単発描画している: %v", panes.onced)
 			}
 		})
+	}
+}
+
+func TestPaneCommandTaskControlNeedsATabName(t *testing.T) {
+	t.Parallel()
+
+	// タブ名なしで起動すると、どのタスクの操作バーか決まらない。
+	panes := &stubPanes{}
+	if _, err := runPaneCommand(t, panes, paneTaskControl); err == nil {
+		t.Fatal("タブ名なしがエラーにならない")
+	}
+	if len(panes.ran) != 0 {
+		t.Errorf("タブ名なしで起動している: %v", panes.ran)
+	}
+}
+
+func TestPaneCommandPassesTheTabNameThrough(t *testing.T) {
+	t.Parallel()
+
+	// タブ名は空白を含みうる(現行の list-tabs のパースが対応している)。
+	panes := &stubPanes{}
+	if _, err := runPaneCommand(t, panes, paneTaskControl, "my task"); err != nil {
+		t.Fatalf("pane task-control = %v", err)
+	}
+	if len(panes.ran) != 1 || panes.ran[0] != "task-control my task" {
+		t.Errorf("起動したペイン = %v, want [task-control my task]", panes.ran)
 	}
 }
 
@@ -104,7 +146,7 @@ func TestPaneCommandRequiresExactlyOneName(t *testing.T) {
 		args []string
 	}{
 		{name: "名前なし", args: nil},
-		{name: "名前が 2 つ", args: []string{"dashboard", "news"}},
+		{name: "引数が 3 つ", args: []string{"dashboard", "a", "b"}},
 	}
 
 	for _, tt := range tests {

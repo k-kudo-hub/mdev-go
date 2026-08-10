@@ -35,21 +35,23 @@ TODAY="$(date '+%Y-%m-%d')"
 # ペイン名から現行スクリプト名と ONCE 環境変数への対応。
 script_for_pane() {
     case "$1" in
-        dashboard) echo "dashboard-loop.sh" ;;
-        waiting)   echo "waiting-loop.sh" ;;
-        done)      echo "done-loop.sh" ;;
-        news)      echo "news-loop.sh" ;;
-        *)         echo "未知のペイン: $1" >&2; return 1 ;;
+        dashboard)    echo "dashboard-loop.sh" ;;
+        waiting)      echo "waiting-loop.sh" ;;
+        done)         echo "done-loop.sh" ;;
+        news)         echo "news-loop.sh" ;;
+        task-control) echo "task-control.sh" ;;
+        *)            echo "未知のペイン: $1" >&2; return 1 ;;
     esac
 }
 
 once_var_for_pane() {
     case "$1" in
-        dashboard) echo "CONDUCTOR_DASHBOARD_ONCE" ;;
-        waiting)   echo "CONDUCTOR_WAITING_ONCE" ;;
-        done)      echo "CONDUCTOR_DONE_ONCE" ;;
-        news)      echo "CONDUCTOR_NEWS_ONCE" ;;
-        *)         echo "未知のペイン: $1" >&2; return 1 ;;
+        dashboard)    echo "CONDUCTOR_DASHBOARD_ONCE" ;;
+        waiting)      echo "CONDUCTOR_WAITING_ONCE" ;;
+        done)         echo "CONDUCTOR_DONE_ONCE" ;;
+        news)         echo "CONDUCTOR_NEWS_ONCE" ;;
+        task-control) echo "CONDUCTOR_TASKCTL_ONCE" ;;
+        *)            echo "未知のペイン: $1" >&2; return 1 ;;
     esac
 }
 
@@ -72,11 +74,13 @@ chmod +x "$STUB_BIN/zellij"
 # 1 件の case を実行して expected.txt を書く。
 run_case() {
     local case_json="$1"
-    local name pane session tabs
+    local name pane session tabs arg
     name=$(printf '%s' "$case_json" | jq -r '.name')
     pane=$(printf '%s' "$case_json" | jq -r '.pane')
     session=$(printf '%s' "$case_json" | jq -r '.session')
     tabs=$(printf '%s' "$case_json" | jq -r '.tabs // ""')
+    # task-control だけはタブ名を位置引数で受け取る。
+    arg=$(printf '%s' "$case_json" | jq -r '.arg // ""')
 
     local sandbox="$WORK/run/$name"
     rm -rf "$sandbox"
@@ -116,7 +120,7 @@ run_case() {
         LC_CTYPE="UTF-8" \
         TERM="dumb" \
         "$(once_var_for_pane "$pane")=1" \
-        bash "$sandbox/conductor/scripts/$(script_for_pane "$pane")" \
+        bash "$sandbox/conductor/scripts/$(script_for_pane "$pane")" ${arg:+"$arg"} \
         > "$out_dir/expected.txt" 2>/dev/null
 
     printf '%s\n' "$TODAY" > "$out_dir/date.txt"

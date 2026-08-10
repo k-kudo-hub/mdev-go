@@ -35,14 +35,14 @@ zellij 駆動には確立済みの防御(登録待ち・stdout 検証フォー�
 
 ### tui
 
-- [ ] task-create Model のテスト → 実装(メニュー(キー待ちのみ・ポーリング無し)→ dir 選択 → type 選択(記述順)→ agent 選択(0 件スキップ / 1 件即決 / 複数で選択)→ 名前入力(プリフィル・skip 設定対応)→ 一意化 → 作成実行(進行表示 + 失敗表示)→ 新タブへ遷移。各ステップの ESC キャンセルでメニューへ)
-- [ ] task-control Model のテスト → 実装(2 秒ポーリングで WAITING 追従 / m / w / d+d(2 秒)/ dd の削除フロー(upload 失敗で何も消さない契約・URL 2 秒表示)/ 削除完了で終了)
-- [ ] `--once` 対応(task-control は Shell の ONCE と出力一致)
+- [x] task-create Model のテスト → 実装(メニュー(キー待ちのみ・ポーリング無し)→ dir 選択 → type 選択(記述順)→ agent 選択(0 件スキップ / 1 件即決 / 複数で選択)→ 名前入力(プリフィル・skip 設定対応)→ 一意化 → 作成実行(進行表示 + 失敗表示)→ 新タブへ遷移。各ステップの ESC キャンセルでメニューへ)
+- [x] task-control Model のテスト → 実装(2 秒ポーリングで WAITING 追従 / m / w / d+d(2 秒)/ dd の削除フロー(upload 失敗で何も消さない契約・URL 2 秒表示)/ 削除完了で終了)
+- [x] `--once` 対応(task-control は Shell の ONCE と出力一致)
 
 ### cli / 互換検証
 
-- [ ] `mdev pane task-create` / `mdev pane task-control <tab>` を登録
-- [ ] ゴールデン: task-control バーの ONCE 出力を Shell と比較(通常 / WAITING)。waiting-toggle は同一 pending 入力での出力ファイル比較(Shell を隔離実行)
+- [x] `mdev pane task-create` / `mdev pane task-control <tab>` を登録
+- [x] ゴールデン: task-control バーの ONCE 出力を Shell と比較(通常 / WAITING)。waiting-toggle は同一 pending 入力での出力ファイル比較(Shell を隔離実行)
 - [ ] ユーザーテスト手順書 `docs/user-test-03-task-create.md`(multi.kdl の TaskCreate 差し替え、n フロー全経路・キャンセル・w・dd のチェックリスト、復元手順)
 - [ ] `make check` 緑
 
