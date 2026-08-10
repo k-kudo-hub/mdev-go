@@ -85,10 +85,21 @@ type TranscriptReader interface {
 	Read(path string) (data []byte, found bool)
 }
 
-// DailyAppender は daily log へレコードを 1 行追記する。
+// DailyAppender は daily log へレコードを 1 行書く。
 type DailyAppender interface {
-	// Append は session の date のファイルへ record を追記する。
+	// Append は session の date のファイルへ record を書く。
 	// date は domain.DailyFileDateLayout で整形した文字列である。
+	//
+	// 同じ記録の書き直しになる行が既にあれば、それを取り除いてから末尾へ書く
+	// (追記ではなく置換)。取り除く条件は次のすべてを満たす行である。
+	//
+	//   - tab が record.Tab と一致する
+	//   - claude_session_id が record.ClaudeSessionID と一致する
+	//   - restored が true ではない(復元済みの履歴は残す)
+	//
+	// record.ClaudeSessionID が空の場合は dedupe キーが無いため、何も取り除かず
+	// 追記する。同じ引数で 2 回呼んでも daily log の行数が増えないことが、この
+	// ポートの利用者(RecordOutput)が頼っている性質である。
 	Append(session, date string, record domain.DailyRecord) error
 }
 

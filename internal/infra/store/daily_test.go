@@ -29,6 +29,30 @@ func testDailyRecord(tab string) domain.DailyRecord {
 	}
 }
 
+// testDedupeRecord は置換の検証に使うレコード。dedupe キーは tab と
+// claude_session_id の組であり、message で世代を見分ける。
+func testDedupeRecord(tab, claudeSessionID, message string) domain.DailyRecord {
+	return domain.DailyRecord{
+		Tab:             tab,
+		Session:         "test-session",
+		CompletedAt:     "2026-08-08T10:11:12+0900",
+		Message:         message,
+		ClaudeSessionID: claudeSessionID,
+	}
+}
+
+// dailyMessages は daily ファイルの各行の message を並び順のまま返す。
+func dailyMessages(t *testing.T, path string) []string {
+	t.Helper()
+
+	var messages []string
+	for _, record := range readDailyLines(t, path) {
+		message, _ := record["message"].(string)
+		messages = append(messages, message)
+	}
+	return messages
+}
+
 // readDailyLines は daily ファイルの各行を JSON として読む。
 func readDailyLines(t *testing.T, path string) []map[string]any {
 	t.Helper()
@@ -230,5 +254,229 @@ func TestDailyStoreAppendReportsWriteFailure(t *testing.T) {
 	err := store.NewDailyStore(root, io.Discard).Append("s", "2026-08-08", testDailyRecord("a"))
 	if err == nil {
 		t.Error("Append() = nil, want エラー")
+	}
+}
+
+// writeExistingDaily は実行前から存在する daily ファイルを作る。
+func writeExistingDaily(t *testing.T, path string, lines ...string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() = %v", err)
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile() = %v", err)
+	}
+}
+
+func TestDailyStoreAppendReplacesSameTabAndClaudeSessionID(t *testing.T) {
+	t.Parallel()
+
+	// アップロード失敗で dd が中止されると record は同じ pending に対して
+	// 何度も走る。同じ (tab, claude_session_id) の再実行は行を増やさず、
+	// 内容だけを置き換える。
+	root := t.TempDir()
+	daily := store.NewDailyStore(root, io.Discard)
+
+	if err := daily.Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "sid-A", "first")); err != nil {
+		t.Fatalf("Append(1 回目) = %v", err)
+	}
+	if err := daily.Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "sid-A", "second")); err != nil {
+		t.Fatalf("Append(2 回目) = %v", err)
+	}
+
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	if got, want := dailyMessages(t, path), []string{"second"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v", got, want)
+	}
+}
+
+func TestDailyStoreAppendKeepsOtherClaudeSessionID(t *testing.T) {
+	t.Parallel()
+
+	// --resume でセッション ID が変わった場合は別のタスクの記録なので、
+	// 同じタブでも別行として残す。
+	root := t.TempDir()
+	daily := store.NewDailyStore(root, io.Discard)
+
+	for _, record := range []domain.DailyRecord{
+		testDedupeRecord("dedupe-tab", "sid-A", "first"),
+		testDedupeRecord("dedupe-tab", "sid-B", "second"),
+	} {
+		if err := daily.Append("s", "2026-08-08", record); err != nil {
+			t.Fatalf("Append() = %v", err)
+		}
+	}
+
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	if got, want := dailyMessages(t, path), []string{"first", "second"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v", got, want)
+	}
+}
+
+func TestDailyStoreAppendKeepsOtherTab(t *testing.T) {
+	t.Parallel()
+
+	// 同じ claude_session_id でもタブが違えば別の記録として残す。
+	root := t.TempDir()
+	daily := store.NewDailyStore(root, io.Discard)
+
+	for _, record := range []domain.DailyRecord{
+		testDedupeRecord("tab-a", "sid-A", "first"),
+		testDedupeRecord("tab-b", "sid-A", "second"),
+	} {
+		if err := daily.Append("s", "2026-08-08", record); err != nil {
+			t.Fatalf("Append() = %v", err)
+		}
+	}
+
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	if got, want := dailyMessages(t, path), []string{"first", "second"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v", got, want)
+	}
+}
+
+func TestDailyStoreAppendKeepsRestoredEntries(t *testing.T) {
+	t.Parallel()
+
+	// restored: true はダッシュボードへ戻したタスクの履歴である。同じ
+	// dedupe キーでも消さず、新しい記録はその後ろへ足す。
+	root := t.TempDir()
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	writeExistingDaily(t, path,
+		`{"tab":"dedupe-tab","claude_session_id":"sid-A","message":"restored-one","restored":true}`,
+		`{"tab":"dedupe-tab","claude_session_id":"sid-A","message":"live-one"}`,
+	)
+
+	err := store.NewDailyStore(root, io.Discard).
+		Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "sid-A", "fresh"))
+	if err != nil {
+		t.Fatalf("Append() = %v", err)
+	}
+
+	if got, want := dailyMessages(t, path), []string{"restored-one", "fresh"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v", got, want)
+	}
+}
+
+func TestDailyStoreAppendWithoutClaudeSessionIDAlwaysAppends(t *testing.T) {
+	t.Parallel()
+
+	// claude_session_id が無いレコードは dedupe キーを持たないため、
+	// 移植前と同じく無条件に追記する。
+	root := t.TempDir()
+	daily := store.NewDailyStore(root, io.Discard)
+
+	for _, message := range []string{"first", "second"} {
+		if err := daily.Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "", message)); err != nil {
+			t.Fatalf("Append() = %v", err)
+		}
+	}
+
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	if got, want := dailyMessages(t, path), []string{"first", "second"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v", got, want)
+	}
+}
+
+func TestDailyStoreAppendMovesReplacedEntryToTail(t *testing.T) {
+	t.Parallel()
+
+	// 置換は「一致行を消して末尾へ追記」である。残った行の相対順序は変わらず、
+	// 置換された行は最終行へ移る(Done ペインは書かれた順に読む)。
+	root := t.TempDir()
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	writeExistingDaily(t, path,
+		`{"tab":"dedupe-tab","claude_session_id":"sid-A","message":"old"}`,
+		`{"tab":"other-tab","claude_session_id":"sid-B","message":"keep-1"}`,
+		`{"tab":"other-tab","claude_session_id":"sid-C","message":"keep-2"}`,
+	)
+
+	err := store.NewDailyStore(root, io.Discard).
+		Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "sid-A", "new"))
+	if err != nil {
+		t.Fatalf("Append() = %v", err)
+	}
+
+	want := []string{"keep-1", "keep-2", "new"}
+	if got := dailyMessages(t, path); !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v", got, want)
+	}
+}
+
+func TestDailyStoreAppendRemovesEveryMatchingEntry(t *testing.T) {
+	t.Parallel()
+
+	// 置換前から重複している場合(移植前に増殖した daily)も 1 回の追記で
+	// まとめて 1 行へ畳む。
+	root := t.TempDir()
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	writeExistingDaily(t, path,
+		`{"tab":"dedupe-tab","claude_session_id":"sid-A","message":"old-1"}`,
+		`{"tab":"dedupe-tab","claude_session_id":"sid-A","message":"old-2"}`,
+	)
+
+	err := store.NewDailyStore(root, io.Discard).
+		Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "sid-A", "new"))
+	if err != nil {
+		t.Fatalf("Append() = %v", err)
+	}
+
+	if got, want := dailyMessages(t, path), []string{"new"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("message の並び = %v, want %v", got, want)
+	}
+}
+
+func TestDailyStoreAppendKeepsBrokenDailyIntact(t *testing.T) {
+	t.Parallel()
+
+	// 既存 daily を読めないときは削除を諦めてそのまま追記する。
+	// 重複した記録は後から消せるが、切り詰めた記録は取り戻せない。
+	root := t.TempDir()
+	path := filepath.Join(root, "s", "2026-08-08.jsonl")
+	writeExistingDaily(t, path,
+		`{"tab":"dedupe-tab","claude_session_id":"sid-A","message":"old"}`,
+		`これは JSON ではない`,
+	)
+
+	err := store.NewDailyStore(root, io.Discard).
+		Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "sid-A", "new"))
+	if err != nil {
+		t.Fatalf("Append() = %v", err)
+	}
+
+	b, err := os.ReadFile(path) //nolint:gosec // テストが書いたパス
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("%d 行, want 3 行(既存 2 行 + 追記 1 行): %q", len(lines), string(b))
+	}
+	if !strings.Contains(lines[0], `"message":"old"`) || lines[1] != "これは JSON ではない" {
+		t.Errorf("既存の行が書き換わった: %q", string(b))
+	}
+	if !strings.Contains(lines[2], `"message":"new"`) {
+		t.Errorf("追記されていない: %q", lines[2])
+	}
+}
+
+func TestDailyStoreAppendReleasesLockAfterReplace(t *testing.T) {
+	t.Parallel()
+
+	// 置換の経路(削除 → rename → 追記)を通ってもロックは持ち越さない。
+	root := t.TempDir()
+	daily := store.NewDailyStore(root, io.Discard)
+
+	for _, message := range []string{"first", "second"} {
+		if err := daily.Append("s", "2026-08-08", testDedupeRecord("dedupe-tab", "sid-A", message)); err != nil {
+			t.Fatalf("Append() = %v", err)
+		}
+	}
+
+	lockDir := filepath.Join(root, "s", "2026-08-08.jsonl.lock")
+	if _, err := os.Stat(lockDir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ロックが残っている: %s", lockDir)
 	}
 }

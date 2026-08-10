@@ -284,3 +284,43 @@ func TestRecordOutputPassesPendingThrough(t *testing.T) {
 		t.Errorf("record =\n  %+v\nwant\n  %+v", got, want)
 	}
 }
+
+func TestRecordOutputRepeatsTheSameDedupeKeyOnRetry(t *testing.T) {
+	t.Parallel()
+
+	// アップロードの失敗でタスク削除が中止されると record は同じ pending に対して
+	// 何度も走る。DailyAppender は (tab, claude_session_id) が同じ行を置き換えて
+	// 重複を防ぐため、再実行でも同じ組を渡し続けることがこのユースケースの責務に
+	// なる。message のように更新される値があっても、キーは変わってはならない。
+	usecase, pending, _, daily := newRecordOutput(t)
+	pending.byTab["test-session/retry-tab"] = domain.Pending{
+		Tab: "retry-tab", Message: "first", ClaudeSessionID: "sid-A",
+	}
+
+	env := app.RecordEnv{ZellijSession: "test-session"}
+	if err := usecase.Execute("retry-tab", env); err != nil {
+		t.Fatalf("Execute(1 回目) = %v", err)
+	}
+	// 2 回目は pending の中身が更新された状態(サマリの作り直し)を模す。
+	pending.byTab["test-session/retry-tab"] = domain.Pending{
+		Tab: "retry-tab", Message: "second", ClaudeSessionID: "sid-A",
+	}
+	if err := usecase.Execute("retry-tab", env); err != nil {
+		t.Fatalf("Execute(2 回目) = %v", err)
+	}
+
+	if len(daily.appended) != 2 {
+		t.Fatalf("Append の呼び出し = %d 回, want 2 回", len(daily.appended))
+	}
+	first, second := daily.appended[0].record, daily.appended[1].record
+	if first.Tab != second.Tab || first.ClaudeSessionID != second.ClaudeSessionID {
+		t.Errorf("dedupe キーが変わった: (%q, %q) -> (%q, %q)",
+			first.Tab, first.ClaudeSessionID, second.Tab, second.ClaudeSessionID)
+	}
+	if second.Message != "second" {
+		t.Errorf("2 回目の message = %q, want %q", second.Message, "second")
+	}
+	if daily.appended[0].date != daily.appended[1].date {
+		t.Errorf("書き込み先の日付が変わった: %q -> %q", daily.appended[0].date, daily.appended[1].date)
+	}
+}
