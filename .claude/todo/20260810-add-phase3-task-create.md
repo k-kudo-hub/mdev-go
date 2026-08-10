@@ -22,7 +22,7 @@ zellij 駆動には確立済みの防御(登録待ち・stdout 検証フォー�
 - [x] デフォルト名・名前解決のテスト → 実装(`generate_default_name` = basename+type / `resolve_name` = 空なら default。末尾スラッシュの basename 挙動含む)
 - [x] 選択リストのフィルタ(部分列マッチ)のテスト → 実装(純粋関数)
 - [x] waiting-toggle の event 遷移のテスト → 実装(prev_event 退避 / 復元(欠落時 Notification)/ time 更新。純粋変換)
-- [ ] task-control バー描画のテスト → 実装(通常 / WAITING、ANSI は Shell と同一文字列。ONCE 互換)
+- [x] task-control バー描画のテスト → 実装(通常 / WAITING、ANSI は Shell と同一文字列。ONCE 互換)
 
 ### app / infra(zellij 駆動の防御込み)
 
