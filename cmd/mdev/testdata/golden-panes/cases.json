@@ -1,0 +1,244 @@
+[
+  {
+    "name": "dashboard-basic",
+    "description": "Stop(緑■ + done)と Notification(赤■)が混ざり、タブ順に並ぶ。message は 60 バイトで切られる",
+    "pane": "dashboard",
+    "session": "s1",
+    "tabs": "beta alpha gamma",
+    "files": {
+      "pending/s1/a.json": "{\"tab\":\"alpha\",\"session\":\"s1\",\"message\":\"needs permission to run the command\",\"event\":\"Notification\",\"time\":\"10:00:00\",\"agent\":\"claude\"}",
+      "pending/s1/b.json": "{\"tab\":\"beta\",\"session\":\"s1\",\"message\":\"turn finished\",\"event\":\"Stop\",\"time\":\"10:01:00\",\"agent\":\"claude\"}",
+      "pending/s1/c.json": "{\"tab\":\"gamma\",\"session\":\"s1\",\"message\":\"0123456789012345678901234567890123456789012345678901234567890123456789\",\"event\":\"Stop\",\"time\":\"10:02:00\",\"agent\":\"codex\"}"
+    }
+  },
+  {
+    "name": "dashboard-empty",
+    "description": "pending が 1 件も無ければ All tasks running",
+    "pane": "dashboard",
+    "session": "s1",
+    "tabs": "alpha",
+    "files": {}
+  },
+  {
+    "name": "dashboard-broken-json",
+    "description": "壊れた pending は読み飛ばされ、正常なものだけが並ぶ",
+    "pane": "dashboard",
+    "session": "s1",
+    "tabs": "alpha beta",
+    "files": {
+      "pending/s1/a.json": "{broken json",
+      "pending/s1/b.json": "{\"tab\":\"beta\",\"session\":\"s1\",\"message\":\"still listed\",\"event\":\"Stop\",\"time\":\"10:01:00\"}"
+    }
+  },
+  {
+    "name": "dashboard-waiting-excluded",
+    "description": "Waiting は Waiting ペインの担当なので Dashboard には出ない",
+    "pane": "dashboard",
+    "session": "s1",
+    "tabs": "active-task waiting-task",
+    "files": {
+      "pending/s1/a.json": "{\"tab\":\"active-task\",\"session\":\"s1\",\"message\":\"needs permission\",\"event\":\"Notification\",\"time\":\"10:00:00\"}",
+      "pending/s1/b.json": "{\"tab\":\"waiting-task\",\"session\":\"s1\",\"message\":\"pr review\",\"event\":\"Waiting\",\"time\":\"10:01:00\"}"
+    }
+  },
+  {
+    "name": "dashboard-unknown-tab",
+    "description": "zellij のタブ一覧に無い pending は表示されない",
+    "pane": "dashboard",
+    "session": "s1",
+    "tabs": "alpha",
+    "files": {
+      "pending/s1/a.json": "{\"tab\":\"alpha\",\"session\":\"s1\",\"message\":\"listed\",\"event\":\"Stop\",\"time\":\"10:00:00\"}",
+      "pending/s1/z.json": "{\"tab\":\"ghost\",\"session\":\"s1\",\"message\":\"not listed\",\"event\":\"Stop\",\"time\":\"10:01:00\"}"
+    }
+  },
+  {
+    "name": "dashboard-many",
+    "description": "10 件を超えても番号は振られ続ける(キーで選べるのは 1-9 まで)",
+    "pane": "dashboard",
+    "session": "s1",
+    "tabs": "t01 t02 t03 t04 t05 t06 t07 t08 t09 t10 t11 t12",
+    "files": {
+      "pending/s1/01.json": "{\"tab\":\"t01\",\"session\":\"s1\",\"message\":\"m01\",\"event\":\"Stop\",\"time\":\"10:01:00\"}",
+      "pending/s1/02.json": "{\"tab\":\"t02\",\"session\":\"s1\",\"message\":\"m02\",\"event\":\"Notification\",\"time\":\"10:02:00\"}",
+      "pending/s1/03.json": "{\"tab\":\"t03\",\"session\":\"s1\",\"message\":\"m03\",\"event\":\"Stop\",\"time\":\"10:03:00\"}",
+      "pending/s1/04.json": "{\"tab\":\"t04\",\"session\":\"s1\",\"message\":\"m04\",\"event\":\"Notification\",\"time\":\"10:04:00\"}",
+      "pending/s1/05.json": "{\"tab\":\"t05\",\"session\":\"s1\",\"message\":\"m05\",\"event\":\"Stop\",\"time\":\"10:05:00\"}",
+      "pending/s1/06.json": "{\"tab\":\"t06\",\"session\":\"s1\",\"message\":\"m06\",\"event\":\"Notification\",\"time\":\"10:06:00\"}",
+      "pending/s1/07.json": "{\"tab\":\"t07\",\"session\":\"s1\",\"message\":\"m07\",\"event\":\"Stop\",\"time\":\"10:07:00\"}",
+      "pending/s1/08.json": "{\"tab\":\"t08\",\"session\":\"s1\",\"message\":\"m08\",\"event\":\"Notification\",\"time\":\"10:08:00\"}",
+      "pending/s1/09.json": "{\"tab\":\"t09\",\"session\":\"s1\",\"message\":\"m09\",\"event\":\"Stop\",\"time\":\"10:09:00\"}",
+      "pending/s1/10.json": "{\"tab\":\"t10\",\"session\":\"s1\",\"message\":\"m10\",\"event\":\"Notification\",\"time\":\"10:10:00\"}",
+      "pending/s1/11.json": "{\"tab\":\"t11\",\"session\":\"s1\",\"message\":\"m11\",\"event\":\"Stop\",\"time\":\"10:11:00\"}",
+      "pending/s1/12.json": "{\"tab\":\"t12\",\"session\":\"s1\",\"message\":\"m12\",\"event\":\"Notification\",\"time\":\"10:12:00\"}"
+    }
+  },
+  {
+    "name": "dashboard-missing-keys",
+    "description": "キーが欠けた pending は jq -r の出力である null がそのまま出る",
+    "pane": "dashboard",
+    "session": "s1",
+    "tabs": "alpha",
+    "files": {
+      "pending/s1/a.json": "{\"tab\":\"alpha\"}"
+    }
+  },
+  {
+    "name": "waiting-basic",
+    "description": "Waiting だけが黄色の■で並ぶ。Notification は出ない",
+    "pane": "waiting",
+    "session": "w1",
+    "tabs": "",
+    "files": {
+      "pending/w1/a.json": "{\"tab\":\"active-task\",\"session\":\"w1\",\"message\":\"needs permission\",\"event\":\"Notification\",\"time\":\"11:00:00\"}",
+      "pending/w1/b.json": "{\"tab\":\"review-task\",\"session\":\"w1\",\"message\":\"waiting for pr review\",\"event\":\"Waiting\",\"time\":\"11:01:00\"}"
+    }
+  },
+  {
+    "name": "waiting-empty",
+    "description": "Waiting が無ければ No waiting tasks",
+    "pane": "waiting",
+    "session": "w1",
+    "tabs": "",
+    "files": {}
+  },
+  {
+    "name": "waiting-multiple",
+    "description": "複数件はファイル名順に並び、件数が出る",
+    "pane": "waiting",
+    "session": "w1",
+    "tabs": "",
+    "files": {
+      "pending/w1/a.json": "{\"tab\":\"first\",\"session\":\"w1\",\"message\":\"waiting a\",\"event\":\"Waiting\",\"time\":\"11:00:00\"}",
+      "pending/w1/b.json": "{\"tab\":\"second\",\"session\":\"w1\",\"message\":\"waiting b\",\"event\":\"Waiting\",\"time\":\"11:01:00\"}",
+      "pending/w1/c.json": "{\"tab\":\"third\",\"session\":\"w1\",\"message\":\"waiting c\",\"event\":\"Waiting\",\"time\":\"11:02:00\"}"
+    }
+  },
+  {
+    "name": "waiting-closed-tab",
+    "description": "Waiting は zellij のタブ一覧を見ないので、閉じたタブのものも残る",
+    "pane": "waiting",
+    "session": "w1",
+    "tabs": "",
+    "files": {
+      "pending/w1/a.json": "{\"tab\":\"ghost-task\",\"session\":\"w1\",\"message\":\"tab is gone\",\"event\":\"Waiting\",\"time\":\"11:00:00\"}"
+    }
+  },
+  {
+    "name": "done-basic",
+    "description": "全セッション横断で completed_at の昇順。統計行と markers が出る",
+    "pane": "done",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "daily/s1/{TODAY}.jsonl": "{\"tab\":\"alpha\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:00:00+0900\",\"summary\":{\"total_turns\":3,\"total_tool_calls\":5,\"total_cost_usd\":0.42},\"markers\":{\"merged\":true,\"slack\":false,\"doc\":true}}\n{\"tab\":\"very-long-tab-name-here\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T12:00:00+0900\",\"summary\":{\"total_turns\":120,\"total_tool_calls\":7,\"total_cost_usd\":12.5},\"markers\":{\"merged\":false,\"slack\":true,\"doc\":false}}\n",
+      "daily/s2/{TODAY}.jsonl": "{\"tab\":\"beta\",\"session\":\"s2\",\"completed_at\":\"2026-08-09T11:00:00+0900\",\"summary\":{\"total_turns\":2,\"total_tool_calls\":2,\"total_cost_usd\":1},\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false}}\n{\"tab\":\"nosummary\",\"session\":\"s2\",\"completed_at\":\"2026-08-09T13:00:00+0900\",\"summary\":null}\n"
+    }
+  },
+  {
+    "name": "done-empty",
+    "description": "当日の daily が無ければ No tasks completed yet",
+    "pane": "done",
+    "session": "s1",
+    "tabs": "",
+    "files": {}
+  },
+  {
+    "name": "done-broken-json",
+    "description": "1 行でも壊れていると全滅する(jq -s が失敗する現行の既知バグ)",
+    "pane": "done",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "daily/s1/{TODAY}.jsonl": "{\"tab\":\"good\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:00:00+0900\",\"summary\":{\"total_turns\":1,\"total_tool_calls\":1,\"total_cost_usd\":0.1}}\n{broken json\n"
+    }
+  },
+  {
+    "name": "done-restored-excluded",
+    "description": "restored が true のエントリは件数にも合計にも入らない",
+    "pane": "done",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "daily/s1/{TODAY}.jsonl": "{\"tab\":\"kept\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:00:00+0900\",\"summary\":{\"total_turns\":1,\"total_tool_calls\":1,\"total_cost_usd\":0.1}}\n{\"tab\":\"restored-one\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T09:00:00+0900\",\"restored\":true,\"summary\":{\"total_turns\":99,\"total_tool_calls\":99,\"total_cost_usd\":9.99}}\n"
+    }
+  },
+  {
+    "name": "done-multibyte-tab",
+    "description": "日本語タブ名はバイト幅で詰めるため桁がずれる(現行と同じ見た目)",
+    "pane": "done",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "daily/s1/{TODAY}.jsonl": "{\"tab\":\"日本語タブ\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T11:00:00+0900\",\"summary\":{\"total_turns\":2,\"total_tool_calls\":2,\"total_cost_usd\":1}}\n"
+    }
+  },
+  {
+    "name": "done-many",
+    "description": "10 件を超えても番号は振られ続ける",
+    "pane": "done",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "daily/s1/{TODAY}.jsonl": "{\"tab\":\"d01\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:01:00+0900\",\"summary\":{\"total_turns\":1,\"total_tool_calls\":1,\"total_cost_usd\":0.01}}\n{\"tab\":\"d02\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:02:00+0900\",\"summary\":{\"total_turns\":2,\"total_tool_calls\":2,\"total_cost_usd\":0.02}}\n{\"tab\":\"d03\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:03:00+0900\",\"summary\":{\"total_turns\":3,\"total_tool_calls\":3,\"total_cost_usd\":0.03}}\n{\"tab\":\"d04\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:04:00+0900\",\"summary\":{\"total_turns\":4,\"total_tool_calls\":4,\"total_cost_usd\":0.04}}\n{\"tab\":\"d05\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:05:00+0900\",\"summary\":{\"total_turns\":5,\"total_tool_calls\":5,\"total_cost_usd\":0.05}}\n{\"tab\":\"d06\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:06:00+0900\",\"summary\":{\"total_turns\":6,\"total_tool_calls\":6,\"total_cost_usd\":0.06}}\n{\"tab\":\"d07\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:07:00+0900\",\"summary\":{\"total_turns\":7,\"total_tool_calls\":7,\"total_cost_usd\":0.07}}\n{\"tab\":\"d08\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:08:00+0900\",\"summary\":{\"total_turns\":8,\"total_tool_calls\":8,\"total_cost_usd\":0.08}}\n{\"tab\":\"d09\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:09:00+0900\",\"summary\":{\"total_turns\":9,\"total_tool_calls\":9,\"total_cost_usd\":0.09}}\n{\"tab\":\"d10\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:10:00+0900\",\"summary\":{\"total_turns\":10,\"total_tool_calls\":10,\"total_cost_usd\":0.1}}\n{\"tab\":\"d11\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:11:00+0900\",\"summary\":{\"total_turns\":11,\"total_tool_calls\":11,\"total_cost_usd\":0.11}}\n{\"tab\":\"d12\",\"session\":\"s1\",\"completed_at\":\"2026-08-09T10:12:00+0900\",\"summary\":{\"total_turns\":12,\"total_tool_calls\":12,\"total_cost_usd\":0.12}}\n"
+    }
+  },
+  {
+    "name": "news-basic",
+    "description": "見出し・説明・フッタが並ぶ。区切り線は 22 本",
+    "pane": "news",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "news/{TODAY}.json": "{\"items\":[{\"title\":\"GPT-5 Released with Major Improvements\",\"url\":\"https://techcrunch.com/gpt5\",\"description\":\"OpenAI has released GPT-5 with significant performance gains.\"},{\"title\":\"Claude 4.6 Beats All Benchmarks\",\"url\":\"https://techcrunch.com/claude\",\"description\":\"Anthropic Claude 4.6 sets new records in reasoning and coding.\"}]}"
+    }
+  },
+  {
+    "name": "news-empty",
+    "description": "ファイルが無ければ No news yet",
+    "pane": "news",
+    "session": "s1",
+    "tabs": "",
+    "files": {}
+  },
+  {
+    "name": "news-no-items",
+    "description": "items が空でも No news yet に潰れる",
+    "pane": "news",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "news/{TODAY}.json": "{\"items\":[]}"
+    }
+  },
+  {
+    "name": "news-broken-json",
+    "description": "壊れた JSON も No news yet に潰れる",
+    "pane": "news",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "news/{TODAY}.json": "{broken json"
+    }
+  },
+  {
+    "name": "news-missing-description",
+    "description": "description が null / 空 / 文字列 null のときは説明行を出さない",
+    "pane": "news",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "news/{TODAY}.json": "{\"items\":[{\"title\":\"With Description\",\"url\":\"https://a\",\"description\":\"has one\"},{\"title\":\"Null Description\",\"url\":\"https://b\",\"description\":null},{\"title\":\"Empty Description\",\"url\":\"https://c\",\"description\":\"\"},{\"title\":\"No Description Key\",\"url\":\"https://d\"}]}"
+    }
+  },
+  {
+    "name": "news-many",
+    "description": "5 件を超えても全件出る(件数を絞るのは fetch-news.sh 側)",
+    "pane": "news",
+    "session": "s1",
+    "tabs": "",
+    "files": {
+      "news/{TODAY}.json": "{\"items\":[{\"title\":\"n1\",\"url\":\"https://1\",\"description\":\"d1\"},{\"title\":\"n2\",\"url\":\"https://2\",\"description\":\"d2\"},{\"title\":\"n3\",\"url\":\"https://3\",\"description\":\"d3\"},{\"title\":\"n4\",\"url\":\"https://4\",\"description\":\"d4\"},{\"title\":\"n5\",\"url\":\"https://5\",\"description\":\"d5\"},{\"title\":\"n6\",\"url\":\"https://6\",\"description\":\"d6\"},{\"title\":\"n7\",\"url\":\"https://7\",\"description\":\"d7\"}]}"
+    }
+  }
+]

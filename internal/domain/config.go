@@ -5,9 +5,12 @@ import "encoding/json"
 // Config は conductor の設定ファイル(config.json / config.default.json)を表す。
 //
 // フェーズごとに必要になったキーを追加していく。現時点で解釈するのは pricing
-// だけで、未知のキーは読み飛ばされる(書き戻しは行わないため失われない)。
+// と agents だけで、未知のキーは読み飛ばされる(書き戻しは行わないため失われない)。
 type Config struct {
 	Pricing Pricing `json:"pricing"`
+	// Agents は名前付きエージェントの設定(`.agents`)である。
+	// ダッシュボードがジャンプ時に pending を消すかどうかの判断に使う。
+	Agents map[string]AgentConfig `json:"agents"`
 }
 
 // 単価表のキー名。ModelPricing.Missing と cost 計算の必須キー判定で使う。
