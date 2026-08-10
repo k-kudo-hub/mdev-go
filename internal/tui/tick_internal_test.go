@@ -117,99 +117,278 @@ func update(t *testing.T, m tea.Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 	return next, cmd
 }
 
-// wantRefreshIssued は tick が読み直しと次の合図を束ねて返したことを確かめ、
-// 束ねられた読み直しを実際に走らせる(発行はしたが着弾はしていない状態)。
-func wantRefreshIssued(t *testing.T, cmd tea.Cmd) {
-	t.Helper()
-	batch, ok := immediate(cmd).(tea.BatchMsg)
-	if !ok {
-		t.Fatal("読み直しと次の合図を束ねていない")
-	}
-	if len(batch) != 2 {
-		t.Fatalf("コマンド数 = %d, want 2", len(batch))
-	}
-	batch[0]()
-}
-
-// wantOnlyRearm は tick が次の合図だけを予約したことを確かめる。
+// wantTimerOnly は予約されたのが次の合図のタイマーだけであることを確かめる。
 //
-// 読み直しを束ねていれば tea.Batch がその場でメッセージを返すのに対し、
-// タイマー(tea.Tick)だけなら間隔ぶん待たないと返らない。この差で判別する。
-func wantOnlyRearm(t *testing.T, cmd tea.Cmd) {
+// 読み直しのコマンドはその場でメッセージを返すのに対し、タイマー(tea.Tick)は
+// 間隔ぶん待たないと返らない。この差で判別する。
+func wantTimerOnly(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
-		t.Fatal("ポーリングが止まっている")
+		t.Fatal("ポーリングのチェーンが切れている")
 	}
 	if msg := immediate(cmd); msg != nil {
-		t.Errorf("読み直しを重ねて発行している: %T", msg)
+		t.Errorf("タイマー以外に %T を予約している", msg)
 	}
 }
 
-// ---- 逐次化(4 ペイン共通) -----------------------------------------------
+// wantRefreshOnly は予約されたのが読み直しだけであることを確かめ、その着弾
+// メッセージを返す。
+//
+// 次の合図を一緒に張っていれば tea.Batch がその場で tea.BatchMsg を返すため、
+// 「発行と同時にタイマーを張っていない」ことまでここで見える。
+func wantRefreshOnly(t *testing.T, cmd tea.Cmd) tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("読み直しを発行していない")
+	}
+	msg := immediate(cmd)
+	if msg == nil {
+		t.Fatal("読み直しではなくタイマーを予約している")
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		t.Fatalf("読み直しと一緒に %d 個のコマンドを束ねている(次の合図は着弾で張る)", len(batch))
+	}
+	return msg
+}
 
-// 前回の読み直し(コマンドの発行から着弾まで)が終わるまで、tick は次の
-// 読み直しを発行しない。Dashboard の読み直しは zellij の CLI 呼び出しを含み
-// 間隔(2 秒)を超えることがあり、重ねて出すと CLI が並行に走り続ける。
+// wantNoContinuation は何も予約していないことを確かめる。
+func wantNoContinuation(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
+	if cmd != nil {
+		t.Errorf("予約すべきでない場面で %T を予約している", immediate(cmd))
+	}
+}
 
-// inflightCase は 4 ペインを同じ形で回すためのテーブルの 1 行である。
-type inflightCase struct {
+// ---- 完了起点のポーリング(4 ペイン共通)---------------------------------
+
+// 不変条件: ポーリングのチェーンは常にちょうど 1 本である。
+// 「未着弾のポーリング読み直し」と「予約済みのタイマー」のどちらか一方だけが
+// 存在し、着弾と発火で互いに入れ替わる。
+//
+//	Init ─→ [読み直し] ─着弾→ [タイマー] ─発火→ [読み直し] ─着弾→ …
+//
+// これで 1 周期が「読み直しにかかった時間 + 間隔」になり、現行 Shell 版の
+// 「処理 → sleep」と同じ自己抑制が働く。キー操作で出した読み直し(force 起源)は
+// チェーンの一部ではなく、着弾しても何も予約しない。
+
+// chainCase は 4 ペインを同じ形で回すためのテーブルの 1 行である。
+type chainCase struct {
 	name string
-	// model は生成直後のモデル。Init が最初の読み直しを発行済みの状態にあたる。
+	// model は生成直後のモデル(Init が最初の読み直しを発行した状態にあたる)。
 	model tea.Model
-	// landed は読み直しの着弾メッセージ。
-	landed tea.Msg
+	// landed は着弾メッセージを作る。poll はポーリング起源かどうか。
+	landed func(poll bool) tea.Msg
 	// refreshes はユースケースが読み直された回数を返す。
 	refreshes func() int
 }
 
-func inflightCases() []inflightCase {
+func chainCases() []chainCase {
 	dashboard := &tickDashboard{snapshot: app.DashboardSnapshot{Text: "画面"}}
 	waiting := &tickWaiting{text: "待ち画面"}
 	done := &tickDone{snapshot: app.DoneSnapshot{Text: "完了画面"}}
 	news := &tickNews{snapshot: app.NewsSnapshot{Text: "ニュース画面"}}
 
-	return []inflightCase{
-		{"dashboard", NewDashboardModel(dashboard, tickEnv), dashboardRefreshedMsg{}, func() int { return dashboard.refreshes }},
-		{"waiting", NewWaitingModel(waiting, tickEnv), waitingRefreshedMsg{}, func() int { return waiting.refreshes }},
-		{"done", NewDoneModel(done), doneRefreshedMsg{}, func() int { return done.refreshes }},
-		{"news", NewNewsModel(news), newsRefreshedMsg{}, func() int { return news.refreshes }},
+	return []chainCase{
+		{
+			name:      "dashboard",
+			model:     NewDashboardModel(dashboard, tickEnv),
+			landed:    func(poll bool) tea.Msg { return dashboardRefreshedMsg{poll: poll} },
+			refreshes: func() int { return dashboard.refreshes },
+		},
+		{
+			name:      "waiting",
+			model:     NewWaitingModel(waiting, tickEnv),
+			landed:    func(poll bool) tea.Msg { return waitingRefreshedMsg{poll: poll} },
+			refreshes: func() int { return waiting.refreshes },
+		},
+		{
+			name:      "done",
+			model:     NewDoneModel(done),
+			landed:    func(poll bool) tea.Msg { return doneRefreshedMsg{poll: poll} },
+			refreshes: func() int { return done.refreshes },
+		},
+		{
+			name:      "news",
+			model:     NewNewsModel(news),
+			landed:    func(poll bool) tea.Msg { return newsRefreshedMsg{poll: poll} },
+			refreshes: func() int { return news.refreshes },
+		},
+	}
+}
+
+func TestPaneInitStartsChainWithRefreshOnly(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range chainCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Init が張るのは最初の読み直しだけである。ここでタイマーも
+			// 一緒に張るとチェーンが 2 本になり、以後ずっと 2 本で回る。
+			wantRefreshOnly(t, tt.model.Init())
+			if tt.refreshes() != 1 {
+				t.Errorf("読み直しの回数 = %d, want 1", tt.refreshes())
+			}
+		})
+	}
+}
+
+func TestPaneChainAlternatesRefreshAndTimer(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range chainCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := tt.model
+			// 2 周ぶん回して、毎回ちょうど 1 本だけが次へ渡ることを見る。
+			for round := 1; round <= 2; round++ {
+				// 着弾 → 次の合図(タイマー)だけを張る。
+				next, cmd := update(t, m, tt.landed(true))
+				wantTimerOnly(t, cmd)
+
+				// タイマーの発火 → 読み直しだけを発行する(合図は張らない)。
+				after, cmd := update(t, next, tickMsg{})
+				wantRefreshOnly(t, cmd)
+				if tt.refreshes() != round {
+					t.Fatalf("%d 周目の読み直しの回数 = %d, want %d", round, tt.refreshes(), round)
+				}
+				m = after
+			}
+		})
+	}
+}
+
+func TestPaneForcedRefreshDoesNotRearmPolling(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range chainCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// キー操作で出した読み直しの着弾は、何度来てもチェーンを増やさない。
+			// ここで合図を張ると、押した回数だけポーリングが増殖する。
+			m := tt.model
+			for i := range 3 {
+				next, cmd := update(t, m, tt.landed(false))
+				if cmd != nil {
+					t.Fatalf("%d 回目の force 起源の着弾がポーリングを張り直している", i+1)
+				}
+				m = next
+			}
+		})
 	}
 }
 
 func TestPaneTickSkipsRefreshWhileInFlight(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range inflightCases() {
+	for _, tt := range chainCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// 生成直後は Init が出した読み直しが走っている。着弾するまでは
+			// 生成直後は Init が出した読み直しが走っている。着弾する前に
 			// tick が来ても重ねて出さず、次の合図だけを予約する。
+			// (完了起点なのでこの状況ではタイマーが存在せず、通常は tick 自体
+			// 来ない。キー操作の読み直しが走っている場合への備えである)
 			m, cmd := update(t, tt.model, tickMsg{})
-			wantOnlyRearm(t, cmd)
+			wantTimerOnly(t, cmd)
 			if tt.refreshes() != 0 {
-				t.Fatalf("起動時の読み直しに重ねている: %d 回", tt.refreshes())
+				t.Fatalf("実行中の読み直しに重ねている: %d 回", tt.refreshes())
 			}
 
-			// 着弾したら、次の tick は通常どおり読み直しを発行する。
-			m, _ = update(t, m, tt.landed)
-			m, cmd = update(t, m, tickMsg{})
-			wantRefreshIssued(t, cmd)
+			// 着弾したら、次の tick は通常どおり読み直しを発行する
+			// (印の下ろし忘れが無い)。
+			m, _ = update(t, m, tt.landed(true))
+			_, cmd = update(t, m, tickMsg{})
+			wantRefreshOnly(t, cmd)
 			if tt.refreshes() != 1 {
-				t.Fatalf("読み直しの回数 = %d, want 1", tt.refreshes())
+				t.Errorf("読み直しの回数 = %d, want 1", tt.refreshes())
+			}
+		})
+	}
+}
+
+// forceCase はキー操作起源の読み直しを起こせるペインのテーブルの 1 行である。
+// Waiting はキー入力を受け付けないためこの経路を持たない。
+type forceCase struct {
+	name  string
+	model tea.Model
+	// trigger はキー操作起源の読み直しを発行させるメッセージ。
+	trigger tea.Msg
+	// landed は着弾メッセージを作る。
+	landed    func(poll bool) tea.Msg
+	refreshes func() int
+}
+
+func forceCases() []forceCase {
+	dashboard := &tickDashboard{snapshot: app.DashboardSnapshot{Text: "画面"}}
+	done := &tickDone{snapshot: app.DoneSnapshot{Text: "完了画面"}}
+	news := &tickNews{snapshot: app.NewsSnapshot{Text: "ニュース画面"}}
+
+	return []forceCase{
+		{
+			// 2 打鍵目の待ち受けが時間切れになると、止めていた間の変化に
+			// 追いつくために読み直す。
+			name:      "dashboard",
+			model:     NewDashboardModel(dashboard, tickEnv),
+			trigger:   promptExpiredMsg{},
+			landed:    func(poll bool) tea.Msg { return dashboardRefreshedMsg{poll: poll} },
+			refreshes: func() int { return dashboard.refreshes },
+		},
+		{
+			name:      "done",
+			model:     NewDoneModel(done),
+			trigger:   promptExpiredMsg{},
+			landed:    func(poll bool) tea.Msg { return doneRefreshedMsg{poll: poll} },
+			refreshes: func() int { return done.refreshes },
+		},
+		{
+			// r を押した後の取得。取得が終わったら読み直して通常の画面へ戻る。
+			name:      "news",
+			model:     NewNewsModel(news),
+			trigger:   newsReloadMsg{},
+			landed:    func(poll bool) tea.Msg { return newsRefreshedMsg{poll: poll} },
+			refreshes: func() int { return news.refreshes },
+		},
+	}
+}
+
+func TestPaneTickSkipsRefreshWhileForcedRefreshInFlight(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range forceCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// 起動時の読み直しが着弾し、チェーンはタイマーになっている。
+			m, cmd := update(t, tt.model, tt.landed(true))
+			wantTimerOnly(t, cmd)
+
+			// キー操作起源の読み直しが走り出す。着弾しても合図は張らない
+			// 約束なので、この間チェーンはタイマーのまま 1 本である。
+			m, cmd = update(t, m, tt.trigger)
+			wantRefreshOnly(t, cmd)
+			if tt.refreshes() != 1 {
+				t.Fatalf("キー操作の読み直しの回数 = %d, want 1", tt.refreshes())
 			}
 
-			// その読み直しが着弾する前の tick も、次の合図だけを予約する。
+			// その着弾前にタイマーが発火した。読み直しを重ねず、次の合図
+			// だけを予約し直す。
 			m, cmd = update(t, m, tickMsg{})
-			wantOnlyRearm(t, cmd)
+			wantTimerOnly(t, cmd)
 			if tt.refreshes() != 1 {
 				t.Fatalf("読み直しが重なった: %d 回", tt.refreshes())
 			}
 
-			// 着弾すれば元どおり発行できる(印の下ろし忘れが無い)。
-			m, _ = update(t, m, tt.landed)
+			// キー操作の読み直しが着弾する。ここで合図を張るとチェーンが
+			// 2 本になる。
+			m, cmd = update(t, m, tt.landed(false))
+			wantNoContinuation(t, cmd)
+
+			// 印は下りているので、次のタイマーの発火では読み直しを発行する。
 			_, cmd = update(t, m, tickMsg{})
-			wantRefreshIssued(t, cmd)
+			wantRefreshOnly(t, cmd)
 			if tt.refreshes() != 2 {
 				t.Errorf("読み直しの回数 = %d, want 2", tt.refreshes())
 			}
@@ -217,11 +396,11 @@ func TestPaneTickSkipsRefreshWhileInFlight(t *testing.T) {
 	}
 }
 
-func TestPaneRefreshErrorReleasesInFlight(t *testing.T) {
+func TestPaneRefreshErrorReleasesInFlightAndRearms(t *testing.T) {
 	t.Parallel()
 
-	// エラーで返ってきた着弾でも印は下ろす。下ろし忘れると、一度失敗した
-	// だけでポーリングが二度と読み直さなくなる。
+	// エラーで返ってきた着弾でも、印を下ろして次の合図を張る。どちらかを
+	// 忘れると、一度失敗しただけでポーリングが二度と回らなくなる。
 	tests := []struct {
 		name   string
 		model  tea.Model
@@ -230,12 +409,12 @@ func TestPaneRefreshErrorReleasesInFlight(t *testing.T) {
 		{
 			name:   "dashboard",
 			model:  NewDashboardModel(&tickDashboard{}, tickEnv),
-			failed: dashboardRefreshedMsg{err: errTickRefresh},
+			failed: dashboardRefreshedMsg{err: errTickRefresh, poll: true},
 		},
 		{
 			name:   "waiting",
 			model:  NewWaitingModel(&tickWaiting{}, tickEnv),
-			failed: waitingRefreshedMsg{err: errTickRefresh},
+			failed: waitingRefreshedMsg{err: errTickRefresh, poll: true},
 		},
 	}
 
@@ -243,9 +422,11 @@ func TestPaneRefreshErrorReleasesInFlight(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			m, _ := update(t, tt.model, tt.failed)
-			_, cmd := update(t, m, tickMsg{})
-			wantRefreshIssued(t, cmd)
+			m, cmd := update(t, tt.model, tt.failed)
+			wantTimerOnly(t, cmd)
+
+			_, cmd = update(t, m, tickMsg{})
+			wantRefreshOnly(t, cmd)
 		})
 	}
 }
@@ -270,21 +451,22 @@ func TestDashboardTickRefreshesAndRearms(t *testing.T) {
 	service := &tickDashboard{snapshot: app.DashboardSnapshot{Text: "画面"}}
 	m := settledDashboard(t, service)
 
+	// tick が出すのは読み直しだけで、次の合図はその着弾で張る。
 	_, cmd := m.Update(tickMsg{})
-	batch, ok := immediate(cmd).(tea.BatchMsg)
+	landed, ok := wantRefreshOnly(t, cmd).(dashboardRefreshedMsg)
 	if !ok {
-		t.Fatal("読み直しと次の合図を束ねていない")
+		t.Fatal("発行したのが読み直しではない")
 	}
-	if len(batch) != 2 {
-		t.Fatalf("コマンド数 = %d, want 2", len(batch))
-	}
-	// 先頭が読み直しである。後ろはタイマーなので実行しない。
-	if _, ok := batch[0]().(dashboardRefreshedMsg); !ok {
-		t.Error("束の先頭が読み直しではない")
+	if !landed.poll {
+		t.Error("ポーリング起源として発行していない")
 	}
 	if service.refreshes != 1 {
 		t.Errorf("読み直しの回数 = %d, want 1", service.refreshes)
 	}
+
+	// その着弾が次の合図を張る。
+	_, cmd = m.Update(landed)
+	wantTimerOnly(t, cmd)
 }
 
 func TestDashboardTickIsFrozenWhileAwaiting(t *testing.T) {
@@ -315,7 +497,7 @@ func TestDashboardTickIsFrozenWhileAwaiting(t *testing.T) {
 	}
 	after.awaiting = false
 	_, cmd = after.Update(tickMsg{})
-	wantRefreshIssued(t, cmd)
+	wantRefreshOnly(t, cmd)
 	if service.refreshes != 1 {
 		t.Errorf("凍結が解けた後の読み直しの回数 = %d, want 1", service.refreshes)
 	}
@@ -343,7 +525,7 @@ func TestDashboardTickIsFrozenWhileBusy(t *testing.T) {
 	}
 	after.busy = false
 	_, cmd = after.Update(tickMsg{})
-	wantRefreshIssued(t, cmd)
+	wantRefreshOnly(t, cmd)
 	if service.refreshes != 1 {
 		t.Errorf("削除の後の読み直しの回数 = %d, want 1", service.refreshes)
 	}
@@ -367,7 +549,7 @@ func TestDashboardDroppedRefreshReleasesInFlight(t *testing.T) {
 	after.awaiting = false
 
 	_, cmd := after.Update(tickMsg{})
-	wantRefreshIssued(t, cmd)
+	wantRefreshOnly(t, cmd)
 	if service.refreshes != 1 {
 		t.Errorf("読み直しの回数 = %d, want 1", service.refreshes)
 	}
@@ -417,17 +599,18 @@ func TestDoneTickRefreshesAndRearms(t *testing.T) {
 	service := &tickDone{snapshot: app.DoneSnapshot{Text: "完了画面"}}
 	m := settledDone(t, service)
 
+	// tick が出すのは集計だけで、次の合図はその着弾で張る。
 	_, cmd := m.Update(tickMsg{})
-	batch, ok := immediate(cmd).(tea.BatchMsg)
+	landed, ok := wantRefreshOnly(t, cmd).(doneRefreshedMsg)
 	if !ok {
-		t.Fatal("読み直しと次の合図を束ねていない")
+		t.Fatal("発行したのが集計ではない")
 	}
-	if len(batch) != 2 {
-		t.Fatalf("コマンド数 = %d, want 2", len(batch))
+	if !landed.poll {
+		t.Error("ポーリング起源として発行していない")
 	}
-	if _, ok := batch[0]().(doneRefreshedMsg); !ok {
-		t.Error("束の先頭が読み直しではない")
-	}
+
+	_, cmd = m.Update(landed)
+	wantTimerOnly(t, cmd)
 }
 
 func TestDoneTickIsFrozenWhileAwaiting(t *testing.T) {
@@ -455,7 +638,7 @@ func TestDoneTickIsFrozenWhileAwaiting(t *testing.T) {
 	}
 	after.awaiting = false
 	_, cmd = after.Update(tickMsg{})
-	wantRefreshIssued(t, cmd)
+	wantRefreshOnly(t, cmd)
 	if service.refreshes != 1 {
 		t.Errorf("凍結が解けた後の読み直しの回数 = %d, want 1", service.refreshes)
 	}
@@ -489,7 +672,7 @@ func TestNewsTickIsFrozenWhileFetching(t *testing.T) {
 	}
 	after.fetching = false
 	_, cmd = after.Update(tickMsg{})
-	wantRefreshIssued(t, cmd)
+	wantRefreshOnly(t, cmd)
 	if service.refreshes != 1 {
 		t.Errorf("取得の後の読み直しの回数 = %d, want 1", service.refreshes)
 	}

@@ -10,7 +10,12 @@ import (
 const restorePrompt = "\033[0;33m\033[1mRestore number...\033[0m"
 
 // doneRefreshedMsg は Done の集計が終わったことを表す。
-type doneRefreshedMsg struct{ snapshot app.DoneSnapshot }
+type doneRefreshedMsg struct {
+	snapshot app.DoneSnapshot
+	// poll はこの集計がポーリング起源かどうかを表す。真のときだけ着弾で
+	// 次の合図を張る(pane.go の「完了起点」の説明を参照)。
+	poll bool
+}
 
 // DoneModel は Done ペインの Bubble Tea モデルである。
 //
@@ -45,10 +50,10 @@ func NewDoneModel(pane DoneService) DoneModel {
 
 // Init は最初の集計を行い、ポーリングを開始する。
 //
-// ポーリングのチェーンを張り出すのはここだけである(張り直しは tickMsg の
-// ハンドラに一元化している)。
+// 返すのは最初の集計だけである。次の合図はその着弾で張る(完了起点の
+// ペーシング。pane.go を参照)。
 func (m DoneModel) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), tickCmd(DoneInterval))
+	return m.refreshCmd(true)
 }
 
 // Once は 1 回だけ描画した結果を返す(--once)。
@@ -65,14 +70,16 @@ func (m DoneModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneRefreshedMsg:
 		// 内容を捨てる場合も逐次化の印はここで必ず下ろす。
 		m.gate.release()
+		// ポーリング起源ならここで次の合図を張る(完了起点のペーシング)。
+		// 内容を捨てる場合も張る。絶やすと二度と回らない。
+		next := rearmCmd(msg.poll, DoneInterval)
 		if m.awaiting {
 			// 待ち受けに入る前に発行した集計が着弾した。ここで一覧を
 			// 差し替えると押した番号が別の行を指すため、捨てる。
-			return m, nil
+			return m, next
 		}
-		// ポーリングは張り直さない(Init と tickMsg のハンドラだけが張る)。
 		m.snapshot = msg.snapshot
-		return m, nil
+		return m, next
 
 	case tickMsg:
 		if m.awaiting {
@@ -81,11 +88,12 @@ func (m DoneModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tickCmd(DoneInterval)
 		}
 		if !m.gate.take() {
-			// 前回の集計がまだ着弾していない。重ねて発行せず、次の合図
-			// だけを予約する。
+			// キー操作で出した集計がまだ着弾していない。重ねて発行せず、
+			// 次の合図だけを予約する。
 			return m, tickCmd(DoneInterval)
 		}
-		return m, tea.Batch(m.refreshCmd(), tickCmd(DoneInterval))
+		// 次の合図はこの集計の着弾で張るため、ここでは張らない。
+		return m, m.refreshCmd(true)
 
 	case promptExpiredMsg:
 		if msg.token == m.token {
@@ -114,6 +122,7 @@ func (m DoneModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		}
 		snapshot := m.snapshot
 		// このコマンドも最後に doneRefreshedMsg を返すので、印を立てる。
+		// キー操作起源なので poll は立てない(着弾しても合図は張らない)。
 		m.gate.force()
 		return m, func() tea.Msg {
 			// restore-task.sh の終了コードは見ない。失敗した場合は
@@ -132,16 +141,19 @@ func (m DoneModel) handleKey(key string) (tea.Model, tea.Cmd) {
 }
 
 // forceRefreshCmd は逐次化の印を立ててから集計のコマンドを返す。
+//
 // キー操作に対する反応は前回の完了を待たずに出す(refreshGate.force を参照)。
+// ポーリングのチェーンとは別なので、着弾しても次の合図は張らない。
 func (m *DoneModel) forceRefreshCmd() tea.Cmd {
 	m.gate.force()
-	return m.refreshCmd()
+	return m.refreshCmd(false)
 }
 
 // refreshCmd は集計をやり直す。
-func (m DoneModel) refreshCmd() tea.Cmd {
+// poll はポーリング起源かどうかで、着弾で次の合図を張るかを決める。
+func (m DoneModel) refreshCmd(poll bool) tea.Cmd {
 	return func() tea.Msg {
-		return doneRefreshedMsg{snapshot: m.pane.Refresh()}
+		return doneRefreshedMsg{snapshot: m.pane.Refresh(), poll: poll}
 	}
 }
 

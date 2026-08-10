@@ -206,12 +206,18 @@ func TestPaneIntervalsMatchShellVersion(t *testing.T) {
 
 // ---- ポーリングの張り直し -------------------------------------------------
 
-// ポーリングを張り直すのは tickMsg のハンドラだけである。
+// ポーリングは完了起点で回る。次の合図を張るのは「ポーリングで出した読み直しの
+// 着弾」だけで、チェーンは常にちょうど 1 本(未着弾の読み直しか予約済みの
+// タイマーのどちらか一方)である。
 //
-// 読み直しの完了(refreshedMsg)で張り直すと、tick 以外の生成元(Init /
-// ジャンプ / 削除の完了 / 通知の期限切れ / restore / reload)のぶんだけ
-// チェーンが増える。キー操作のたびに 1 本ずつ恒久的に増えていき、
-// bash と zellij のプロセス生成がその本数ぶん多重に走ることになる。
+// キー操作で出した読み直し(ジャンプ / restore / reload / 削除の完了 /
+// 通知の期限切れ)の着弾で張り直すと、その生成元のぶんだけチェーンが増える。
+// キー操作のたびに 1 本ずつ恒久的に増えていき、bash と zellij のプロセス生成が
+// その本数ぶん多重に走ることになる。
+//
+// チェーンの入れ替わり(着弾 → タイマー → 読み直し)は tickMsg が非公開型の
+// ため内部テスト(tick_internal_test.go)が確かめる。ここでは外から起こせる
+// キー操作の側を見る。
 
 // paneModel は 4 ペインを同じ形で回すためのテーブルの 1 行である。
 type paneModel struct {
@@ -235,7 +241,7 @@ func paneModels() []paneModel {
 	}
 }
 
-func TestPaneInitStartsPollingOnce(t *testing.T) {
+func TestPaneInitStartsChainWithRefreshOnly(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range paneModels() {
@@ -246,33 +252,78 @@ func TestPaneInitStartsPollingOnce(t *testing.T) {
 			if cmd == nil {
 				t.Fatal("Init がコマンドを返していない")
 			}
-			// Init は「最初の読み直し」と「ポーリングの開始」の 2 つだけを返す。
-			batch, ok := cmd().(tea.BatchMsg)
-			if !ok {
-				t.Fatal("Init が読み直しとポーリングの開始を束ねていない")
+			// Init が張るのは最初の読み直しだけである。ここでタイマーも
+			// 一緒に張るとチェーンが 2 本になり、以後ずっと 2 本で回る。
+			msg := cmd()
+			if batch, ok := msg.(tea.BatchMsg); ok {
+				t.Fatalf("Init が %d 個のコマンドを束ねている(次の合図は着弾で張る)", len(batch))
 			}
-			if len(batch) != 2 {
-				t.Errorf("Init のコマンド数 = %d, want 2", len(batch))
+			if msg == nil {
+				t.Error("Init が最初の読み直しを出していない")
 			}
 		})
 	}
 }
 
-func TestPaneRefreshDoesNotReschedulePolling(t *testing.T) {
+// keyDrivenRefresh はキー操作で出した読み直しの着弾を、そのペインの
+// モデルと一緒に返す。
+type keyDrivenRefresh struct {
+	name  string
+	model tea.Model
+	// landed はキー操作で出した読み直しの着弾メッセージ。
+	landed tea.Msg
+}
+
+// keyDrivenRefreshes は 3 ペインぶんの「キー操作起源の着弾」を作る。
+//
+// Waiting は終了キー以外を受け付けない(この経路を持たない)ため入らない。
+func keyDrivenRefreshes(t *testing.T) []keyDrivenRefresh {
+	t.Helper()
+
+	// Dashboard: 番号キーでジャンプしてから読み直す。
+	dashboard := load(t, tui.NewDashboardModel(&stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}},
+	}, testEnv))
+	_, jumped := run(t, dashboard, key('1'))
+
+	// Done: r + 番号で restore してから集計し直す。
+	done := load(t, tui.NewDoneModel(&stubDone{
+		snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1},
+	}))
+	donePrompted, _ := done.Update(key('r'))
+	_, restored := run(t, donePrompted, key('1'))
+
+	// News: r で取得してから読み直す。
+	news := load(t, tui.NewNewsModel(&stubNews{
+		snapshot: app.NewsSnapshot{Text: "ニュース画面", FetchingText: "取得中", Count: 1},
+	}))
+	fetching, reloadMsg := run(t, news, key('r'))
+	_, reloaded := run(t, fetching, reloadMsg)
+
+	return []keyDrivenRefresh{
+		{"dashboard", dashboard, jumped},
+		{"done", donePrompted, restored},
+		{"news", fetching, reloaded},
+	}
+}
+
+func TestPaneKeyDrivenRefreshDoesNotReschedulePolling(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range paneModels() {
+	for _, tt := range keyDrivenRefreshes(t) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// 読み直しの完了を何度流してもコマンドは返らない。返してしまうと
-			// tick 以外の生成元のぶんだけポーリングが増殖する。
-			msg := exec(t, tt.model.Init())
+			if tt.landed == nil {
+				t.Fatal("キー操作の読み直しが着弾していない")
+			}
+			// キー操作起源の着弾を何度流してもコマンドは返らない。返して
+			// しまうと、押した回数だけポーリングのチェーンが増える。
 			model := tt.model
 			for i := range 3 {
-				next, cmd := model.Update(msg)
+				next, cmd := model.Update(tt.landed)
 				if cmd != nil {
-					t.Fatalf("%d 回目の読み直しでポーリングを張り直している", i+1)
+					t.Fatalf("%d 回目の着弾でポーリングを張り直している", i+1)
 				}
 				model = next
 			}
