@@ -438,3 +438,30 @@ func TestTaskCreateAcceptsSpaceInTheFilter(t *testing.T) {
 		t.Errorf("一致しない候補が残っている: %q", got)
 	}
 }
+
+func TestTaskCreateSelectsTheRightDuplicateName(t *testing.T) {
+	t.Parallel()
+
+	// 同じ末尾を持つディレクトリが複数あっても、カーソルの位置どおりの
+	// 候補が選ばれる(絞り込みを位置で扱っているか)。
+	pane := defaultTaskCreateStub()
+	pane.dirs = []string{"/a/dup", "/b/other", "/b/dup"}
+	pane.skipName = true
+
+	m := startFlow(t, pane)
+	m, _ = m.Update(key('d'))
+	m, _ = m.Update(key('u'))
+	m, _ = m.Update(key('p'))
+	// 絞り込みで /a/dup と /b/dup が残る。2 件目を選ぶ。
+	m, _ = m.Update(specialKey(tea.KeyDown))
+	m, _ = m.Update(specialKey(tea.KeyEnter))
+	_, cmd := m.Update(specialKey(tea.KeyEnter))
+	if cmd == nil {
+		t.Fatal("作成が始まらない")
+	}
+	cmd()
+
+	if last := pane.calls[len(pane.calls)-1]; last != "create /b/dup dev default-dev-uniq " {
+		t.Errorf("選ばれたディレクトリ = %q, want /b/dup", last)
+	}
+}

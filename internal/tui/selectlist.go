@@ -54,16 +54,15 @@ func newSelectList(prompt string, items, labels []string) selectList {
 }
 
 // refilter は今の入力で候補を絞り直し、カーソルを範囲内へ収める。
+//
+// 絞り込みは位置で受け取る。値だけを受け取ると、元の何番目だったかを
+// 突き合わせで引き直すことになり、同じ文字列が 2 つある一覧では最初の
+// 1 つに寄ってしまう(ディレクトリ名は重複しうる)。
 func (l *selectList) refilter() {
-	l.filtered = app.FilterCandidates(l.items, l.query)
-	l.indexes = l.indexes[:0]
-	for i, item := range l.items {
-		for _, kept := range l.filtered {
-			if kept == item {
-				l.indexes = append(l.indexes, i)
-				break
-			}
-		}
+	l.indexes = app.FilterCandidateIndexes(l.items, l.query)
+	l.filtered = l.filtered[:0]
+	for _, i := range l.indexes {
+		l.filtered = append(l.filtered, l.items[i])
 	}
 	if l.cursor >= len(l.filtered) {
 		l.cursor = max(len(l.filtered)-1, 0)

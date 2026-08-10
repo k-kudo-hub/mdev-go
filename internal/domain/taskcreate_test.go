@@ -151,3 +151,22 @@ func TestExpandHome(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterCandidateIndexes(t *testing.T) {
+	t.Parallel()
+
+	// 位置で返すのは、選択 UI が「元の何番目か」を要るためである。
+	// 値だけを返して突き合わせで引き直すと、同じ文字列が 2 つある一覧で
+	// 最初の 1 つに寄ってしまう(ディレクトリ名は重複しうる)。
+	items := []string{"/a/dup", "/b/other", "/b/dup"}
+
+	if got, want := domain.FilterCandidateIndexes(items, "dup"), []int{0, 2}; !reflect.DeepEqual(got, want) {
+		t.Errorf("FilterCandidateIndexes(dup) = %v, want %v", got, want)
+	}
+	if got, want := domain.FilterCandidateIndexes(items, ""), []int{0, 1, 2}; !reflect.DeepEqual(got, want) {
+		t.Errorf("FilterCandidateIndexes(空) = %v, want %v", got, want)
+	}
+	if got := domain.FilterCandidateIndexes(items, "zzz"); len(got) != 0 {
+		t.Errorf("FilterCandidateIndexes(zzz) = %v, want 空", got)
+	}
+}

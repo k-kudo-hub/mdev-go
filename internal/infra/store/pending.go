@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
@@ -84,40 +83,21 @@ func (s *PendingStore) Delete(session, sessionID string) error {
 
 // FindByTab は session の pending からタブ名が一致する 1 件を返す。
 //
-// 同じタブに複数の pending が残ることがある(--resume での再開はエージェントの
-// セッション ID を変えるため)。現行版の `for f in "$PENDING_DIR"/*.json` は
-// glob の展開順、つまりファイル名の昇順で最初に一致したものを採るので、同じ
-// 選び方をしている。
-//
-// 読めない・壊れているファイルは黙って読み飛ばす(現行版が
-// `jq -r '.tab' ... 2>/dev/null` でエラーを空文字に潰していたのと同じ扱い)。
+// 選び方(ファイル名の昇順で最初の一致、読めない・壊れているものは読み飛ばす)は
+// FindRawByTab が 1 か所で持つ。ここはその結果を構造体へ写すだけである。
+// 2 通りに書くと、片方だけが現行版の glob の展開順からずれる。
 func (s *PendingStore) FindByTab(session, tab string) (domain.Pending, bool, error) {
-	dir := filepath.Join(s.root, session)
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return domain.Pending{}, false, nil
-	}
-	if err != nil {
-		return domain.Pending{}, false, fmt.Errorf("pending %s の読み取りに失敗しました: %w", dir, err)
+	_, data, found, err := s.FindRawByTab(session, tab)
+	if err != nil || !found {
+		return domain.Pending{}, false, err
 	}
 
-	// os.ReadDir はファイル名の昇順で返すため、並べ替えは要らない。
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), pendingSuffix) {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(dir, entry.Name())) //nolint:gosec // 列挙結果のパス
-		if err != nil {
-			continue
-		}
-		var pending domain.Pending
-		if err := json.Unmarshal(b, &pending); err != nil {
-			continue
-		}
-		if pending.Tab != tab {
-			continue
-		}
-		return pending, true, nil
+	var pending domain.Pending
+	if err := json.Unmarshal(data, &pending); err != nil {
+		// FindRawByTab が tab を読めている以上ここは通らないが、
+		// 通ったとしても「見つからなかった」に潰す(現行版も jq の失敗を
+		// 空文字にしてタブ名の一致から外していた)。
+		return domain.Pending{}, false, nil
 	}
-	return domain.Pending{}, false, nil
+	return pending, true, nil
 }

@@ -100,9 +100,8 @@ func TestGoldenWaitingToggleMatchesShellVersion(t *testing.T) {
 
 			pending := store.NewPendingStore(pendingRoot)
 			pane := &app.TaskControlPane{
-				Pending: pending,
-				Raw:     pending,
-				Clock:   frozenClock{at: at},
+				Raw:   pending,
+				Clock: frozenClock{at: at},
 			}
 			if err := pane.ToggleWaiting(app.PaneEnv{ZellijSession: session}, tc.Tab); err != nil {
 				t.Fatalf("ToggleWaiting() = %v", err)
@@ -164,7 +163,7 @@ func TestGoldenWaitingToggleIsReversible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("時刻の解釈に失敗: %v", err)
 	}
-	pane := &app.TaskControlPane{Pending: pending, Raw: pending, Clock: frozenClock{at: at}}
+	pane := &app.TaskControlPane{Raw: pending, Clock: frozenClock{at: at}}
 	env := app.PaneEnv{ZellijSession: session}
 
 	for range 2 {

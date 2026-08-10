@@ -54,11 +54,27 @@ func FilterCandidates(items []string, query string) []string {
 	if query == "" {
 		return items
 	}
+	indexes := FilterCandidateIndexes(items, query)
+	matched := make([]string, 0, len(indexes))
+	for _, i := range indexes {
+		matched = append(matched, items[i])
+	}
+	return matched
+}
+
+// FilterCandidateIndexes は FilterCandidates が残す候補の**位置**を返す。
+//
+// 選択 UI は「表示する文字列」と「選ばれた値が元の何番目か」の両方を要る
+// (タスク種別はキーで選び、説明を添えて見せる)。位置で受け取れば、絞り込んだ
+// 結果を元の一覧と突き合わせて位置を引き直す必要がなくなる。
+//
+// query が空なら全件の位置を返す。
+func FilterCandidateIndexes(items []string, query string) []int {
 	pattern := []rune(strings.ToLower(query))
-	matched := make([]string, 0, len(items))
-	for _, item := range items {
+	matched := make([]int, 0, len(items))
+	for i, item := range items {
 		if subsequenceFold(item, pattern) {
-			matched = append(matched, item)
+			matched = append(matched, i)
 		}
 	}
 	return matched

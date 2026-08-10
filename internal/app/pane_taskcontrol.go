@@ -24,9 +24,12 @@ type PendingRawStore interface {
 // TaskControlPane はタスクタブ下部の操作バーのユースケースである
 // (現行 task-control.sh 相当)。
 type TaskControlPane struct {
-	// Pending は表示のために今の event を引く。
-	Pending PendingFinder
-	// Raw は Waiting の切り替えで pending を書き換える。
+	// Raw はこのタブの pending を読み書きする。
+	//
+	// 表示(今の event)と Waiting の切り替えで同じ 1 件を対象にする。
+	// 「タブ名が一致する最初の 1 件」という選び方は port の実装が 1 か所で
+	// 持っており、ここで引き直さない。2 通りに引くと、表示している pending と
+	// 書き換える pending が食い違いうる。
 	Raw PendingRawStore
 	// Focuser は m キーで Main タブへ移る。
 	Focuser Focuser
@@ -40,13 +43,13 @@ type TaskControlPane struct {
 // このタブの pending が Waiting なら WAITING 表示になる。pending が無い場合は
 // 通常表示である(現行 current_event が空文字を返す場合に対応)。
 func (p *TaskControlPane) Refresh(env PaneEnv, tab string) (string, error) {
-	pending, found, err := p.Pending.FindByTab(env.Session(), tab)
+	_, data, found, err := p.Raw.FindRawByTab(env.Session(), tab)
 	if err != nil {
 		return "", fmt.Errorf("pending の読み取りに失敗しました: %w", err)
 	}
 	event := ""
 	if found {
-		event = pending.Event
+		event = domain.PendingEvent(data)
 	}
 	return domain.RenderTaskControlBar(domain.TaskControlWaiting(event)), nil
 }

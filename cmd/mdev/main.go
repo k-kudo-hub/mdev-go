@@ -121,7 +121,6 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Home:    home,
 		},
 		TaskControl: &app.TaskControlPane{
-			Pending: pending,
 			Raw:     pending,
 			Focuser: zellij.NewFocuser(),
 			Clock:   clock,

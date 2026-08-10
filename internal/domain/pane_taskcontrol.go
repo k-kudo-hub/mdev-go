@@ -28,3 +28,12 @@ func RenderTaskControlBar(waiting bool) string {
 // 現行 task-control.sh の `[[ "$(current_event)" == "Waiting" ]]` に対応する。
 // pending が無い場合は空文字が渡り、偽になる。
 func TaskControlWaiting(event string) bool { return event == EventWaiting }
+
+// PendingEvent は pending の中身から event を取り出す。
+//
+// 現行 task-control.sh の `current_event`(`jq -r '.event'`)に対応する。
+// 欠けたキーと null はどちらも "null" になるが、いずれも "Waiting" とは
+// 一致しないので通常表示に落ちる。
+func PendingEvent(raw []byte) string {
+	return ParsePendingView("", raw).Event
+}

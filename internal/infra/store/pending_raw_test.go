@@ -122,3 +122,32 @@ func TestPendingStoreWriteRawIsAtomic(t *testing.T) {
 		t.Errorf("一時ファイルが残っている: %d 件", len(entries))
 	}
 }
+
+func TestPendingStoreFindByTabSharesTheSelectionPolicy(t *testing.T) {
+	t.Parallel()
+
+	// 「ファイル名の昇順で最初の一致」という選び方は 1 か所だけが持つ。
+	// FindByTab と FindRawByTab が別々に走査すると、片方だけが現行版の
+	// glob の展開順からずれる。同じ入力で同じ 1 件を指すことを固定する。
+	root := t.TempDir()
+	writePending(t, root, "s1", "a-broken.json", "{ not json")
+	writePending(t, root, "s1", "b.json", `{"tab":"alpha","event":"Notification"}`)
+	writePending(t, root, "s1", "c.json", `{"tab":"alpha","event":"Stop"}`)
+
+	s := store.NewPendingStore(root)
+
+	name, _, _, err := s.FindRawByTab("s1", "alpha")
+	if err != nil {
+		t.Fatalf("FindRawByTab() = %v", err)
+	}
+	pending, found, err := s.FindByTab("s1", "alpha")
+	if err != nil {
+		t.Fatalf("FindByTab() = %v", err)
+	}
+	if !found {
+		t.Fatal("FindByTab が見つけられていない")
+	}
+	if name != "b.json" || pending.Event != "Notification" {
+		t.Errorf("選んだ 1 件がずれている: raw=%q struct.event=%q", name, pending.Event)
+	}
+}

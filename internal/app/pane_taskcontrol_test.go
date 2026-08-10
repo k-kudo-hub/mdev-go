@@ -61,25 +61,11 @@ func (f *fakePendingRaw) WriteRaw(session, name string, data []byte) error {
 	return nil
 }
 
-// fakePendingFinder はタブ名で pending を引く。
-type fakePendingFinder struct {
-	pending domain.Pending
-	found   bool
-	err     error
-}
-
-var _ app.PendingFinder = (*fakePendingFinder)(nil)
-
-func (f *fakePendingFinder) FindByTab(string, string) (domain.Pending, bool, error) {
-	return f.pending, f.found, f.err
-}
-
 // taskControlFixture は task-control の 1 回ぶんの実行環境である。
 type taskControlFixture struct {
 	pane    *app.TaskControlPane
 	journal *paneJournal
 	raw     *fakePendingRaw
-	finder  *fakePendingFinder
 	focuser *fakePaneFocuser
 	closer  *fakeTabCloser
 	shell   *fakeShellRunner
@@ -88,14 +74,12 @@ type taskControlFixture struct {
 func newTaskControlFixture(tabOutput string) *taskControlFixture {
 	journal := &paneJournal{}
 	raw := &fakePendingRaw{journal: journal, files: map[string][]byte{}}
-	finder := &fakePendingFinder{}
 	focuser := &fakePaneFocuser{journal: journal}
 	closer := &fakeTabCloser{journal: journal}
 	shell := &fakeShellRunner{journal: journal}
 
 	return &taskControlFixture{
 		pane: &app.TaskControlPane{
-			Pending: finder,
 			Raw:     raw,
 			Focuser: focuser,
 			Clock:   paneClock{now: time.Date(2026, 8, 10, 11, 22, 33, 0, time.UTC)},
@@ -112,7 +96,6 @@ func newTaskControlFixture(tabOutput string) *taskControlFixture {
 		},
 		journal: journal,
 		raw:     raw,
-		finder:  finder,
 		focuser: focuser,
 		closer:  closer,
 		shell:   shell,
@@ -127,21 +110,26 @@ func TestTaskControlRefresh(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		event string
-		found bool
-		want  string
+		name    string
+		pending string
+		want    string
 	}{
-		{"pending が無ければ通常表示", "", false, domain.RenderTaskControlBar(false)},
-		{"Notification は通常表示", domain.EventNotification, true, domain.RenderTaskControlBar(false)},
-		{"Waiting は WAITING 表示", domain.EventWaiting, true, domain.RenderTaskControlBar(true)},
+		{"pending が無ければ通常表示", "", domain.RenderTaskControlBar(false)},
+		{"Notification は通常表示",
+			`{"tab":"t","event":"Notification"}`, domain.RenderTaskControlBar(false)},
+		{"Waiting は WAITING 表示",
+			`{"tab":"t","event":"Waiting"}`, domain.RenderTaskControlBar(true)},
+		// event キーが無い場合は jq -r が "null" を返す(Waiting ではない)。
+		{"event キーが無ければ通常表示", `{"tab":"t"}`, domain.RenderTaskControlBar(false)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := newTaskControlFixture("")
-			f.finder.pending = domain.Pending{Tab: "t", Event: tc.event}
-			f.finder.found = tc.found
+			if tc.pending != "" {
+				f.raw.order = []string{"a.json"}
+				f.raw.files["s1/a.json"] = []byte(tc.pending)
+			}
 
 			got, err := f.pane.Refresh(taskControlEnv, "t")
 			if err != nil {
@@ -158,7 +146,7 @@ func TestTaskControlRefreshReportsReadFailure(t *testing.T) {
 	t.Parallel()
 
 	f := newTaskControlFixture("")
-	f.finder.err = errors.New("読めない")
+	f.raw.findErr = errors.New("読めない")
 	if _, err := f.pane.Refresh(taskControlEnv, "t"); err == nil {
 		t.Fatal("Refresh() が成功してしまった")
 	}

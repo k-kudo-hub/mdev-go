@@ -131,6 +131,12 @@ func FilterCandidates(items []string, query string) []string {
 	return domain.FilterCandidates(items, query)
 }
 
+// FilterCandidateIndexes は絞り込みの結果を元の一覧での位置で返す。
+// 選択 UI は選ばれた値の位置を要るため、こちらを使う。
+func FilterCandidateIndexes(items []string, query string) []int {
+	return domain.FilterCandidateIndexes(items, query)
+}
+
 // TaskCreateError はタスク作成ペインのエラー行を組み立てる。
 func TaskCreateError(message string) string {
 	return domain.RenderTaskCreateError(message)
