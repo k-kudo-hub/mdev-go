@@ -141,7 +141,7 @@ func (c *TaskCreator) Execute(env PaneEnv, spec TaskSpec) (TaskCreateResult, err
 	}
 
 	// task-control ペインはタスクの中核なので、予算が尽きていても最低 1 秒は試す。
-	limit := budgetCap(c.elapsedSince(start), TaskSetupBudget)
+	limit := callCap(c.remaining(start))
 	if limit <= 0 {
 		limit = taskControlMinTimeout
 	}
@@ -149,20 +149,50 @@ func (c *TaskCreator) Execute(env PaneEnv, spec TaskSpec) (TaskCreateResult, err
 
 	// ここから下は見た目の調整で、タブとしては既に機能している。
 	// 予算切れなら諦めて成功として返す。
+	//
+	// 残り予算は 1 ステップにつき 1 回だけ測り、判定と実際に渡す上限で同じ値を
+	// 使う。2 回測ると、その間に時間が進んで「判定は通ったのに渡した上限は
+	// 0 以下」という食い違いが起こりうる。
 	for range taskResizeCount {
-		if budgetCap(c.elapsedSince(start), TaskSetupBudget) <= 0 {
+		step := callCap(c.remaining(start))
+		if step <= 0 {
 			return TaskCreateResult{Warning: setupBudgetWarning(spec.Name)}, nil
 		}
-		_ = c.Tabs.Resize(budgetCap(c.elapsedSince(start), TaskSetupBudget), "decrease", "up")
+		_ = c.Tabs.Resize(step, "decrease", "up")
 	}
-	if budgetCap(c.elapsedSince(start), TaskSetupBudget) <= 0 {
+	if limit = callCap(c.remaining(start)); limit <= 0 {
 		return TaskCreateResult{Warning: setupBudgetWarning(spec.Name)}, nil
 	}
-	_ = c.Tabs.FocusPreviousPane(budgetCap(c.elapsedSince(start), TaskSetupBudget))
+	_ = c.Tabs.FocusPreviousPane(limit)
 
+	// 残り予算を使い切っていたらレイアウトには入らない。
+	//
+	// ApplyLayout の「0 以下 = 無制限」は**呼び出し側が予算を指定しなかった**
+	// ことを表す約束であって、「使い切った」ではない。使い切ったあとの残り
+	// (0 以下)をそのまま渡すと意味が反転し、1 回あたり最大 10 秒かかりうる
+	// レイアウト操作が警告も無しに最後まで走ってしまう。ここから渡すのは
+	// 必ず正の値に限る。
+	remaining := c.remaining(start)
+	if remaining <= 0 {
+		return TaskCreateResult{Warning: setupBudgetWarning(spec.Name)}, nil
+	}
 	// レイアウトの成否はタブ作成の成否を上書きしない。
-	warning := c.ApplyLayout(config, spec.Dir, spec.Type, TaskSetupBudget-c.elapsedSince(start))
+	warning := c.ApplyLayout(config, spec.Dir, spec.Type, remaining)
 	return TaskCreateResult{Warning: warning}, nil
+}
+
+// remaining はタスク作成全体の予算の残りを返す。使い切っていれば 0 以下になる。
+func (c *TaskCreator) remaining(start time.Time) time.Duration {
+	return TaskSetupBudget - c.elapsedSince(start)
+}
+
+// callCap は残り予算を 1 回の呼び出しの上限へ丸める。
+// 残りが尽きていれば 0 以下がそのまま返り、呼び出し側はコマンドを撃たない。
+func callCap(remaining time.Duration) time.Duration {
+	if remaining > ZellijCallTimeout {
+		return ZellijCallTimeout
+	}
+	return remaining
 }
 
 // ApplyLayout は task_types.<type>.layout の操作を順に当てる。
@@ -276,17 +306,17 @@ func (c *TaskCreator) elapsedSince(start time.Time) time.Duration {
 // budgetCap は「残り予算」と「1 回の上限」の小さいほうを返す。
 //
 // 現行 task-lib.sh の `_zj_budget_cap` に対応する。予算切れなら 0 以下を返し、
-// 呼び出し側はそれ以上コマンドを撃たない。budget が 0 以下なら無制限で、
-// 1 回の上限がそのまま返る。
+// 呼び出し側はそれ以上コマンドを撃たない。
+//
+// budget が 0 以下のときだけは「予算の指定が無い」= 無制限として 1 回の上限を
+// そのまま返す。**使い切って 0 以下になった残りをここへ渡してはならない**。
+// 意味が反転して打ち切りが効かなくなる。呼び出し側は「使い切った」と
+// 「指定が無い」を自分で区別してから渡すこと(Execute は正の値しか渡さない)。
 func budgetCap(elapsed, budget time.Duration) time.Duration {
 	if budget <= 0 {
 		return ZellijCallTimeout
 	}
-	left := budget - elapsed
-	if left > ZellijCallTimeout {
-		return ZellijCallTimeout
-	}
-	return left
+	return callCap(budget - elapsed)
 }
 
 // taskLaunchCommand は new-tab に渡すコマンド行を組み立てる。

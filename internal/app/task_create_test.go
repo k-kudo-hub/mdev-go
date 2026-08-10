@@ -424,3 +424,59 @@ func TestCreateTaskFailsWhenScreenStateCannotBeRemoved(t *testing.T) {
 		t.Error("screen-state を消せていないのにタブを作っている")
 	}
 }
+
+func TestCreateTaskSkipsLayoutWhenTheBudgetIsGone(t *testing.T) {
+	t.Parallel()
+
+	// 予算を使い切った状態で ApplyLayout へ入ってはならない。
+	//
+	// ApplyLayout は「0 以下の予算 = 無制限」と解釈するため、使い切った残り
+	// (負の値)をそのまま渡すと意味が反転し、レイアウト操作が 1 回あたり
+	// 最大 10 秒かけて最後まで走ってしまう。
+	f := newTaskFixture(t, `{"task_types": {"dev": {"layout": [
+	  {"action": "new-pane", "direction": "right", "command": "nvim"},
+	  {"action": "new-pane", "direction": "down", "command": "lazygit"},
+	  {"action": "move-focus", "direction": "left"}
+	]}}}`).registers("over")
+	// 予算 30 秒をぎりぎりまで使い、最後の 1 本が上限を超えるようにする。
+	//   resize 0.9 秒 × 30 = 27 秒(残り 3 秒)
+	//   focus-previous-pane は上限 3 秒で撃たれるが後始末に 5 秒かかる
+	//   → 経過 32 秒 = 残り -2 秒でレイアウトへ進もうとする
+	f.tabs.overrunOn = map[string]time.Duration{
+		"resize":              900 * time.Millisecond,
+		"focus-previous-pane": 5 * time.Second,
+	}
+
+	result, err := f.creator.Execute(taskEnv,
+		app.TaskSpec{Dir: "/tmp/proj", Type: "dev", Name: "over"})
+	if err != nil {
+		t.Fatalf("Execute() = %v(予算切れは成功として返すこと)", err)
+	}
+	if result.Warning == "" {
+		t.Error("予算切れの警告が返っていない")
+	}
+	for _, prefix := range []string{"new-pane right", "new-pane down /tmp/proj -- lazygit", "move-focus"} {
+		if f.journal.indexOf(prefix) >= 0 {
+			t.Errorf("予算切れなのにレイアウトを当てている(%s): %v", prefix, f.journal.entries)
+		}
+	}
+}
+
+func TestCreateTaskMeasuresTheBudgetOncePerStep(t *testing.T) {
+	t.Parallel()
+
+	// 判定に使った残り予算と、実際にコマンドへ渡した上限は同じ値でなければ
+	// ならない。別々に測ると、その間に時間が進んで「判定は通ったのに
+	// 渡した上限は 0 以下」という組み合わせが起こりうる。
+	f := newTaskFixture(t, defaultTaskConfig).registers("t")
+	f.tabs.spend = 900 * time.Millisecond
+
+	if _, err := f.creator.Execute(taskEnv, app.TaskSpec{Dir: "/d", Type: "dev", Name: "t"}); err != nil {
+		t.Fatalf("Execute() = %v", err)
+	}
+	for i, limit := range f.tabs.caps {
+		if limit <= 0 {
+			t.Fatalf("%d 回目に 0 以下の上限を渡している: %v", i, f.tabs.caps)
+		}
+	}
+}

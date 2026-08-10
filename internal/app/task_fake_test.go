@@ -82,12 +82,19 @@ type fakeTabActor struct {
 	newTabErr error
 	// spend は 1 回の呼び出しが消費する時間。劣化サーバの再現に使う。
 	spend time.Duration
-	clock *fakeStopwatch
+	// overrunOn はアクション名ごとの「上限を超えてかかる時間」である。
+	//
+	// 実際の打ち切りは上限ぴったりでは終わらない。proc.Command は期限のあとも
+	// WaitDelay(2 秒)ぶん後始末を待ち、SIGKILL の配送と reap にも時間がかかる。
+	// この超過ぶんだけ経過時間は予算を追い越し、残り予算は**負**になる。
+	// 上限で頭打ちにする spend では負にならないため、別の口として持つ。
+	overrunOn map[string]time.Duration
+	clock     *fakeStopwatch
 }
 
-func (f *fakeTabActor) tick(limit time.Duration) {
+func (f *fakeTabActor) tick(action string, limit time.Duration) {
 	f.caps = append(f.caps, limit)
-	if f.clock == nil || f.spend == 0 {
+	if f.clock == nil {
 		return
 	}
 	// 打ち切りは上限までしか待たない。
@@ -95,11 +102,14 @@ func (f *fakeTabActor) tick(limit time.Duration) {
 	if limit > 0 && spent > limit {
 		spent = limit
 	}
-	f.clock.advance(spent)
+	// 超過ぶんは上限で頭打ちにしない(後始末は期限のあとに起きるため)。
+	if spent += f.overrunOn[action]; spent > 0 {
+		f.clock.advance(spent)
+	}
 }
 
 func (f *fakeTabActor) QueryTabNames(limit time.Duration) []string {
-	f.tick(limit)
+	f.tick("query-tab-names", limit)
 	f.queryCalls++
 	f.journal.add("query-tab-names")
 	names := f.tabNames
@@ -110,20 +120,20 @@ func (f *fakeTabActor) QueryTabNames(limit time.Duration) []string {
 }
 
 func (f *fakeTabActor) FocusTabVerified(limit time.Duration, name string) bool {
-	f.tick(limit)
+	f.tick("go-to-tab-name", limit)
 	f.focusCalls++
 	f.journal.add("go-to-tab-name " + name)
 	return f.focusCalls > f.focusEmptyUntil
 }
 
 func (f *fakeTabActor) NewTab(limit time.Duration, name, cwd string, command []string) error {
-	f.tick(limit)
+	f.tick("new-tab", limit)
 	f.journal.add(fmt.Sprintf("new-tab %s %s -- %s", name, cwd, strings.Join(command, " ")))
 	return f.newTabErr
 }
 
 func (f *fakeTabActor) NewPane(limit time.Duration, direction, cwd string, command []string) error {
-	f.tick(limit)
+	f.tick("new-pane", limit)
 	entry := fmt.Sprintf("new-pane %s %s", direction, cwd)
 	if len(command) > 0 {
 		entry += " -- " + strings.Join(command, " ")
@@ -133,19 +143,19 @@ func (f *fakeTabActor) NewPane(limit time.Duration, direction, cwd string, comma
 }
 
 func (f *fakeTabActor) MoveFocus(limit time.Duration, direction string) error {
-	f.tick(limit)
+	f.tick("move-focus", limit)
 	f.journal.add("move-focus " + direction)
 	return nil
 }
 
 func (f *fakeTabActor) FocusPreviousPane(limit time.Duration) error {
-	f.tick(limit)
+	f.tick("focus-previous-pane", limit)
 	f.journal.add("focus-previous-pane")
 	return nil
 }
 
 func (f *fakeTabActor) Resize(limit time.Duration, args ...string) error {
-	f.tick(limit)
+	f.tick("resize", limit)
 	f.journal.add("resize " + strings.Join(args, " "))
 	return nil
 }
