@@ -164,7 +164,8 @@ TODO は「全て proc.Command + 10 秒上限」と書いていたが、固定 1
 
 TODO は「既存の PrepareDelete / CommitDelete に統合」と書いていた。
 `DashboardPane` のメソッドをそのまま task-control から呼ぶと、Dashboard 用の
-port(PendingLister など task-control には要らないもの)まで組み立てる必要が
+port(PendingLister / ConfigLoader / Focuser の 3 つは task-control の削除に
+要らない)まで組み立てる必要が
 あり、`close-tab` フォールバックの有無も分けられない。
 
 削除フローだけを `app.TaskDeleter` に切り出し、`DashboardPane` は
@@ -217,3 +218,66 @@ CreateTask が呼ぶ側であるため。
 | フォーカス検証の失敗を無視して先へ進む | 4 件(ペインを 1 枚も作らない契約) |
 | screen-state の削除を new-tab の後ろへ移す | 3 件(順序と失敗時の中止) |
 | resize ループの予算チェックを外す | 1 件(30 回回りきり、経過が予算を超える) |
+
+## 10. コードレビュー指摘への対応
+
+`/code-review` の CONFIRMED 7 件と cleanup 2 件。指摘 9 はコーディネータ検証で
+却下されたため現状維持とした。
+
+| # | 指摘 | 対応 | 実証 |
+|---|------|------|------|
+| 1 | 予算枯渇が無制限へ反転 | Execute は残り予算が 0 以下ならレイアウトへ入らない。残りは 1 ステップ 1 回だけ測る | 上限を超える呼び出しを再現する fake(overrunOn)で修正前の失敗を確認 |
+| 2 | `-` 始まりのタブ名 | 起動コマンドと CLI の両方に `--` 区切り | `-wip` で起動・表示できることをテストと実バイナリで確認 |
+| 3 | スペースの無音破棄 | typedText が "space" を個別に受ける | 特別扱いを外すと落ちることを確認 |
+| 4 | `"true"` が効かない | `jq -r` 出力との比較に合わせ両対応 | jq 実測(§10-1)。誤ったコメントとテストの期待値も訂正 |
+| 5 | 全滅パース | agents / task_types を per-entry で読み飛ばす | 壊れた 1 件があっても codex の detection=screen が生きることを固定 |
+| 6 | 余剰引数の黙殺 | ペインごとに引数の数を厳密に見る | 3 パターンをテスト |
+| 7 | 選択ポリシーの重複 | FindByTab を FindRawByTab の上に載せ、TaskControlPane の port を 1 つに | 同じ入力で同じ 1 件を指すことを固定 |
+| 8 | refilter の二重走査 | FilterCandidateIndexes で単一パス化 | 重複名でカーソルどおり選べることを固定 |
+| 9 | deleter の二重配線 | **却下**(コーディネータ検証で前提の一部が誤り・実害僅少)。現状維持 | — |
+
+### 10-1. jq の実測(指摘 4 の根拠)
+
+`[[ "$(jq -r '.skip_task_name_input // false' ...)" == "true" ]]` の結果:
+
+| 設定値 | `jq -r` の出力 | 有効か |
+|--------|----------------|--------|
+| `true` | `true` | 有効 |
+| `"true"` | `true` | **有効** |
+| `false` / `"false"` / `null` | `false` | 無効 |
+| `1` | `1` | 無効 |
+
+`jq -r` は文字列を引用符なしで出すため、真偽値 true と文字列 "true" が
+同じ出力になる。当初「文字列は別物」と書いていたのは誤りだった。
+
+### 10-2. jq の実測(指摘 5 の根拠)
+
+`{"agents":{"claude":{...},"broken":5,"codex":{...}}}` に対して:
+
+- `jq -r '.agents // {} | keys_unsorted[]'` → `claude broken codex`(値を見ない)
+- `jq -r --arg a codex '.agents[$a].command // empty'` → `codex`(1 件だけ読む)
+
+つまり現行版は 1 件壊れても他のエージェントを失わない。Go 版が map 全体を
+一度に読んで空へ落ちていたのは、この経路との差異である。
+
+`task_types` の一覧表示(`to_entries[] | "\(.key)  \(.value.description)"`)は
+オブジェクトでない値に当たるとその手前までしか出さない(実測)。レイアウト
+適用は型ごとに読むため無事である。Go 版は per-entry で読み飛ばす形に揃えた
+(1 つの設定ミスで選択肢が全部消えるより、その 1 つだけが説明なしで並ぶ
+ほうが直しやすい)。
+
+### 10-3. 却下した指摘の要旨
+
+コーディネータ検証で除外されたもの。判断の根拠を残す。
+
+1. **screen-state の削除失敗で fail-fast するのは過剰では** — 意図的である。
+   消せないまま作ると古い "working" が新しいタブの最初のポーリングで即 Stop に
+   見え、古い "blocked" は Main への不要なジャンプを起こす。タブを作る前に
+   止めるほうが安全である
+2. **Config を毎回読み直している** — TaskCreatePane の各メソッドが
+   `Config.Load()` を呼ぶ。設定ファイルは小さく、呼ばれるのはキー操作の
+   たびに 1 回である。キャッシュを持つと、設定を書き換えたあとペインを
+   再起動するまで反映されない別の分かりにくさが生まれる
+3. **close-active フォールバックの非対称** — Dashboard は落ちず task-control は
+   落ちる、という差は現行版のもので、`TaskDeleter.CloseActiveOnMissingID` の
+   コメントと evidence §7-2 に理由ごと文書化済みである
