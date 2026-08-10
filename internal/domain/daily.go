@@ -1,6 +1,9 @@
 package domain
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // DailyCompletedAtLayout は daily レコードの completed_at の書式。
 // 現行 record-output.sh の `date '+%Y-%m-%dT%H:%M:%S%z'` に対応する
@@ -45,6 +48,26 @@ type DailyRecord struct {
 	ClaudeSessionID string        `json:"claude_session_id,omitempty"`
 	TranscriptPath  string        `json:"transcript_path,omitempty"`
 	Agent           string        `json:"agent,omitempty"`
+}
+
+// ScreenSessionIDPrefix はスクリーン検出が合成する claude_session_id の前置きである
+// (現行 screen-detect-lib.sh の `--arg claude_session_id "screen-$slug"`)。
+//
+// hook を持たないエージェントの完了はタブの画面から検出するため、そこには
+// エージェントが発行した本物のセッション ID が無い。代わりにタブ名から作った
+// slug(ScreenTabSlug)を使うが、これはタブ名の純関数であり、同じ名前のタブなら
+// 別のタスクでも同じ値になる。
+const ScreenSessionIDPrefix = "screen-"
+
+// HasDedupeKey は daily log の置換キーとして使えるレコードかを返す。
+//
+// 置換キーは (tab, claude_session_id) の組である。claude_session_id が無いレコードは
+// もちろん、スクリーン検出が合成した ID を持つレコードもキーにはできない。合成 ID は
+// タブ名だけで決まるため、同じ名前のタブで前に行ったタスクの記録にまで一致してしまい、
+// 消してはいけない履歴を消すからである。キーが無い場合は置換せず追記する
+// (記録が重複することはあっても、過去の記録は失われない)。
+func (r DailyRecord) HasDedupeKey() bool {
+	return r.ClaudeSessionID != "" && !strings.HasPrefix(r.ClaudeSessionID, ScreenSessionIDPrefix)
 }
 
 // DailyMarkers はタスク中に何をしたかの目印である。

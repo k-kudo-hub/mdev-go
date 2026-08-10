@@ -1,0 +1,190 @@
+# daily 追記の冪等化(置換)の調査記録(evidence)
+
+移植元: `claude-conductor` の `scripts/record-output.sh` 末尾ブロックと `test.sh` セクション 26i2。
+実行環境は macOS 15 / `jq-1.7.1-apple` / Go 1.25。
+現行 Shell 版の挙動はすべて隔離サンドボックス(`env -i` で `HOME` と `CONDUCTOR_HOME` を
+一時ディレクトリへ向けたもの)での実測に基づく。実環境のファイルには触れていない。
+
+## 1. Shell 版の削除条件と Go 実装の対応
+
+現行版の削除は次の 1 行に集約されている。
+
+```sh
+jq -c --arg tab "$TAB_NAME" --arg sid "$CLAUDE_SESSION_ID" \
+    'select(((.tab == $tab) and ((.claude_session_id // "") == $sid) and ((.restored // false) != true)) | not)'
+```
+
+Go 側は `internal/infra/store/daily.go` の `filterSupersededDaily` がこれに対応する。
+判定を `map[string]any` で行い、値の型が想定と違っても解析を止めない作りにした。理由は
+jq の比較セマンティクスに合わせるためである。
+
+### 型が違う行の扱い(実測)
+
+`tab` が数値の行を混ぜて現行版を走らせた結果:
+
+```console
+$ printf '%s\n' '{"tab":123,"claude_session_id":"sid","message":"weird"}' \
+                '{"tab":"t","claude_session_id":"sid","message":"old"}' > $DAILY
+$ record-output.sh t
+$ cat $DAILY
+{"tab":123,"claude_session_id":"sid","message":"weird"}
+{"tab":"t","session":"s","completed_at":"...","message":"new",...,"claude_session_id":"sid"}
+```
+
+`tab` が数値の行は「一致しない行」として残り、文字列で一致した行だけが消えた。
+Go 側で `DailyRecord` のような構造体へ Unmarshal すると型不一致で解析エラーになり、
+フェイルセーフ(削除見送り)へ落ちて挙動が変わってしまう。`map[string]any` +
+文字列アサーション(`dailyString`)にしたのはこのためである。
+
+## 2. フェイルセーフ(解析できない daily)
+
+現行版は jq が失敗した場合に一時ファイルを捨て、削除せず追記だけを行う。実測:
+
+```console
+$ printf '%s\n' '{"tab":"t","claude_session_id":"sid","message":"old"}' 'これは JSON ではない' > $DAILY
+$ record-output.sh t
+$ cat $DAILY
+{"tab":"t","claude_session_id":"sid","message":"old"}
+これは JSON ではない
+{"tab":"t","session":"s","completed_at":"...","message":"new",...}
+```
+
+既存の 2 行はそのまま残り、末尾に 1 行増える。重複した記録は後から消せるが、
+切り詰めた記録は取り戻せないため、この非対称性をそのまま移植した。
+Go 側は `filterSupersededDaily` が 1 行でも解析に失敗したら `removed=false` を返し、
+書き直しそのものを見送る(`TestDailyStoreAppendKeepsBrokenDailyIntact`)。
+
+## 3. 空行の扱い
+
+jq は入力の空行を値の区切りとして読み飛ばすため、置換が起きたファイルからは空行が消える。実測:
+
+```console
+$ printf '%s\n' '{"tab":"t","claude_session_id":"sid",...}' '' '{"tab":"x","claude_session_id":"other",...}' > $DAILY
+$ record-output.sh t
+$ wc -l < $DAILY
+2
+```
+
+Go 側も `strings.TrimSpace(line) == ""` の行を落とすため一致する。
+なお削除対象が 1 行も無い場合は書き直し自体を行わないので、空行はそのまま残る
+(現行版も `CLAUDE_SESSION_ID` が空、または daily が無い場合は jq を通さない)。
+
+## 4. 残す行を再整形しない判断
+
+現行版は `jq -c` で全行を読み直して書き戻すため、残る行も再整形される。Go 側は
+読んだ行の文字列をそのまま書き戻す。ゴールデンテストは JSON としての等価で比較するため
+この差は表に出ず、mdev が知らないフィールドや表記(数値の書き方など)を壊さない分だけ安全である。
+
+## 5. dedupe キーから `screen-` 前置きを外した理由
+
+conductor 側の code-review で確定した仕様変更。スクリーン検出は
+`scripts/screen-detect-lib.sh:97` で
+
+```sh
+--arg claude_session_id "screen-$slug"
+```
+
+として pending を作る。`$slug` は `_screen_tab_slug`(mdev-go では `domain.ScreenTabSlug`)が
+返すタブ名の純関数であり、同じ名前のタブなら別のタスクでも同じ値になる。
+
+したがって `screen-<slug>` を置換キーに使うと、同名タブで過去に完了した別タスクの記録まで
+削除条件に一致してしまう。**キーとして使えるのは `claude_session_id` が非空かつ
+`screen-` で始まらない場合だけ**とし、それ以外は従来どおり無条件追記にした
+(`domain.DailyRecord.HasDedupeKey`)。重複が残るのは Done ペインの見た目の問題だが、
+履歴の誤削除は復旧できないため、安全側へ倒している。
+
+## 6. ロックを取れないとき(fail-open)は置換しない
+
+daily ファイルのロックは 2 秒で諦めて処理を続ける(fail-open)。この状態で置換を行うと、
+ファイル全体の書き直しが並行する `restore-task` の結果(`restored: true` の付与)を
+巻き戻しかねない。追記は `O_APPEND` なので競合しても行を失わないが、全体書き直しは失う。
+
+そのため `DailyStore.Append` は**ロックを取得できたときだけ**削除フィルタを走らせ、
+取れなかった場合は追記のみ行う(`TestDailyStoreAppendSkipsReplacementWhenLockUnavailable`)。
+ロック無しでの重複は次回の(ロックを取れた)実行で解消される。
+
+## 7. ゴールデン fixture の再生成手順
+
+```console
+$ bash scripts/gen-golden-record.sh /Users/kazuto/projects/claude-conductor/.worktree/fix-upload-codex-record-dedupe
+32 件の fixture を .../golden-record に生成しました
+$ go test ./internal/infra/store/ -run TestGoldenRecord -v | grep -c -- '--- PASS'
+32
+```
+
+生成元は conductor worktree の確定版(HEAD = `433c402`「dedupe対象をscreen合成IDに限定し
+ロック未取得時は追記のみにする」、conductor 側テスト 603 passed)である。
+
+`cases.json` に `"runs": N` を足し、`gen-golden-record.sh` は同じ sandbox のまま
+`record-output.sh` を N 回続けて走らせるようにした。Go 側のゴールデンテストも
+`runCount()` 回だけ `Execute` を呼ぶ。
+
+### 複数回実行の fixture が固定時刻で再現できることの担保
+
+Shell 版は実行ごとに `date` を呼ぶ。置換が起きる `retry-replaces-entry` は最後の 1 件しか
+残らないので問題にならないが、置換が起きない `screen-session-appends-every-run` は
+2 行とも残るため、実行が秒をまたぐと 2 つの `completed_at` を持つ fixture ができる。
+Go 側は fixture から復元した 1 つの固定時刻で走るため、これは再現できない。
+
+そこで `gen-golden-record.sh` に `run_timestamps_uniform` を足した。`existing_daily` 由来の
+時刻を除いた「今回書かれた行」の `completed_at` が 2 種類以上あれば生成をやり直す
+(既存の `dates_consistent` と同じ再試行ループに乗せ、5 回で打ち切り)。
+実測では `record-output.sh` 1 回が数十 ms なのでやり直しは発生しなかった。
+
+### 既存 fixture を変更しないための確認
+
+再生成すると全ケースのファイル名の日付と `completed_at` が今日の値へ変わる。
+`completed_at` を定数へ潰し、ファイル名の日付を無視して旧 fixture(`git show HEAD:<path>`)と
+突き合わせた結果、**内容が変わったケースは 0 件**だった。とくに `retry-replaces-entry` は
+conductor の修正前に生成したものと確定版の出力が `completed_at` を除いて完全一致しており、
+`screen-` 除外とロック条件の追加がこのケースの経路を変えていないことを確認できた。
+そのうえで既存 30 ケースは `git checkout` と生成物の削除で元へ戻し、新規 2 ケースだけを追加した。
+
+### 新規ケース `retry-replaces-entry`
+
+同一 pending で `record-output.sh` を 2 回走らせる。既存 daily には
+(a) 同じ tab + sid で `restored: true`、(b) 同じ tab + sid で未 restore、
+(c) 別 tab + 別 sid、の 3 行を置いてある。Shell 版の出力は:
+
+```
+{"tab":"retry-tab",...,"message":"restored-history",...,"restored":true}
+{"tab":"other-tab",...,"message":"other-task",...}
+{"tab":"retry-tab",...,"message":"latest attempt",...,"claude_session_id":"sess-retry"}
+```
+
+(b) だけが消え、(a) と (c) は位置ごと残り、新しい記録が末尾に来る。1 ケースで
+「restored は対象外」「別キーは対象外」「未変更行の相対順序」「置換行の末尾配置」
+「2 回実行で 1 行」のすべてを押さえている。
+
+### 新規ケース `screen-session-appends-every-run` / `screen-session-keeps-old-history`
+
+`screen-` 前置きの sid が置換キーにならないことを Shell 版の出力で固定する 2 件。
+
+- `screen-session-appends-every-run`: `claude_session_id` が
+  `screen-screen-tab-2917289248` の pending で 2 回実行 → **daily は 2 行**。
+  同じ内容の記録が 2 つ並ぶ(重複は許容し、履歴の誤削除を避ける側の挙動)。
+- `screen-session-keeps-old-history`: 同じタブ名・同じ合成 ID で完了した
+  **無関係な古い記録**(`completed_at` が 2026-01-01)を置いた状態で 1 回実行 →
+  古い行は消えず 2 行になる。合成 ID を置換キーにしていたら消えていた行であり、
+  この除外規則が守っているものそのものである。
+
+## 8. ロック未取得時の挙動の固定
+
+conductor 側は test.sh がロックディレクトリを保持したまま `record-output.sh` を走らせて
+検証している。Go 側は `TestDailyStoreAppendSkipsReplacementWhenLockUnavailable` が同じ状況を
+作る(ロックディレクトリに自プロセスの PID を書いて「所有者が生きている」状態にし、
+`DailyLockTimeout` の 2 秒を空振りさせる)。置換対象の行が残ったまま追記されること、
+fail-open の警告が出ることの両方を確認している。ゴールデンでは再現しない
+(gen スクリプトは実 Shell を素で走らせるため、ロックは常に取得できる)。
+
+## 9. 未解決 / 判断を保留した点
+
+- **app 層のテストは赤を先に出せていない**: `RecordOutput` 自体の振る舞いは変わらない
+  (dedupe キーは pending から素通しで渡るだけ)ため、
+  `TestRecordOutputRepeatsTheSameDedupeKeyOnRetry` は退行防止の characterization テストである。
+  赤から始めたのは domain と store のテストである。
+- **Shell の既知の制約はそのまま移植した**: 確定版の `record-output.sh` が
+  「Known limitations」として明記している 2 点(再試行の合間に pending の sid が
+  実 ID と `screen-<slug>` の間で入れ替わると 2 行残る / 毎回 `completed_at` を
+  打ち直すため `restore-task.sh` の (tab, completed_at) 照合が一度だけ空振りしうる)は、
+  Go 側でも同じ挙動になる。挙動互換を優先し、ここでの独自対処は行っていない。

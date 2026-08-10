@@ -50,6 +50,17 @@ type goldenRecordCase struct {
 	Transcripts map[string]string `json:"transcripts"`
 	// ExistingDaily は実行前から daily ファイルに入っている内容。
 	ExistingDaily string `json:"existing_daily"`
+	// Runs は record を続けて走らせる回数(省略時は 1)。アップロードの失敗で
+	// タスク削除が中止され、同じ pending に対して何度も走る状況を再現する。
+	Runs int `json:"runs"`
+}
+
+// runCount は case が求める実行回数を返す(未指定なら 1 回)。
+func (c goldenRecordCase) runCount() int {
+	if c.Runs < 1 {
+		return 1
+	}
+	return c.Runs
 }
 
 func loadGoldenRecordCases(t *testing.T) []goldenRecordCase {
@@ -119,8 +130,12 @@ func TestGoldenRecordCompatibilityWithShellVersion(t *testing.T) {
 				Clock:      fixedClock{now: now},
 			}
 			env := app.RecordEnv{ZellijSession: tc.Env["ZELLIJ_SESSION_NAME"]}
-			if err := usecase.Execute(tc.Tab, env); err != nil {
-				t.Fatalf("Execute() = %v", err)
+			// 複数回の実行では時刻が固定になる。Shell 版は毎回 date を呼ぶが、
+			// 置換で残るのは最後の 1 件だけなので fixture の completed_at と一致する。
+			for run := 1; run <= tc.runCount(); run++ {
+				if err := usecase.Execute(tc.Tab, env); err != nil {
+					t.Fatalf("Execute(%d 回目) = %v", run, err)
+				}
 			}
 
 			compareDailyTree(t, expectedDaily, dailyRoot, transcriptsDir)

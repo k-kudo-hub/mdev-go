@@ -16,6 +16,10 @@
 # transcript_path は実行のたびに変わる絶対パスなので、pending には
 # {{TRANSCRIPT_DIR}} というプレースホルダを書いておき、実行直前に実パスへ
 # 置換する。保存時は逆向きに置換して戻す(Go 側も同じ置換を行う)。
+#
+# case に "runs": N を書くと、同じ sandbox のまま record-output.sh を N 回続けて
+# 走らせる。アップロードの失敗でタスク削除が中止され、同じ pending に対して
+# record が何度も走る状況(daily の重複を置換で防ぐ挙動)を再現するためである。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -64,12 +68,13 @@ replace_in_file() {
 # run_case <case json> <出力先ディレクトリ>
 run_case() {
     local case_json="$1" out_dir="$2"
-    local name tab session sandbox transcripts_dir
+    local name tab session sandbox transcripts_dir runs run
 
     name=$(field "$case_json" '.name')
     tab=$(field "$case_json" '.tab')
     session=$(field "$case_json" '.env.ZELLIJ_SESSION_NAME')
     session="${session:-unknown}"
+    runs=$(printf '%s' "$case_json" | jq -r '.runs // 1')
 
     sandbox="$WORK/run/$name"
     rm -rf "$sandbox"
@@ -114,12 +119,15 @@ run_case() {
         env_args+=("$kv")
     done < <(printf '%s' "$case_json" | jq -r '.env | to_entries[] | "\(.key)=\(.value)"')
 
-    env -i \
-        PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin" \
-        HOME="$sandbox/home" \
-        CONDUCTOR_HOME="$sandbox/conductor" \
-        ${env_args[@]+"${env_args[@]}"} \
-        bash "$sandbox/conductor/scripts/record-output.sh" "$tab"
+    # runs 回続けて走らせる(pending も daily も持ち越す = 再試行そのもの)。
+    for ((run = 0; run < runs; run++)); do
+        env -i \
+            PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin" \
+            HOME="$sandbox/home" \
+            CONDUCTOR_HOME="$sandbox/conductor" \
+            ${env_args[@]+"${env_args[@]}"} \
+            bash "$sandbox/conductor/scripts/record-output.sh" "$tab"
+    done
 
     # 生成物を集める(実パスをプレースホルダへ戻す)。
     rm -rf "$out_dir"
@@ -155,20 +163,44 @@ dates_consistent() {
     return 0
 }
 
+# 複数回走らせた case で、今回書かれた行の completed_at がすべて同じかを見る。
+#
+# Go 側のゴールデンテストは fixture から復元した 1 つの固定時刻で同じ回数走らせる。
+# Shell 版は実行のたびに date を呼ぶため、2 回目が秒をまたぐと再現できない fixture
+# ができてしまう。実行前から置いてある行(existing_daily)の時刻は比較から除く。
+run_timestamps_uniform() {
+    local out_dir="$1" case_json="$2" file
+    local existing_ts="$WORK/existing-ts" written_ts="$WORK/written-ts"
+
+    field "$case_json" '.existing_daily' | jq -r '.completed_at // empty' 2>/dev/null > "$existing_ts" \
+        || : > "$existing_ts"
+    : > "$written_ts"
+    while IFS= read -r -d '' file; do
+        jq -r '.completed_at // empty' "$file" >> "$written_ts"
+    done < <(find "$out_dir/daily" -name '*.jsonl' -type f -print0 2>/dev/null)
+
+    [ "$(grep -vxF -f "$existing_ts" "$written_ts" | sort -u | wc -l | tr -d ' ')" -le 1 ]
+}
+
 count=0
 while IFS= read -r case_json; do
     name=$(field "$case_json" '.name')
+    runs=$(printf '%s' "$case_json" | jq -r '.runs // 1')
     out_dir="$GOLDEN_DIR/$name/expected"
 
     attempt=0
     while :; do
         run_case "$case_json" "$out_dir"
-        if dates_consistent "$out_dir"; then
+        if ! dates_consistent "$out_dir"; then
+            reason="daily のファイル名と completed_at の日付が一致しません"
+        elif [ "$runs" -gt 1 ] && ! run_timestamps_uniform "$out_dir" "$case_json"; then
+            reason="複数回の実行が秒をまたぎ、completed_at が揃いませんでした"
+        else
             break
         fi
         attempt=$((attempt + 1))
         if [ "$attempt" -ge 5 ]; then
-            echo "$name: daily のファイル名と completed_at の日付が一致しません" >&2
+            echo "$name: $reason" >&2
             exit 1
         fi
     done
