@@ -79,10 +79,18 @@ func (p *DashboardPane) Startup() {
 // 先頭でスクリーン検出を走らせてから pending を読む。順序が逆だと、その回に
 // 観測した状態が一覧に反映されず、screen 方式のエージェント(codex)のタスクが
 // 出てこなくなる。
+//
+// ただし検出を走らせるのは、設定に screen 方式のエージェントが 1 つでも
+// ある場合だけである。1 つも無ければ検出しても見つかるものが無く、中で走る
+// `zellij action list-panes`(実測 1.1〜1.5 秒)の負荷だけが残る。2 秒ごとの
+// ポーリングでは zellij サーバをほぼ占有し続けることになるため、設定を見て
+// 静的に省く。
 func (p *DashboardPane) Refresh(env PaneEnv) (DashboardSnapshot, error) {
 	session := env.Session()
 
-	p.Shell.ScreenDetectTick(session)
+	if p.Config.Load().HasScreenDetectionAgent() {
+		p.Shell.ScreenDetectTick(session)
+	}
 
 	views, err := p.Pending.List(session)
 	if err != nil {

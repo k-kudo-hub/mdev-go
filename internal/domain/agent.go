@@ -34,3 +34,19 @@ func (c Config) AgentDetection(agent string) string {
 	}
 	return DetectionHooks
 }
+
+// HasScreenDetectionAgent は screen 方式のエージェントが 1 つでも設定に
+// あるかを返す。
+//
+// スクリーン検出は設定に screen 方式のエージェントがあって初めて意味を持つ。
+// 1 つも無ければ走らせても見つかるものが無く、検出の中で走る
+// `zellij action list-panes` の実行時間(実測 1.1〜1.5 秒)だけが残る。
+// 呼び出し側はこの判定で検出そのものを省く。
+func (c Config) HasScreenDetectionAgent() bool {
+	for name := range c.Agents {
+		if c.AgentDetection(name) == DetectionScreen {
+			return true
+		}
+	}
+	return false
+}

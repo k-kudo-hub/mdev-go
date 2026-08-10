@@ -107,6 +107,9 @@ func TestDashboardPaneRefreshRunsScreenDetectionFirst(t *testing.T) {
 	// スクリーン検出はポーリングの先頭で走らせる。pending を読む前に走らせないと、
 	// その回の観測結果が一覧に反映されない(screen 方式のタスクが出てこない)。
 	f := newDashboardFixture(nil, "ID POS NAME\n")
+	f.config.config = domain.Config{Agents: map[string]domain.AgentConfig{
+		"codex": {Detection: domain.DetectionScreen},
+	}}
 	if _, err := f.pane.Refresh(dashboardEnv); err != nil {
 		t.Fatalf("Refresh() = %v", err)
 	}
@@ -116,6 +119,45 @@ func TestDashboardPaneRefreshRunsScreenDetectionFirst(t *testing.T) {
 	}
 	if len(f.journal.entries) == 0 || f.journal.entries[0] != "screen-detect-tick s1" {
 		t.Errorf("先頭が screen 検出ではない: %v", f.journal.entries)
+	}
+}
+
+func TestDashboardPaneRefreshSkipsScreenDetectionWithoutScreenAgent(t *testing.T) {
+	t.Parallel()
+
+	// screen 方式のエージェントが 1 つも設定されていなければ、検出しても
+	// 見つかるものが無い。中で走る `zellij action list-panes` は実測 1.1〜1.5 秒
+	// かかり、2 秒ごとのポーリングでは zellij サーバを占有し続けるため、
+	// 設定だけを見て静的に省く。
+	tests := []struct {
+		name   string
+		config domain.Config
+	}{
+		{name: "設定が読めなかった", config: domain.Config{}},
+		{name: "agents が空", config: domain.Config{Agents: map[string]domain.AgentConfig{}}},
+		{
+			name: "hooks 方式だけが設定されている",
+			config: domain.Config{Agents: map[string]domain.AgentConfig{
+				"claude":  {Detection: domain.DetectionHooks},
+				"somecli": {},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newDashboardFixture(nil, "ID POS NAME\n")
+			f.config.config = tt.config
+
+			if _, err := f.pane.Refresh(dashboardEnv); err != nil {
+				t.Fatalf("Refresh() = %v", err)
+			}
+			if len(f.shell.detectSessions) != 0 {
+				t.Errorf("screen 検出を呼んでいる: %v", f.shell.detectSessions)
+			}
+		})
 	}
 }
 

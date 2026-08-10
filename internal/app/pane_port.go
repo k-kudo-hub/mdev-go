@@ -109,7 +109,10 @@ type ShellRunner interface {
 	RestoreSession()
 
 	// ScreenDetectTick は screen-detect-lib.sh の screen_detect_tick を呼ぶ。
-	// Dashboard の毎ポーリングの先頭で走らせる。省略すると screen 方式の
-	// エージェント(codex)のタスクが一覧に出てこない。
+	//
+	// Dashboard のポーリングの先頭で走らせる。設定に screen 方式のエージェント
+	// (codex)がある場合に限り毎回呼ぶ。呼ばないとそのエージェントのタスクが
+	// 一覧に出てこない。1 つも設定されていない場合は呼ばない
+	// (DashboardPane.Refresh を参照)。
 	ScreenDetectTick(session string)
 }
