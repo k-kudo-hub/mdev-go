@@ -4,10 +4,10 @@ package zellij
 
 import (
 	"context"
-	"os/exec"
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/proc"
 )
 
 // binaryName は呼び出す zellij の実行ファイル名。
@@ -54,11 +54,12 @@ func withTimeout(timeout time.Duration) func(name string, args ...string) error 
 }
 
 // runCommand は実際に外部コマンドを実行する。
-// timeout が正の値なら、その時間で子プロセスを切る。
+// timeout が正の値なら、その時間でプロセスグループごと切る
+// (直接の子だけを切ると孫が残る。internal/infra/proc を参照)。
 func runCommand(timeout time.Duration, name string, args ...string) error {
 	ctx, cancel := commandContext(timeout)
 	defer cancel()
-	return exec.CommandContext(ctx, name, args...).Run()
+	return proc.Command(ctx, name, args...).Run()
 }
 
 // commandContext は上限付きの context を返す。timeout が 0 以下なら上限なし。

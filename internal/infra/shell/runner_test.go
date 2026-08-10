@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -300,5 +302,71 @@ func TestRunCommandWithoutTimeoutRuns(t *testing.T) {
 	}
 	if strings.TrimSpace(out) != "ok" {
 		t.Errorf("出力 = %q, want ok", out)
+	}
+}
+
+// ---- 孫プロセスまで止まること ---------------------------------------------
+
+// grandchildScript は孫プロセスを 1 つ spawn して自分も待ち続ける bash の本文。
+//
+// $1 に孫の PID を書き出すファイルのパスを取る。孫は SIGTERM を無視し、待ち方も
+// 外部コマンド任せにしない(while ループ)ため、止めるにはプロセスグループ全体への
+// SIGKILL しか手が無い。実環境で起きたのは「screen-detect-lib.sh が spawn した
+// `zellij action` が上限で切られても生き残る」ことで、この形はその最小再現である。
+//
+// 孫の標準出力は /dev/null へ向ける。親の標準出力のパイプを孫が握る件は
+// internal/infra/proc の TestCommandDoesNotWaitForGrandchildHoldingStdout が扱う。
+const grandchildScript = `
+trap "" TERM
+bash -c 'trap "" TERM; echo $$ > "$1"; while :; do sleep 1; done' _ "$1" </dev/null >/dev/null 2>&1 &
+while :; do sleep 1; done
+`
+
+func TestRunCommandKillsGrandchildren(t *testing.T) {
+	t.Parallel()
+
+	// 上限で切るとき、直接の子(bash)だけでなく、その子が spawn した孫まで
+	// 止まらなければならない。生き残った孫は CPU を空転させ zellij サーバを
+	// 劣化させる(タブ遷移レースの増幅ループ)。
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	if _, err := runCommand(time.Second, nil, "bash", "-c", grandchildScript, "_", pidFile); err == nil {
+		t.Fatal("上限を超えたのにエラーが返っていない")
+	}
+
+	pid := readPID(t, pidFile)
+	if err := waitProcessGone(pid); err != nil {
+		t.Errorf("孫プロセス(pid %d)が生き残っている: %v", pid, err)
+	}
+}
+
+// readPID は pidFile に書かれた PID を読む。テストが失敗して孫が生き残った
+// 場合に備え、後始末で必ず SIGKILL を送る。
+func readPID(t *testing.T, pidFile string) int {
+	t.Helper()
+
+	b, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("孫の PID が書かれていない: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatalf("PID の解釈に失敗: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	return pid
+}
+
+// waitProcessGone は pid のプロセスが消えるまで待つ。消えなければエラーを返す。
+// シグナル 0 の kill は生存確認で、シグナルは送らない(`kill -0` と同じ)。
+func waitProcessGone(pid int) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return errors.New("5 秒待っても消えなかった")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

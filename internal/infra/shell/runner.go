@@ -9,12 +9,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/proc"
 )
 
 // scriptsDirName は CONDUCTOR_HOME 直下のスクリプト置き場。
@@ -135,8 +135,10 @@ func (r *Runner) ScreenDetectTick(session string) {
 // runCommand は外部コマンドを実行して標準出力を返す。
 // 標準エラー出力は捨てる(現行版の `2>/dev/null` に対応する)。
 //
-// timeout が正の値なら、その時間で子プロセスを切る(exec.CommandContext が
-// SIGKILL を送る)。切られた場合はエラーが返る。
+// timeout が正の値なら、その時間でプロセスグループごと切る。ここで呼ぶのは
+// bash スクリプトで、スクリプトはさらに `zellij action ...` を起こすため、
+// 直接の子だけを切ると孫が残ってしまう(internal/infra/proc を参照)。
+// 切られた場合はエラーが返る。
 func runCommand(timeout time.Duration, env []string, name string, args ...string) (string, error) {
 	ctx := context.Background()
 	if timeout > 0 {
@@ -144,7 +146,7 @@ func runCommand(timeout time.Duration, env []string, name string, args ...string
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := proc.Command(ctx, name, args...)
 	cmd.Env = env
 	out, err := cmd.Output()
 	return string(out), err
