@@ -111,6 +111,9 @@ func immediate(cmd tea.Cmd) tea.Msg {
 	}
 }
 
+// tickKey は 1 文字のキー押下メッセージを作る。
+func tickKey(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
+
 // update はモデルにメッセージを 1 つ渡し、進んだモデルとコマンドを返す。
 func update(t *testing.T, m tea.Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 	t.Helper()
@@ -549,6 +552,62 @@ func TestDashboardTickRefreshesAndRearms(t *testing.T) {
 	// その着弾が次の合図を張る。
 	_, cmd = m.Update(landed)
 	wantTimerOnly(t, cmd)
+}
+
+func TestDashboardIgnoresPromptTimeoutAfterNumberKey(t *testing.T) {
+	t.Parallel()
+
+	// d を押した時点で 3 秒の打ち切りタイマーが仕掛かる。2 打鍵目を押して削除へ
+	// 進んだ後にそれが発火しても、待ち受けはもう終わっているので無視しなければ
+	// ならない。無視しないと、削除の処理中に余計な読み直しが 1 本走る。
+	service := &tickDashboard{snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}}}
+	m := settledDashboard(t, service)
+	m.snapshot = service.snapshot
+
+	prompted, cmd := update(t, m, tickKey('d'))
+	if cmd == nil {
+		t.Fatal("待ち受けに入っていない")
+	}
+	// 2 打鍵目。削除の準備(record と upload)へ進む。
+	deleting, cmd := update(t, prompted, tickKey('1'))
+	if cmd == nil {
+		t.Fatal("削除の準備に進んでいない")
+	}
+
+	// d を押したときに仕掛けた世代(1)の打ち切りが遅れて着弾する。
+	_, cmd = update(t, deleting, promptExpiredMsg{token: 1})
+	if cmd != nil {
+		t.Errorf("削除の途中に %T を予約している", immediate(cmd))
+	}
+	if service.refreshes != 0 {
+		t.Errorf("削除の途中に読み直している: %d 回", service.refreshes)
+	}
+}
+
+func TestDoneIgnoresPromptTimeoutAfterNumberKey(t *testing.T) {
+	t.Parallel()
+
+	// Dashboard と同じ。restore へ進んだ後に古い打ち切りが発火しても集計しない。
+	service := &tickDone{snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1}}
+	m := settledDone(t, service)
+	m.snapshot = service.snapshot
+
+	prompted, cmd := update(t, m, tickKey('r'))
+	if cmd == nil {
+		t.Fatal("待ち受けに入っていない")
+	}
+	restoring, cmd := update(t, prompted, tickKey('1'))
+	if cmd == nil {
+		t.Fatal("restore に進んでいない")
+	}
+
+	_, cmd = update(t, restoring, promptExpiredMsg{token: 1})
+	if cmd != nil {
+		t.Errorf("restore の直後に %T を予約している", immediate(cmd))
+	}
+	if service.refreshes != 0 {
+		t.Errorf("restore の直後に集計している: %d 回", service.refreshes)
+	}
 }
 
 func TestDashboardTickIsFrozenWhileAwaiting(t *testing.T) {

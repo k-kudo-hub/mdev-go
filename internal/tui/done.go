@@ -106,7 +106,12 @@ func (m DoneModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	if m.awaiting {
 		// 凍結を解く。restore へ進まない分岐では、止めていた間の変化に
 		// 表示を追いつかせるため集計し直す。
+		//
+		// 世代を進めて、待ち受けに入るときに仕掛けた打ち切りのタイマーを
+		// 無効にする(Dashboard と同じ理由。進めないと restore の直後に
+		// 古い promptExpiredMsg が発火して余計な集計が走る)。
 		m.awaiting = false
+		m.token++
 		number, ok := keyIndex(key)
 		if !ok || number > m.snapshot.Count {
 			cmd := m.forceRefreshCmd()

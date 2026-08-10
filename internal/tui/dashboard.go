@@ -192,7 +192,14 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	if m.awaiting {
 		// 凍結を解く。削除へ進まない分岐では、止めていた間の変化に表示を
 		// 追いつかせるため読み直す。
+		//
+		// 世代を進めるのは、2 打鍵目を待つ間に仕掛けた打ち切りのタイマーを
+		// 無効にするためである。進めないと、削除の処理中(busy)に古い
+		// promptExpiredMsg が発火して余計な読み直しが走る。現行版の
+		// `read -t 3` はキーを受け取った時点で終わっており、その後に
+		// 時間切れが起きることはない。
 		m.awaiting = false
+		m.token++
 		number, ok := keyIndex(key)
 		if !ok {
 			cmd := m.forceRefreshCmd()
