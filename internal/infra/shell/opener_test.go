@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestOpenerPrefersOpenOverXdgOpen(t *testing.T) {
@@ -74,4 +75,27 @@ func TestOpenerIgnoresFailure(t *testing.T) {
 		run:      func(string, ...string) error { return errors.New("失敗") },
 	}
 	o.Open("https://example.com")
+}
+
+func TestRunOpenRunsRealCommand(t *testing.T) {
+	t.Parallel()
+
+	// 既定の実行関数が実プロセスを起動することを、確実に存在するコマンドと
+	// 存在しないコマンドで確認する。
+	if err := runOpen("true"); err != nil {
+		t.Errorf("runOpen(true) = %v, want nil", err)
+	}
+	if err := runOpen("mdev-no-such-command-for-test"); err == nil {
+		t.Error("存在しないコマンドで nil が返った")
+	}
+}
+
+func TestOpenTimeoutIsTenSeconds(t *testing.T) {
+	t.Parallel()
+
+	// `open` は即座に返るコマンドなので、10 秒かかる時点で異常である。
+	// 上限が無いと返らないコマンドが goroutine ごと mdev の終了まで残る。
+	if openTimeout != 10*time.Second {
+		t.Errorf("openTimeout = %v, want 10s", openTimeout)
+	}
 }

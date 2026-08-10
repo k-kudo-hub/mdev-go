@@ -302,3 +302,40 @@ func TestRunCommandWithoutTimeoutRuns(t *testing.T) {
 		t.Errorf("出力 = %q, want ok", out)
 	}
 }
+
+// ---- 起動方法の使い分け ---------------------------------------------------
+
+func TestCommandUsesProcessGroupOnlyWithTimeout(t *testing.T) {
+	t.Parallel()
+
+	// 上限つきの呼び出しは proc.Command を通す(プロセスグループごと切るため)。
+	// 孫まで止まることの実証は internal/infra/proc のテストが持つ。
+	// 上限なしの呼び出しは素の exec.Command のままにする。プロセスグループを
+	// 分けると端末が閉じたときの SIGHUP が子へ連鎖しなくなり、上限で自分から
+	// 片付く保証も無いまま残り続けるためである。
+	tests := []struct {
+		name       string
+		timeout    time.Duration
+		wantPgroup bool
+	}{
+		{name: "上限つきはプロセスグループを分ける", timeout: time.Second, wantPgroup: true},
+		{name: "上限なしは分けない", timeout: noTimeout, wantPgroup: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd, cancel := command(tt.timeout, "true")
+			defer cancel()
+
+			gotPgroup := cmd.SysProcAttr != nil && cmd.SysProcAttr.Setpgid
+			if gotPgroup != tt.wantPgroup {
+				t.Errorf("Setpgid = %v, want %v", gotPgroup, tt.wantPgroup)
+			}
+			if got := cmd.Cancel != nil; got != tt.wantPgroup {
+				t.Errorf("Cancel の差し替え = %v, want %v", got, tt.wantPgroup)
+			}
+		})
+	}
+}

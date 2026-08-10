@@ -112,3 +112,38 @@ func TestCommandTimeoutIsTenSeconds(t *testing.T) {
 		t.Errorf("commandTimeout = %v, want 10s", commandTimeout)
 	}
 }
+
+// ---- 起動方法の使い分け ---------------------------------------------------
+
+func TestCommandUsesProcessGroupOnlyWithTimeout(t *testing.T) {
+	t.Parallel()
+
+	// 上限つきの呼び出しは proc.Command を通す(プロセスグループごと切るため)。
+	// 孫まで止まることの実証は internal/infra/proc のテストが持つ。
+	// zellij CLI はすべて上限つきなので、実際に通るのは上の枝だけである。
+	tests := []struct {
+		name       string
+		timeout    time.Duration
+		wantPgroup bool
+	}{
+		{name: "上限つきはプロセスグループを分ける", timeout: commandTimeout, wantPgroup: true},
+		{name: "上限なしは分けない", timeout: 0, wantPgroup: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd, cancel := command(tt.timeout, "true")
+			defer cancel()
+
+			gotPgroup := cmd.SysProcAttr != nil && cmd.SysProcAttr.Setpgid
+			if gotPgroup != tt.wantPgroup {
+				t.Errorf("Setpgid = %v, want %v", gotPgroup, tt.wantPgroup)
+			}
+			if got := cmd.Cancel != nil; got != tt.wantPgroup {
+				t.Errorf("Cancel の差し替え = %v, want %v", got, tt.wantPgroup)
+			}
+		})
+	}
+}

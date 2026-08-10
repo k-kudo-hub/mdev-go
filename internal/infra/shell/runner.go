@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/proc"
 )
 
 // scriptsDirName は CONDUCTOR_HOME 直下のスクリプト置き場。
@@ -134,18 +135,30 @@ func (r *Runner) ScreenDetectTick(session string) {
 
 // runCommand は外部コマンドを実行して標準出力を返す。
 // 標準エラー出力は捨てる(現行版の `2>/dev/null` に対応する)。
-//
-// timeout が正の値なら、その時間で子プロセスを切る(exec.CommandContext が
-// SIGKILL を送る)。切られた場合はエラーが返る。
+// 上限で切られた場合はエラーが返る。
 func runCommand(timeout time.Duration, env []string, name string, args ...string) (string, error) {
-	ctx := context.Background()
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd, cancel := command(timeout, name, args...)
+	defer cancel()
 	cmd.Env = env
 	out, err := cmd.Output()
 	return string(out), err
+}
+
+// command は timeout の有無で起動方法を変えた exec.Cmd を返す。
+//
+// timeout が正の値なら proc.Command を使い、その時間でプロセスグループごと切る。
+// ここで呼ぶのは bash スクリプトで、スクリプトはさらに `zellij action ...` を
+// 起こすため、直接の子だけを切ると孫が残ってしまう(internal/infra/proc を参照)。
+//
+// timeout が無いときは素の exec.Command を使う。プロセスグループを分けると、
+// 端末が閉じたときにカーネルが送る SIGHUP が子へ連鎖しなくなるためである。
+// 上限のある呼び出しは高々その上限で自分から片付くが、上限の無い呼び出し
+// (UploadLog / RestoreTask / FetchNews)は連鎖が切れると端末が消えた後も
+// 残り続ける。
+func command(timeout time.Duration, name string, args ...string) (*exec.Cmd, context.CancelFunc) {
+	if timeout <= 0 {
+		return exec.Command(name, args...), func() {}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return proc.Command(ctx, name, args...), cancel
 }
