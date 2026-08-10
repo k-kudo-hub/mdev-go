@@ -45,6 +45,46 @@ func tickCmd(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// refreshGate は読み直しを逐次化する 4 ペイン共通の仕組みである。
+//
+// 前回の読み直し(コマンドの発行から *RefreshedMsg の着弾まで)が終わるまで、
+// tick では次の読み直しを発行しない。Dashboard の 1 回の読み直しは zellij の
+// CLI(スクリーン検出の list-panes と list-tabs)を呼ぶため実測で 1 秒以上
+// かかることがあり、間隔(2 秒)より遅れると呼び出しが重なって zellij サーバを
+// 圧迫する。現行 Shell 版は「処理 → sleep 2」の逐次実行なので遅い回は周期が
+// 自動で伸びる。その自己抑制をここで取り戻す。
+//
+// ゼロ値は「実行中ではない」である。ただし各ペインの New*Model は実行中で
+// 始める。Init が必ず 1 回目の読み直しを発行するのに対し、Init は値レシーバで
+// モデルを書き換えられず、そこで印を立てられないためである。
+type refreshGate struct {
+	// inFlight は発行済みでまだ着弾していない読み直しがあることを表す。
+	inFlight bool
+}
+
+// take は読み直しを発行してよいかを返す。発行できるときは印を立てる。
+// ポーリング(tickMsg)だけが使う。
+func (g *refreshGate) take() bool {
+	if g.inFlight {
+		return false
+	}
+	g.inFlight = true
+	return true
+}
+
+// force は完了を待たずに読み直しを発行するときに印を立てる。
+//
+// キー操作と削除・取得の後始末が使う。利用者の操作に対する反応は遅らせずに
+// 出したいので、実行中でも発行する(そのぶん重なるのは押した瞬間だけである)。
+func (g *refreshGate) force() { g.inFlight = true }
+
+// release は読み直しの着弾で印を下ろす。
+//
+// 呼ぶのは *RefreshedMsg のハンドラの先頭だけである。エラーで返ってきた場合も、
+// 待ち受け中で内容を捨てる場合も必ず通す。下ろし忘れるとポーリングが二度と
+// 読み直さなくなる。
+func (g *refreshGate) release() { g.inFlight = false }
+
 // promptExpiredMsg は 2 打鍵目の待ち受けが時間切れになったことを表す。
 // token は世代番号で、待ち受けをやり直した後に古いタイマーが効かないようにする。
 type promptExpiredMsg struct{ token int }

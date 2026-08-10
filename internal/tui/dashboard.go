@@ -55,6 +55,8 @@ type DashboardModel struct {
 	notice string
 	// busy は削除の処理中で、ポーリングによる再描画を止める状態。
 	busy bool
+	// gate は読み直しの逐次化。前回が着弾するまでポーリングで重ねて出さない。
+	gate refreshGate
 }
 
 var (
@@ -63,8 +65,11 @@ var (
 )
 
 // NewDashboardModel は Dashboard のモデルを作る。
+//
+// 逐次化の印は実行中で始める。Init が最初の読み直しを必ず発行するためで、
+// これがないと起動直後の 1 回だけがガードの外へ漏れる(refreshGate を参照)。
 func NewDashboardModel(pane DashboardService, env app.PaneEnv) DashboardModel {
-	return DashboardModel{pane: pane, env: env}
+	return DashboardModel{pane: pane, env: env, gate: refreshGate{inFlight: true}}
 }
 
 // Init は起動時の復元と最初の一覧の組み立てを行い、ポーリングを開始する。
@@ -105,6 +110,9 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg.String())
 
 	case dashboardRefreshedMsg:
+		// 発行した読み直しが 1 つ片付いた。内容を使うかどうかに関わらず、
+		// また失敗していても、逐次化の印はここで必ず下ろす。
+		m.gate.release()
 		if m.awaiting {
 			// 待ち受けに入る前に発行した読み直しが着弾した。ここで一覧を
 			// 差し替えると押した番号が別のタブを指すため、捨てる。
@@ -127,13 +135,18 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 動かない。同じ意味になるようポーリングだけを空回りさせる。
 			return m, tickCmd(DashboardInterval)
 		}
+		if !m.gate.take() {
+			// 前回の読み直しがまだ着弾していない。重ねて発行せず、次の合図
+			// だけを予約する(遅い回はそのぶん周期が伸びる)。
+			return m, tickCmd(DashboardInterval)
+		}
 		return m, tea.Batch(m.refreshCmd(), tickCmd(DashboardInterval))
 
 	case promptExpiredMsg:
 		if msg.token == m.token {
 			// 凍結を解いて、止めていた間の変化に表示を追いつかせる。
 			m.awaiting = false
-			return m, m.refreshCmd()
+			return m, m.forceRefreshCmd()
 		}
 		return m, nil
 
@@ -154,12 +167,12 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, noticeCmd(m.token)
 		}
 		m.busy, m.notice = false, ""
-		return m, m.refreshCmd()
+		return m, m.forceRefreshCmd()
 
 	case noticeExpiredMsg:
 		if msg.token == m.token {
 			m.busy, m.notice = false, ""
-			return m, m.refreshCmd()
+			return m, m.forceRefreshCmd()
 		}
 		return m, nil
 	}
@@ -182,11 +195,11 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		m.awaiting = false
 		number, ok := keyIndex(key)
 		if !ok {
-			return m, m.refreshCmd()
+			return m, m.forceRefreshCmd()
 		}
 		if number > len(m.snapshot.Tabs) {
 			// 範囲外の番号は何もしない(現行版も同じ)。
-			return m, m.refreshCmd()
+			return m, m.forceRefreshCmd()
 		}
 		tab := m.snapshot.Tabs[number-1]
 		m.busy, m.notice = true, uploadingLabel
@@ -210,6 +223,8 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	snapshot := m.snapshot
+	// このコマンドも最後に dashboardRefreshedMsg を返すので、逐次化の印を立てる。
+	m.gate.force()
 	return m, func() tea.Msg {
 		if err := m.pane.Jump(m.env, snapshot, number); err != nil {
 			return dashboardRefreshedMsg{snapshot: snapshot, err: err}
@@ -248,6 +263,15 @@ func (m DashboardModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cm
 	return m, tea.Tick(noticeDuration, func(time.Time) tea.Msg {
 		return commitDeleteMsg{tab: tab}
 	})
+}
+
+// forceRefreshCmd は逐次化の印を立ててから読み直しのコマンドを返す。
+//
+// キー操作と後始末(削除の完了・通知の期限切れ)が使う。利用者の操作への
+// 反応は前回の完了を待たずに出す(refreshGate.force を参照)。
+func (m *DashboardModel) forceRefreshCmd() tea.Cmd {
+	m.gate.force()
+	return m.refreshCmd()
 }
 
 // refreshCmd は一覧を組み立て直す。
