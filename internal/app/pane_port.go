@@ -76,8 +76,13 @@ type NewsReader interface {
 // 読めなかった場合もエラーを返さずゼロ値を返す。現行版が
 // `jq ... 2>/dev/null` で失敗を握り潰し、検出方式を既定の "hooks" に
 // 落としているのに合わせている。
+//
+// ok は設定を実際に読めたかどうかである。ゼロ値の設定は「エージェントが 1 つも
+// 設定されていない」とも「設定が読めなかった」とも取れるが、この 2 つは判断が
+// 逆になる場面がある(DashboardPane.Refresh のスクリーン検出)。読めなかった
+// ことを黙って「無い」と扱わないよう、区別して返す。
 type ConfigLoader interface {
-	Load() domain.Config
+	Load() (config domain.Config, ok bool)
 }
 
 // URLOpener は既定のブラウザで URL を開く。

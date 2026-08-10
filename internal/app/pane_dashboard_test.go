@@ -161,6 +161,24 @@ func TestDashboardPaneRefreshSkipsScreenDetectionWithoutScreenAgent(t *testing.T
 	}
 }
 
+func TestDashboardPaneRefreshRunsScreenDetectionWhenConfigIsUnreadable(t *testing.T) {
+	t.Parallel()
+
+	// 設定が読めなかったとき(ファイルが無い・JSON が壊れている)は、screen 方式が
+	// 設定されているかどうか分からない。ここで検出を止めると、codex を使っている
+	// 利用者のタスクが原因の分からないまま一覧から消える。負荷より表示を優先し、
+	// 従来どおり走らせる。
+	f := newDashboardFixture(nil, "ID POS NAME\n")
+	f.config.failed = true
+
+	if _, err := f.pane.Refresh(dashboardEnv); err != nil {
+		t.Fatalf("Refresh() = %v", err)
+	}
+	if want := []string{"s1"}; !reflect.DeepEqual(f.shell.detectSessions, want) {
+		t.Errorf("screen_detect_tick の呼び出し = %v, want %v", f.shell.detectSessions, want)
+	}
+}
+
 func TestDashboardPaneRefreshUsesUnknownSessionWhenOutsideZellij(t *testing.T) {
 	t.Parallel()
 

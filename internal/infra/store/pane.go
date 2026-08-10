@@ -167,15 +167,23 @@ func (s *PaneStore) Read(date string) []byte {
 	return b
 }
 
-// Load は設定を読む。読めなければゼロ値を返す。
+// Load は設定を読む。読めなければゼロ値と ok=false を返す。
 //
 // 現行 task-lib.sh の agent_detection は `jq ... 2>/dev/null` で失敗を握り潰し、
 // 検出方式を既定の "hooks" に落とす。設定が壊れていても画面が出なくなるより
 // マシなので、その扱いに合わせている。
-func (s *PaneStore) Load() domain.Config {
+//
+// ok が false になるのは「設定ファイルが 1 つも無い」場合と「JSON が壊れて
+// いる」場合である。どちらも中身が分からない状態で、ゼロ値の設定(= エージェント
+// が 1 つも無い)と区別できないと、呼び出し側が「screen 方式は設定されていない」
+// と誤って判断してしまう(app.ConfigLoader を参照)。
+func (s *PaneStore) Load() (domain.Config, bool) {
+	if _, err := os.Stat(ConfigPath(s.conductorHome)); err != nil {
+		return domain.Config{}, false
+	}
 	config, err := LoadConfig(s.conductorHome)
 	if err != nil {
-		return domain.Config{}
+		return domain.Config{}, false
 	}
-	return config
+	return config, true
 }

@@ -196,7 +196,11 @@ func TestPaneStoreLoadConfig(t *testing.T) {
 	writePaneFile(t, filepath.Join(conductorHome, "config.json"),
 		`{"agents":{"codex":{"detection":"screen"}}}`)
 
-	if got := s.Load().AgentDetection("codex"); got != "screen" {
+	config, ok := s.Load()
+	if !ok {
+		t.Fatal("読めた設定なのに ok=false が返った")
+	}
+	if got := config.AgentDetection("codex"); got != "screen" {
 		t.Errorf("AgentDetection() = %q, want screen", got)
 	}
 }
@@ -205,10 +209,32 @@ func TestPaneStoreLoadBrokenConfigFallsBackToHooks(t *testing.T) {
 	t.Parallel()
 
 	// 設定が壊れていても画面が出なくなるより既定へ落ちるほうがよい。
+	// ただし「読めなかった」ことは ok で伝える。中身が分からない状態を
+	// 「エージェントが 1 つも無い」と取り違えさせないためである。
 	s, _, conductorHome := newPaneStore(t)
 	writePaneFile(t, filepath.Join(conductorHome, "config.json"), `{broken`)
 
-	if got := s.Load().AgentDetection("codex"); got != "hooks" {
+	config, ok := s.Load()
+	if ok {
+		t.Error("壊れた設定なのに ok=true が返った")
+	}
+	if got := config.AgentDetection("codex"); got != "hooks" {
 		t.Errorf("AgentDetection() = %q, want hooks", got)
+	}
+}
+
+func TestPaneStoreLoadWithoutConfigFileReportsNotOK(t *testing.T) {
+	t.Parallel()
+
+	// config.json も config.default.json も無い(CONDUCTOR_HOME の指し先が
+	// 違うなど)。設定が空なのか読めないのか区別が付かないので ok=false にする。
+	s, _, _ := newPaneStore(t)
+
+	config, ok := s.Load()
+	if ok {
+		t.Error("設定ファイルが無いのに ok=true が返った")
+	}
+	if len(config.Agents) != 0 {
+		t.Errorf("agents = %v, want 空", config.Agents)
 	}
 }
