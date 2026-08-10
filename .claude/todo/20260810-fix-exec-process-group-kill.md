@@ -40,6 +40,17 @@ PR #6 で外部コマンドに `exec.CommandContext` の実行時間上限を付
 - [x] evidence(`.claude/todo/20260810-pgkill-evidence.md`)に赤→緑の記録を残す
 - [x] `make check` 緑
 
+## コードレビュー指摘への対応(4 件)
+
+- [x] 指摘 1: Cancel の PID 使い回しガード(生の kill の前に os.Process 越しの
+      シグナル 0 を通す。根拠は os/exec_unix.go の pidWait のコメント)
+- [x] 指摘 2: Setpgid を上限のある経路に限定し、上限なし経路は素の exec.Command に
+      戻す(端末が閉じたときの SIGHUP 連鎖を保つ)。方針を proc のドキュメントに明記
+- [x] 指摘 3: runOpen に 10 秒の上限を付けて proc.Command へ移す
+- [x] 指摘 4: テストヘルパの三重複を解消(実プロセスの証明は proc に集約し、
+      shell / zellij は proc.Command を通していることの軽量な確認に置き換える)
+- [x] evidence に対応記録と REFUTED 3 件の要旨を追記
+
 ## 完了条件
 
 - タイムアウトを持つ全経路で、孫プロセスがタイムアウト後に消えることがテストで固定されている
