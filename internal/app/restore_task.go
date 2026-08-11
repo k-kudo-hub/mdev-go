@@ -20,7 +20,7 @@ var (
 	// (dir を記録する前の古いエントリ。現行版の exit 2)。
 	ErrRestoreDirUnknown = errors.New("エントリに作業ディレクトリが記録されていません")
 	// ErrRestoreDirMissing は記録された作業ディレクトリが消えている
-	// (閉じた worktree など。現行版の exit 3)。
+	// (閉じた worktree が該当する。現行版の exit 3)。
 	ErrRestoreDirMissing = errors.New("記録された作業ディレクトリがありません")
 	// ErrRestoreTabFailed はタブそのものを作れなかった(現行版の exit 4)。
 	ErrRestoreTabFailed = errors.New("タブを作り直せませんでした")

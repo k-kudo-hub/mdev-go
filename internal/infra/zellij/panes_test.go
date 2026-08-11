@@ -102,7 +102,7 @@ func TestTabControllerDumpScreen(t *testing.T) {
 func TestTabControllerDumpScreenReturnsEmptyOnFailure(t *testing.T) {
 	t.Parallel()
 
-	// ハングして打ち切られた場合など。呼び出し側はこのペインを飛ばす。
+	// ハングして打ち切られた場合。呼び出し側はこのペインを飛ばす。
 	c := &TabController{output: func(time.Duration, string, ...string) (string, error) { return "", errStub }}
 	if out := c.DumpScreen("5"); out != "" {
 		t.Errorf("DumpScreen() = %q, want 空", out)

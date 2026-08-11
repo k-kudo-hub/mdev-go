@@ -18,7 +18,7 @@ const (
 	ScreenBlocked = "blocked"
 	// ScreenWorking はターンが進行中の画面(スピナー行がある)。
 	ScreenWorking = "working"
-	// ScreenIdle は上のどれでもない画面。ターンの終わりかもしれない。
+	// ScreenIdle は上のどれでもない画面。ターンが終わった画面もここに入る。
 	ScreenIdle = "idle"
 	// ScreenIdlePending は idle を 1 度観測したが確定させていない内部状態。
 	// 分類の結果としては現れず、状態ファイルにだけ書かれる。

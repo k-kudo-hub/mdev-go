@@ -26,7 +26,7 @@ var taskAgentPattern = regexp.MustCompile(taskAgentMarker + `([^ ]+)`)
 type paneJSON struct {
 	// ID は数値。現行版は `.id | tostring` で文字列にしている。
 	ID json.Number `json:"id"`
-	// IsPlugin はタブバーなどのプラグインペインかどうか。
+	// IsPlugin はプラグインペイン(タブバー・ステータスバー)かどうか。
 	IsPlugin bool `json:"is_plugin"`
 	// TabName は所属するタブ名。
 	TabName string `json:"tab_name"`

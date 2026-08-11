@@ -227,7 +227,7 @@ func TestPaneStoreLoadWithoutConfigFileReportsNotOK(t *testing.T) {
 	t.Parallel()
 
 	// config.json も config.default.json も無い(CONDUCTOR_HOME の指し先が
-	// 違うなど)。設定が空なのか読めないのか区別が付かないので ok=false にする。
+	// 違う)。設定が空なのか読めないのか区別が付かないので ok=false にする。
 	s, _, _ := newPaneStore(t)
 
 	config, ok := s.Load()

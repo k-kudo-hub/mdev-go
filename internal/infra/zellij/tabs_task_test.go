@@ -232,7 +232,7 @@ func TestTabControllerReturnsRunError(t *testing.T) {
 func TestTabControllerCloseActiveTabIgnoresFailure(t *testing.T) {
 	t.Parallel()
 
-	// 既に閉じられている場合など。削除フローとしては進んでよい。
+	// 既に閉じられているタブを指した場合。削除フローとしては進んでよい。
 	r := &recorder{err: errors.New("失敗")}
 	r.controller().CloseActiveTab()
 }

@@ -66,7 +66,7 @@ type ScreenEffect struct {
 	// 対象にする pending のファイル名。
 	Name string
 	// Event / Message は ScreenEffectWritePending で書く内容。
-	// 残りのフィールド(dir / task_type / transcript_path など)は
+	// 残りのフィールド(dir / task_type / transcript_path)は
 	// ユースケースがレジストリから借りて埋める。
 	Event   string
 	Message string

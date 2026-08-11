@@ -193,7 +193,7 @@ func key(r rune) tea.KeyPressMsg {
 // content はモデルの描画結果を文字列で返す。
 func content(m tea.Model) string { return m.View().Content }
 
-// specialKey は名前付きのキー押下メッセージを作る(esc / enter / ↑ など)。
+// specialKey は名前付きのキー押下メッセージを作る(esc / enter / ↑)。
 func specialKey(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
 
 // ctrlKey は Ctrl 修飾つきのキー押下メッセージを作る。

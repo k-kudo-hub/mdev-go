@@ -33,7 +33,7 @@ func TestTabControllerListTabs(t *testing.T) {
 func TestTabControllerListTabsReturnsEmptyOnFailure(t *testing.T) {
 	t.Parallel()
 
-	// zellij の外で動いた場合など。タブが 1 つも無い扱いになる。
+	// zellij の外で動いた場合。タブが 1 つも無い扱いになる。
 	c := &TabController{output: func(time.Duration, string, ...string) (string, error) { return "", errStub }}
 	if out := c.ListTabs(); out != "" {
 		t.Errorf("ListTabs() = %q, want 空", out)
@@ -61,7 +61,7 @@ func TestTabControllerCloseTabByID(t *testing.T) {
 func TestTabControllerCloseTabByIDIgnoresFailure(t *testing.T) {
 	t.Parallel()
 
-	// 既に閉じられている場合など。削除フローとしては進んでよい。
+	// 既に閉じられているタブを指した場合。削除フローとしては進んでよい。
 	c := &TabController{run: func(time.Duration, string, ...string) error { return errors.New("失敗") }}
 	c.CloseTabByID("7")
 }

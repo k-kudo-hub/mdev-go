@@ -45,7 +45,7 @@ func NewTabController() *TabController {
 //
 // 解釈しないのは、タブ名の取り出し(3 列目)と id の解決(先頭 2 列を落とす)で
 // 規則が違い、その非対称ごと domain の純粋関数で再現しているためである。
-// zellij の外で動いた場合などコマンドが失敗したときは空文字を返す
+// zellij の外で動いた場合のようにコマンドが失敗したときは空文字を返す
 // (現行版も `2>/dev/null` で握り潰し、タブが 1 つも無い扱いにしている)。
 func (c *TabController) ListTabs() string {
 	// 失敗は空文字に潰す(タブが 1 つも無い扱い)。
@@ -55,7 +55,7 @@ func (c *TabController) ListTabs() string {
 
 // CloseTabByID は id のタブを閉じる。
 //
-// 失敗しても何も返さない。既に閉じられている場合などが該当し、いずれも
+// 失敗しても何も返さない。既に閉じられているタブを指した場合が該当し、
 // 削除フローとしては進んでよい状態である(現行版も `2>/dev/null`)。
 func (c *TabController) CloseTabByID(id string) {
 	_ = c.run(commandTimeout, binaryName, "action", "close-tab-by-id", id)
@@ -64,7 +64,7 @@ func (c *TabController) CloseTabByID(id string) {
 // CloseActiveTab は今フォーカスしているタブを閉じる。
 //
 // task-control が id を引けなかったときのフォールバックである。id で閉じるのが
-// 本筋で(同期アップロードの間に別のタブへ移っている可能性がある)、こちらは
+// 本筋で(同期アップロードの間に別のタブへ移っていることがある)、こちらは
 // 「何も閉じられないよりはまし」という位置づけである。
 func (c *TabController) CloseActiveTab() {
 	_ = c.run(commandTimeout, binaryName, "action", "close-tab")

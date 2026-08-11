@@ -48,7 +48,7 @@ var _ app.ShellRunner = (*Runner)(nil)
 //
 // 子プロセスには呼び出し元の環境をそのまま渡したうえで CONDUCTOR_HOME を
 // 上書きする。スクリプト側も `${CONDUCTOR_HOME:-$HOME/.claude-conductor}` で
-// 同じ既定を持つが、mdev 側が別の値に解決している場合(worktree での試験など)に
+// 同じ既定を持つが、mdev 側が別の値に解決している場合(worktree での試験)に
 // 食い違わないよう明示する。ZELLIJ_SESSION_NAME は継承されたものをそのまま使う。
 func NewRunner(conductorHome string) *Runner {
 	return &Runner{

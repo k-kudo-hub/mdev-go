@@ -279,7 +279,8 @@ func TestDecideScreenLifecycle(t *testing.T) {
 		what string
 		obs  domain.ScreenObservation
 		now  int64
-		// setup は観測の前に外から置かれる pending(notify 由来など)。
+		// setup は観測の前に外から置かれる pending(notify 由来の Stop や
+		// Waiting の退避)。
 		setup func(*screenSim)
 		want  []string
 	}
