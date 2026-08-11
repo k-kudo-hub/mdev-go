@@ -21,7 +21,7 @@ var (
 	_ app.NewsReader         = (*fakeNewsReader)(nil)
 	_ app.ConfigLoader       = (*fakeConfigLoader)(nil)
 	_ app.URLOpener          = (*fakeURLOpener)(nil)
-	_ app.ShellRunner        = (*fakeShellRunner)(nil)
+	_ app.NewsFetcher        = (*fakeNewsFetcher)(nil)
 	_ app.LogUploadRunner    = (*fakeLogUploader)(nil)
 	_ app.Focuser            = (*fakePaneFocuser)(nil)
 )
@@ -180,15 +180,20 @@ func (f *fakePaneFocuser) FocusTab(name string) error {
 	return nil
 }
 
-type fakeShellRunner struct {
+type fakeNewsFetcher struct {
 	journal *paneJournal
 
 	fetchNewsCalls int
+	// dates は FetchNews に渡された日付。
+	dates []string
 }
 
-func (f *fakeShellRunner) FetchNews() {
+func (f *fakeNewsFetcher) FetchNews(date string) {
 	f.fetchNewsCalls++
-	f.journal.add("fetch-news")
+	f.dates = append(f.dates, date)
+	if f.journal != nil {
+		f.journal.add("fetch-news")
+	}
 }
 
 // fakeLogUploader は作業ログのアップロードの代役である。

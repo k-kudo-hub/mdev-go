@@ -240,11 +240,13 @@ type URLOpener interface {
 	Open(url string)
 }
 
-// ShellRunner は移行期に Shell のまま残るスクリプトを呼ぶ。
+// NewsFetcher は当日のニュースを取り直す。
 //
-// フェーズ 5 で Go 化する予定で、それまでは env
-// (ZELLIJ_SESSION_NAME / CONDUCTOR_HOME)を引き継いだ同期呼び出しにする。
-type ShellRunner interface {
-	// FetchNews は fetch-news.sh --force を同期で呼ぶ。
-	FetchNews()
+// **失敗しても何も返さない。** ニュースは無くても作業は進むため、取得の
+// 失敗で画面が止まるより、前の内容がそのまま残るほうがよい(現行版も
+// すべての失敗経路で黙って exit 0 する)。
+type NewsFetcher interface {
+	// FetchNews は date(YYYY-MM-DD)のニュースを取り直す。同期で走らせ、
+	// 終わってから次の描画で新しい内容が出る。
+	FetchNews(date string)
 }

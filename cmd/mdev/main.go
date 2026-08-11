@@ -12,6 +12,7 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/cli"
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/git"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/news"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/shell"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/zellij"
@@ -78,7 +79,6 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	// 同期で呼ぶ。
 	paneStore := store.NewPaneStore(store.PendingRoot(home), conductorHome)
 	tabs := zellij.NewTabController()
-	runner := shell.NewRunner(conductorHome)
 	binary := store.NewMdevBinaryStore(conductorHome)
 	registry := store.NewRegistryStore(store.RegistryRoot(conductorHome))
 
@@ -165,10 +165,10 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Waiting: &app.WaitingPane{Pending: paneStore},
 		Done:    &app.DonePane{Daily: paneStore, Restorer: taskRestorer, Clock: clock},
 		News: &app.NewsPane{
-			News:   paneStore,
-			Shell:  runner,
-			Opener: shell.NewOpener(),
-			Clock:  clock,
+			News:    paneStore,
+			Fetcher: news.NewFetcher(conductorHome),
+			Opener:  shell.NewOpener(),
+			Clock:   clock,
 		},
 		TaskCreate: &app.TaskCreatePane{
 			Config:  paneStore,

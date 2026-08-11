@@ -1,10 +1,18 @@
+// Package shell は外部コマンドの呼び出しを担当する。
+// internal/app が定義する port の実装(adapter)である(ADR-0002)。
+//
+// ここにあるのは conductor が管理しないコマンド(URL を開く `open` と
+// 要約に使う `claude`)で、Shell スクリプトの呼び出しはフェーズ 5 で
+// すべて Go 実装へ置き換えた。
 package shell
 
 import (
+	"context"
 	"os/exec"
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/proc"
 )
 
 // openCommands は URL を開くコマンドの候補。先に見つかったものを使う
@@ -51,11 +59,12 @@ func (o *Opener) Open(url string) {
 
 // runOpen は実際に外部コマンドを実行する。
 //
-// 上限を持つので runCommand と同じくプロセスグループごと切る(command を参照)。
-// 上限に達したときに道連れになるのは `open` 自身とその子孫だけで、開いた
-// ブラウザは launchd の下にあるため巻き込まれない。
+// 上限で打ち切るときはプロセスグループごと切る(internal/infra/proc を参照)。
+// `open` はさらに別のプロセスを起こすため、直接の子だけを切ると孫が残る。
+// 道連れになるのは `open` 自身とその子孫だけで、開いたブラウザは launchd の
+// 下にあるため巻き込まれない。
 func runOpen(name string, args ...string) error {
-	cmd, cancel := command(openTimeout, name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
 	defer cancel()
-	return cmd.Run()
+	return proc.Command(ctx, name, args...).Run()
 }
