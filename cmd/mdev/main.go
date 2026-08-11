@@ -11,6 +11,7 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/cli"
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/git"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/shell"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/zellij"
@@ -73,8 +74,8 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 
 	// ダッシュボード系 4 ペイン。pending はホーム直下、daily とニュースは
 	// CONDUCTOR_HOME 配下という置き場所の違いを PaneStore がそのまま持つ。
-	// upload-log / restore-task / fetch-news はまだ Shell のままで、
-	// shell.Runner が env を引き継いで同期で呼ぶ。
+	// fetch-news はまだ Shell のままで、shell.Runner が env を引き継いで
+	// 同期で呼ぶ。
 	paneStore := store.NewPaneStore(store.PendingRoot(home), conductorHome)
 	tabs := zellij.NewTabController()
 	runner := shell.NewRunner(conductorHome)
@@ -133,6 +134,19 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Paths:   paneStore,
 	}
 
+	// 作業ログのアップロード(dd / d+番号 の前半)。要約は claude CLI、push は
+	// git バイナリで、どちらも上限を設けない。失敗すると呼び出し側がタブの
+	// 削除を中止する(作業ログを失わないための契約)。
+	uploader := &app.LogUploader{
+		Config:     paneStore,
+		Pending:    pending,
+		Transcript: store.NewTranscriptStore(),
+		Daily:      store.NewDailyStore(store.DailyRoot(conductorHome), nil),
+		Summarizer: shell.NewSummaryGenerator(),
+		Pusher:     git.NewLogRepository(conductorHome),
+		Clock:      clock,
+	}
+
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
 			Pending:     paneStore,
@@ -146,7 +160,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Recorder:    record,
 			Detector:    detector,
 			Restorer:    restorer,
-			Shell:       runner,
+			Uploader:    uploader,
 		},
 		Waiting: &app.WaitingPane{Pending: paneStore},
 		Done:    &app.DonePane{Daily: paneStore, Restorer: taskRestorer, Clock: clock},
@@ -173,7 +187,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 				Tabs:        tabs,
 				Closer:      tabs,
 				Recorder:    record,
-				Shell:       runner,
+				Uploader:    uploader,
 				// 自分のタブの中で動いているので、id が引けなければ
 				// 「今のタブ」を閉じてよい(Dashboard との非対称)。
 				CloseActiveOnMissingID: true,

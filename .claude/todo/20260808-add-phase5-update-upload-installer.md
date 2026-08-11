@@ -21,7 +21,7 @@ Shell 版に残る upload-log / fetch-news / update 系を Go 化し、ShellRunn
 - [x] infra/git: LogRepository のテスト+実装(upload-cache 永続 clone・fetch 成否で checkout -B 分岐・同一内容 no-op・chore: add work log メッセージ・-c user.email/name)
 - [x] infra/shell: SummaryGenerator を実装(claude -p を stdin 渡し・タイムアウト無し・モデル指定なし)
 - [x] app: LogUploader usecase のテスト+実装(スキップ=("",nil) / 失敗=err の契約、マスク 2 回適用の不変条件)
-- [ ] app: TaskDeleter.Prepare を LogUploader に接続し ShellRunner.UploadLog を削除
+- [x] app: TaskDeleter.Prepare を LogUploader に接続し ShellRunner.UploadLog を削除
 
 ### B. fetch-news の Go 化(ShellRunner 消滅)
 

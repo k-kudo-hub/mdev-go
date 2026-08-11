@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,57 +29,6 @@ func newTestRunner(out string, err error) (*Runner, *[]recordedCall) {
 	return r, calls
 }
 
-func TestRunnerUploadLogStripsPrefix(t *testing.T) {
-	t.Parallel()
-
-	// 現行版の `${upload_out#upload-log: }` と同じく印を外して返す。
-	r, calls := newTestRunner("upload-log: https://example.com/log/1\n", nil)
-
-	out, err := r.UploadLog("alpha")
-	if err != nil {
-		t.Fatalf("UploadLog() = %v", err)
-	}
-	if out != "https://example.com/log/1" {
-		t.Errorf("UploadLog() = %q, want URL のみ", out)
-	}
-
-	want := []string{"/ch/scripts/upload-log.sh", "alpha"}
-	if !reflect.DeepEqual((*calls)[0].args, want) {
-		t.Errorf("引数 = %v, want %v", (*calls)[0].args, want)
-	}
-	if (*calls)[0].name != "bash" {
-		t.Errorf("コマンド = %q, want bash", (*calls)[0].name)
-	}
-}
-
-func TestRunnerUploadLogWithoutPrefix(t *testing.T) {
-	t.Parallel()
-
-	// 印が付いていない出力はそのまま返す(TrimPrefix は一致しなければ無変換)。
-	r, _ := newTestRunner("plain output\n", nil)
-	out, err := r.UploadLog("alpha")
-	if err != nil {
-		t.Fatalf("UploadLog() = %v", err)
-	}
-	if out != "plain output" {
-		t.Errorf("UploadLog() = %q", out)
-	}
-}
-
-func TestRunnerUploadLogReturnsErrorOnFailure(t *testing.T) {
-	t.Parallel()
-
-	// 非 0 終了は削除を中止させるためのエラーとして返す。
-	r, _ := newTestRunner("", errors.New("exit status 1"))
-	out, err := r.UploadLog("alpha")
-	if err == nil {
-		t.Fatal("失敗したのにエラーが返っていない")
-	}
-	if out != "" {
-		t.Errorf("失敗時の出力 = %q, want 空", out)
-	}
-}
-
 func TestRunnerPassesEnvToChildren(t *testing.T) {
 	t.Parallel()
 
@@ -105,11 +53,6 @@ func TestRunnerScriptCalls(t *testing.T) {
 		call func(*Runner)
 		want []string
 	}{
-		{
-			name: "upload-log はタブ名を渡す",
-			call: func(r *Runner) { _, _ = r.UploadLog("alpha") },
-			want: []string{"/ch/scripts/upload-log.sh", "alpha"},
-		},
 		{
 			name: "fetch-news は --force を付ける",
 			call: func(r *Runner) { r.FetchNews() },
@@ -156,19 +99,14 @@ func TestNewRunnerSetsConductorHome(t *testing.T) {
 func TestRunnerAppliesTimeoutPerScript(t *testing.T) {
 	t.Parallel()
 
-	// ここに残っているのは利用者が起こす長時間処理だけで、いずれも途中で
-	// 切ると作業ログを失う・取得が中途半端に終わる。ポーリングのチェーンも
-	// 止めない経路なので上限は付けない。
+	// ここに残っているのは利用者が起こす長時間処理だけで、途中で切ると
+	// 取得が中途半端に終わる。ポーリングのチェーンも止めない経路なので
+	// 上限は付けない。
 	tests := []struct {
 		name string
 		call func(*Runner)
 		want time.Duration
 	}{
-		{
-			name: "アップロードは上限なし",
-			call: func(r *Runner) { _, _ = r.UploadLog("alpha") },
-			want: 0,
-		},
 		{
 			name: "ニュース取得は上限なし",
 			call: func(r *Runner) { r.FetchNews() },

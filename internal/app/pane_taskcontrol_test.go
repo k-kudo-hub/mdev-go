@@ -63,12 +63,12 @@ func (f *fakePendingRaw) WriteRaw(session, name string, data []byte) error {
 
 // taskControlFixture は task-control の 1 回ぶんの実行環境である。
 type taskControlFixture struct {
-	pane    *app.TaskControlPane
-	journal *paneJournal
-	raw     *fakePendingRaw
-	focuser *fakePaneFocuser
-	closer  *fakeTabCloser
-	shell   *fakeShellRunner
+	pane     *app.TaskControlPane
+	journal  *paneJournal
+	raw      *fakePendingRaw
+	focuser  *fakePaneFocuser
+	closer   *fakeTabCloser
+	uploader *fakeLogUploader
 }
 
 func newTaskControlFixture(tabOutput string) *taskControlFixture {
@@ -76,7 +76,7 @@ func newTaskControlFixture(tabOutput string) *taskControlFixture {
 	raw := &fakePendingRaw{journal: journal, files: map[string][]byte{}}
 	focuser := &fakePaneFocuser{journal: journal}
 	closer := &fakeTabCloser{journal: journal}
-	shell := &fakeShellRunner{journal: journal}
+	uploader := &fakeLogUploader{journal: journal}
 
 	return &taskControlFixture{
 		pane: &app.TaskControlPane{
@@ -90,15 +90,15 @@ func newTaskControlFixture(tabOutput string) *taskControlFixture {
 				Tabs:                   &fakeTabLister{output: tabOutput},
 				Closer:                 closer,
 				Recorder:               &fakeRecorder{journal: journal},
-				Shell:                  shell,
+				Uploader:               uploader,
 				CloseActiveOnMissingID: true,
 			},
 		},
-		journal: journal,
-		raw:     raw,
-		focuser: focuser,
-		closer:  closer,
-		shell:   shell,
+		journal:  journal,
+		raw:      raw,
+		focuser:  focuser,
+		closer:   closer,
+		uploader: uploader,
 	}
 }
 
@@ -336,7 +336,7 @@ func TestTaskControlDeleteCancelsOnUploadFailure(t *testing.T) {
 	// アップロードが失敗したら**何も消さない**。タブを消すと作業ログを
 	// 永久に失うため、これがこのフローで最も重要な契約である。
 	f := newTaskControlFixture("ID POS NAME\n1 x t\n")
-	f.shell.uploadErr = errors.New("送信に失敗")
+	f.uploader.err = errors.New("送信に失敗")
 
 	prep, err := f.pane.PrepareDelete(taskControlEnv, "t")
 	if err != nil {

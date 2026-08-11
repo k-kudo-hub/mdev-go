@@ -23,6 +23,8 @@ type DailySessionReader interface {
 	ReadSession(session string) [][]byte
 }
 
+var _ LogUploadRunner = (*LogUploader)(nil)
+
 // LogUploader は作業ログをログ用リポジトリへアップロードする
 // (現行 upload-log.sh 相当)。
 type LogUploader struct {

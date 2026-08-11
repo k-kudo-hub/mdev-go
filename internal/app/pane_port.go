@@ -242,17 +242,9 @@ type URLOpener interface {
 
 // ShellRunner は移行期に Shell のまま残るスクリプトを呼ぶ。
 //
-// いずれもフェーズ 5 で Go 化する予定で、それまでは env
+// フェーズ 5 で Go 化する予定で、それまでは env
 // (ZELLIJ_SESSION_NAME / CONDUCTOR_HOME)を引き継いだ同期呼び出しにする。
 type ShellRunner interface {
-	// UploadLog は upload-log.sh を呼ぶ。
-	//
-	// 終了コード 0 は「アップロードした」または「意図的に飛ばした」で、
-	// 非 0 は失敗である。呼び出し側は非 0 のときタブの削除を中止しなければ
-	// ならない(作業ログを失わないための契約)。output は標準出力の 1 行目から
-	// `upload-log: ` を取り除いたもので、空なら表示するものが無い。
-	UploadLog(tab string) (output string, err error)
-
 	// FetchNews は fetch-news.sh --force を同期で呼ぶ。
 	FetchNews()
 }

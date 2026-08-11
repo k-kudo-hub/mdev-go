@@ -23,3 +23,13 @@ type LogPusher interface {
 type SummaryGenerator interface {
 	Summarize(conversation string) (summary string, err error)
 }
+
+// LogUploadRunner は作業ログのアップロードを 1 回実行する。
+// 実体は LogUploader である。
+//
+// 戻り値は現行 upload-log.sh の終了コードの契約をそのまま写している。
+// ("", nil) は意図的に飛ばした、(message, nil) はアップロードした、
+// ("", err) は失敗である。**失敗したときタブを削除してはならない。**
+type LogUploadRunner interface {
+	UploadLog(env PaneEnv, tab string) (output string, err error)
+}
