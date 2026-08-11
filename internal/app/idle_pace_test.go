@@ -39,8 +39,8 @@ func TestIdlePaceBoundary(t *testing.T) {
 	if !pace.Detached() {
 		t.Error("未アタッチと判定されていません")
 	}
-	if got := pace.Interval(normal); got != app.IdlePollInterval {
-		t.Errorf("未アタッチの間隔 = %v, want %v", got, app.IdlePollInterval)
+	if got := pace.Interval(normal); got != app.AttachCheckInterval {
+		t.Errorf("未アタッチの間隔 = %v, want %v", got, app.AttachCheckInterval)
 	}
 
 	pace = pace.Observe(true)

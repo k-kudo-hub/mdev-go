@@ -147,12 +147,24 @@ func (p poller) pollInterval() time.Duration {
 	return p.pace.Interval(p.interval)
 }
 
-// observeAttach は確認の結果を取り込む。
+// observeAttach は確認の結果を取り込み、必要なら復帰の読み直しを返す。
 //
 // **次の合図は張らない。** これはポーリングのチェーンの外側の出来事であり、
-// ここで張るとチェーンが 2 本になる。効くのは次に張られる合図からである。
-func (p *poller) observeAttach(attached bool) {
+// ここで張るとチェーンが 2 本になる。止まっていた合図(確認の間隔で回って
+// いるもの)がそのまま次の周期を担う。
+//
+// 減速していたところへ attach が戻ったときだけ、読み直しを 1 本出す。
+// 出さないと、画面は止めていた間の古い内容のまま次の合図まで残る。
+// この読み直しは poll=false(チェーンの外)なので、着弾しても何も予約しない。
+func (p *poller) observeAttach(attached bool, refresh func(poll bool) tea.Cmd) tea.Cmd {
+	recovered := p.pace.Detached() && attached
 	p.pace = p.pace.Observe(attached)
+	if !recovered || refresh == nil {
+		return nil
+	}
+	// 走っている間に合図が重ならないよう、実行中として数える。
+	p.inFlight++
+	return refresh(false)
 }
 
 // armWithAttachCheck は次の合図を張り、頃合いなら attach の確認も足す。
@@ -184,8 +196,17 @@ func (p *poller) armWithAttachCheck() tea.Cmd {
 //
 // refresh は読み直しのコマンドを組み立てるだけで、ポーリングの状態は見ない。
 func (p *poller) tick(refresh func(poll bool) tea.Cmd) tea.Cmd {
-	if p.inFlight > 0 {
-		return tickCmd(p.pollInterval())
+	// 誰も開いていないと分かっている間は **読み直しを一切出さない**。
+	// 誰も見ていない画面を描き直しても意味が無く、Dashboard の読み直しは
+	// zellij の CLI を 2 回叩く一番重い処理である。止めれば、閉じたまま
+	// 残ったセッションはほぼ無害になる。
+	//
+	// 代わりに attach の確認だけを続ける(armWithAttachCheck が出す)。
+	// 誰かが開いたら observeAttach が読み直しを 1 本出して復帰する。
+	// これは 2 打鍵目の待ち受け中と同じ「凍結」の形で、実行中の数を
+	// 変えないためチェーンは 1 本のままである。
+	if p.pace.Detached() || p.inFlight > 0 {
+		return p.armWithAttachCheck()
 	}
 	p.inFlight++
 	return refresh(true)
@@ -215,7 +236,13 @@ func (p *poller) arrive(poll bool) tea.Cmd {
 //
 // 利用者の操作への反応は前回の完了を待たずに出す。数えるのは、その読み直しが
 // 走っている間にポーリングが重ならないようにするためである。
-func (p *poller) force() { p.inFlight++ }
+func (p *poller) force() {
+	p.inFlight++
+	// キー操作が来たということは、誰かがその画面を開いて触っている。
+	// 確認の結果を待たずに減速を解く(実測で、同じ大きさで attach し直した
+	// ときは端末から何の合図も来ないため、こちらから拾える証拠は貴重である)。
+	p.pace = p.pace.Observe(true)
+}
 
 // promptExpiredMsg は 2 打鍵目の待ち受けが時間切れになったことを表す。
 // token は世代番号で、待ち受けをやり直した後に古いタイマーが効かないようにする。

@@ -10,10 +10,9 @@ import (
 //
 // tui は app にしか依存できない(ADR-0002)ため、境界に出す名前は app が持つ。
 const (
-	// AttachCheckInterval は「誰か開いているか」を確かめる間隔。
+	// AttachCheckInterval は「誰か開いているか」を確かめる間隔であり、
+	// attach し直してから通常の速さへ戻るまでの最大の待ち時間でもある。
 	AttachCheckInterval = domain.AttachCheckInterval
-	// IdlePollInterval は誰も開いていないときのポーリング間隔。
-	IdlePollInterval = domain.IdlePollInterval
 )
 
 // IdlePace は「誰も開いていないなら遅く回す」ための状態である。

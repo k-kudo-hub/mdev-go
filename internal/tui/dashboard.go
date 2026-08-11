@@ -143,10 +143,10 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, next
 
 	case attachCheckedMsg:
-		// 減速の判断だけを更新する。次の合図は張らない(pane.go の
-		// チェーン 1 本の不変条件)。
-		m.polling.observeAttach(msg.attached)
-		return m, nil
+		// 減速の判断を更新し、減速から復帰したときだけ読み直しを 1 本出す。
+		// 次の合図は張らない(pane.go のチェーン 1 本の不変条件)。
+		cmd := m.polling.observeAttach(msg.attached, m.refreshCmd)
+		return m, cmd
 
 	case tickMsg:
 		if m.busy || m.awaiting {

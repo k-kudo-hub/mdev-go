@@ -22,8 +22,9 @@ detached セッションの無限ポーリング蓄積(zellij サーバ劣化 �
 
 ### B. 未アタッチ時のポーリング減速(mdev-go)
 
-- [x] domain: 減速判定の純粋関数のテスト+実装(attach 確認は 30 秒間隔、未アタッチが確認できたら poll 間隔を通常 → 60 秒へ、attach 復帰で即通常へ)
+- [x] domain: 減速判定の純粋関数のテスト+実装(attach 確認は 30 秒間隔。未アタッチが確認できたら **読み直しを止め**、30 秒ごとの attach 確認だけを続ける)
 - [x] infra+tui: poller への組み込み(`zellij action list-clients` の呼び出しは既存 zellij adapter 経由・10 秒上限。list-clients 自体の失敗は「attach あり」扱い = 安全側)
+- [x] attach 復帰の即時化: キー操作を attach の証拠として扱い即座に通常速度へ。確認で復帰を検知したときは読み直しを 1 本出す(最大 30 秒)
 
 ### C. conductor 側: init.zsh から自動掃除を呼ぶ(小 PR) — **本タスクの対象外**(別エージェントが担当)
 
@@ -37,10 +38,11 @@ detached セッションの無限ポーリング蓄積(zellij サーバ劣化 �
 
 - `mdev sessions clean --dry-run` が回収対象を列挙し、実行で EXITED・detached mdev セッション・ゾンビサーバ・孤児クライアントが消える。使用中セッションは無傷
 - `mdev` 起動時に自動掃除が走り、蓄積が起きない(--auto は無言に近く、失敗してもセッション起動を妨げない)
-- 未アタッチのセッションのポーリングが 60 秒間隔に落ち、attach で即復帰する
+- 未アタッチのセッションは読み直しを止め、30 秒ごとの attach 確認だけを行う。attach 後はキー操作で即座に、無操作でも最大 30 秒で通常へ戻る
 - 全テスト・lint・カバレッジ通過(mdev-go)、test.sh 全通過(conductor)
 
 ## 備考
 
+- attach 復帰の検知に `tea.WindowSizeMsg` は使えない。実測(zellij 0.44.1 + bubbletea v2.0.8)で、**同じ大きさで attach し直すと端末から何の合図も来ない**ことを確認した(サイズが変わったときだけ SIGWINCH 経由で届く)。そのため確認は自分から行う
 - 対象外(別途): タブ構築のレイアウトファイル化(ADR 先行・フォローアップ)、zellij 本体への issue 報告
 - kill の安全策: 「mdev 管理セッション」の判定は bin/mdev pane プロセスの有無で行い、`dev` 等の手動セッションは EXITED 以外触らない

@@ -88,12 +88,12 @@ func TestPollerSlowsDownWhenDetached(t *testing.T) {
 		t.Errorf("確認前の間隔 = %v, want %v", got, testPollInterval)
 	}
 
-	p.observeAttach(false)
-	if got := p.pollInterval(); got != app.IdlePollInterval {
-		t.Errorf("未アタッチの間隔 = %v, want %v", got, app.IdlePollInterval)
+	p.observeAttach(false, nil)
+	if got := p.pollInterval(); got != app.AttachCheckInterval {
+		t.Errorf("未アタッチの間隔 = %v, want %v", got, app.AttachCheckInterval)
 	}
 
-	p.observeAttach(true)
+	p.observeAttach(true, nil)
 	if got := p.pollInterval(); got != testPollInterval {
 		t.Errorf("attach 復帰後の間隔 = %v, want %v(即座に通常へ戻る)", got, testPollInterval)
 	}
@@ -112,8 +112,8 @@ func TestPollerKeepsSingleChain(t *testing.T) {
 	p := newPacedPoller(checker, &now)
 
 	// 着弾 → 次の合図 1 本 + 確認 1 本。
-	msgs := collectMsgs(t, p.arrive(true))
-	ticks, checks := countMsgs(msgs)
+	msgs, timers := collectMsgs(t, p.arrive(true))
+	ticks, checks := countMsgs(msgs, timers)
 	if ticks != 1 {
 		t.Errorf("合図 = %d 本, want 1 本", ticks)
 	}
@@ -123,7 +123,7 @@ func TestPollerKeepsSingleChain(t *testing.T) {
 
 	// 確認の結果を取り込んでも、合図は 1 本も増えない。
 	before := p.inFlight
-	p.observeAttach(false)
+	p.observeAttach(false, nil)
 	if p.inFlight != before {
 		t.Errorf("確認で実行中の数が変わりました: %d → %d", before, p.inFlight)
 	}
@@ -135,8 +135,8 @@ func TestPollerWithoutWatchDoesNotSlowDown(t *testing.T) {
 	t.Parallel()
 
 	p := newPoller(testPollInterval)
-	msgs := collectMsgs(t, p.arrive(true))
-	ticks, checks := countMsgs(msgs)
+	msgs, timers := collectMsgs(t, p.arrive(true))
+	ticks, checks := countMsgs(msgs, timers)
 	if ticks != 1 || checks != 0 {
 		t.Errorf("合図 = %d 本 / 確認 = %d 本, want 1 / 0", ticks, checks)
 	}
@@ -153,15 +153,22 @@ func TestPollerRearmUsesPacedInterval(t *testing.T) {
 
 	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
 	p := newPacedPoller(&fakeAttachChecker{}, &now)
-	p.observeAttach(false)
+	p.observeAttach(false, nil)
 
-	if got := p.pollInterval(); got != app.IdlePollInterval {
-		t.Errorf("rearm の間隔 = %v, want %v", got, app.IdlePollInterval)
+	if got := p.pollInterval(); got != app.AttachCheckInterval {
+		t.Errorf("rearm の間隔 = %v, want %v", got, app.AttachCheckInterval)
 	}
 	if p.rearm() == nil {
 		t.Error("再予約されていません")
 	}
 }
+
+// collectDeadline は合図が返るのを待つ上限である。
+//
+// 予約されたタイマーは期限が来るまで返らない。未アタッチ中の合図は 30 秒
+// 先なので、実際に待つとテストがその時間だけ止まる。待たずに「タイマーが
+// 1 本予約された」と数えるための短い期限である。
+const collectDeadline = 200 * time.Millisecond
 
 // runAttachChecks は cmd を実行し、確認のコマンドがあれば走らせる。
 func runAttachChecks(t *testing.T, cmd tea.Cmd) {
@@ -169,29 +176,59 @@ func runAttachChecks(t *testing.T, cmd tea.Cmd) {
 	collectMsgs(t, cmd)
 }
 
-// collectMsgs は cmd(tea.Batch を含む)を実行して出た合図を集める。
-func collectMsgs(t *testing.T, cmd tea.Cmd) []tea.Msg {
+// collectMsgs は cmd(tea.Batch を含む)を期限つきで実行し、返った合図と
+// 期限内に返らなかったコマンド(= 予約されたタイマー)の数を返す。
+func collectMsgs(t *testing.T, cmd tea.Cmd) ([]tea.Msg, int) {
 	t.Helper()
 	if cmd == nil {
-		return nil
+		return nil, 0
 	}
-	msg := cmd()
+
+	// tea.Batch そのものは即座に BatchMsg を返す。
+	first := make(chan tea.Msg, 1)
+	go func() { first <- cmd() }()
+	var msg tea.Msg
+	select {
+	case msg = <-first:
+	case <-time.After(collectDeadline):
+		// 単独のタイマーだった。
+		return nil, 1
+	}
+
 	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
-		return []tea.Msg{msg}
+		return []tea.Msg{msg}, 0
 	}
-	msgs := make([]tea.Msg, 0, len(batch))
+
+	results := make(chan tea.Msg, len(batch))
+	pending := 0
 	for _, inner := range batch {
 		if inner == nil {
 			continue
 		}
-		msgs = append(msgs, inner())
+		pending++
+		go func(c tea.Cmd) { results <- c() }(inner)
 	}
-	return msgs
+
+	var msgs []tea.Msg
+	timers := 0
+	deadline := time.After(collectDeadline)
+	for range pending {
+		select {
+		case got := <-results:
+			msgs = append(msgs, got)
+		case <-deadline:
+			// 残りはすべて期限内に返らなかった = タイマーである。
+			return msgs, pending - len(msgs)
+		}
+	}
+	return msgs, timers
 }
 
 // countMsgs は合図の種類ごとの数を返す。
-func countMsgs(msgs []tea.Msg) (ticks, checks int) {
+// timers は「返らなかった = 予約された合図」で、tick として数える。
+func countMsgs(msgs []tea.Msg, timers int) (ticks, checks int) {
+	ticks = timers
 	for _, msg := range msgs {
 		switch msg.(type) {
 		case tickMsg:
@@ -201,4 +238,136 @@ func countMsgs(msgs []tea.Msg) (ticks, checks int) {
 		}
 	}
 	return ticks, checks
+}
+
+// countingRefresh は読み直しの発行回数を数える。
+type countingRefresh struct {
+	calls []bool // poll の値を順に記録する
+}
+
+func (r *countingRefresh) cmd(poll bool) tea.Cmd {
+	r.calls = append(r.calls, poll)
+	return func() tea.Msg { return tickMsg{} }
+}
+
+// TestPollerStopsRefreshingWhenDetached は未アタッチ中に **読み直しを
+// 一切出さない** ことを確かめる。
+//
+// 誰も見ていない画面を描き直しても意味が無く、Dashboard の読み直しは
+// zellij の CLI を 2 回叩く一番重い処理である。止めれば放置された
+// セッションはほぼ無害になる。
+func TestPollerStopsRefreshingWhenDetached(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	checker := &fakeAttachChecker{attached: false}
+	p := newPacedPoller(checker, &now)
+	p.observeAttach(false, nil)
+
+	// 生成直後の 1 本を着弾させ、「読み直しを出せる状態」にしておく。
+	// ここを 1 のままにすると、減速ではなく「重なり防止」で読み直しが
+	// 出ないだけになり、テストが素通りする。
+	p.inFlight = 0
+
+	refresh := &countingRefresh{}
+	for i := range 3 {
+		now = now.Add(app.AttachCheckInterval)
+		cmd := p.tick(refresh.cmd)
+		if cmd == nil {
+			t.Fatalf("%d 回目: 次の合図が張られていません", i+1)
+		}
+		msgs, timers := collectMsgs(t, cmd)
+		ticks, checks := countMsgs(msgs, timers)
+		if ticks != 1 {
+			t.Errorf("%d 回目: 合図 = %d 本, want 1 本", i+1, ticks)
+		}
+		// 読み直しの代わりに attach の確認だけを出す。
+		if checks != 1 {
+			t.Errorf("%d 回目: 確認 = %d 本, want 1 本", i+1, checks)
+		}
+	}
+	if len(refresh.calls) != 0 {
+		t.Errorf("未アタッチ中に読み直しを出しました: %v", refresh.calls)
+	}
+	if p.inFlight != 0 {
+		// 読み直しを出していないので実行中は増えない。
+		t.Errorf("実行中 = %d, want 0", p.inFlight)
+	}
+}
+
+// TestPollerRecoversOnAttach は attach を検知したら読み直しを 1 本出して
+// 通常の速さへ戻ることを確かめる。
+//
+// 出す読み直しは poll=false である。着弾しても次の合図を張らないので、
+// 止まっていたチェーン(30 秒の合図)と合わせて 1 本のままになる。
+func TestPollerRecoversOnAttach(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	p := newPacedPoller(&fakeAttachChecker{}, &now)
+	p.observeAttach(false, nil)
+
+	refresh := &countingRefresh{}
+	cmd := p.observeAttach(true, refresh.cmd)
+	if cmd == nil {
+		t.Fatal("復帰の読み直しが出ていません")
+	}
+	if want := []bool{false}; len(refresh.calls) != 1 || refresh.calls[0] != want[0] {
+		t.Errorf("読み直し = %v, want %v(poll=false = チェーンの外)", refresh.calls, want)
+	}
+	if got := p.pollInterval(); got != testPollInterval {
+		t.Errorf("復帰後の間隔 = %v, want %v", got, testPollInterval)
+	}
+	// 復帰の読み直しは着弾しても何も予約しない。
+	if next := p.arrive(false); next != nil {
+		t.Error("復帰の読み直しの着弾で合図が張られました(チェーンが増える)")
+	}
+}
+
+// TestPollerObserveAttachIsIdempotent は既にアタッチ済みと分かっている
+// ときに読み直しを重ねて出さないことを確かめる。
+func TestPollerObserveAttachIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	p := newPacedPoller(&fakeAttachChecker{attached: true}, &now)
+
+	refresh := &countingRefresh{}
+	if cmd := p.observeAttach(true, refresh.cmd); cmd != nil {
+		t.Error("減速していないのに復帰の読み直しを出しました")
+	}
+	if len(refresh.calls) != 0 {
+		t.Errorf("読み直し = %v, want 空", refresh.calls)
+	}
+}
+
+// TestPollerForceCountsAsAttached はキー操作を attach の証拠として扱う
+// ことを確かめる(A-1)。
+//
+// キー操作が来たということは、誰かがその画面を開いて触っている。
+// 確認を待たずに通常の速さへ戻してよい。
+func TestPollerForceCountsAsAttached(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	p := newPacedPoller(&fakeAttachChecker{}, &now)
+	p.observeAttach(false, nil)
+	if got := p.pollInterval(); got != app.AttachCheckInterval {
+		t.Fatalf("減速していません: %v", got)
+	}
+
+	p.force()
+
+	if got := p.pollInterval(); got != testPollInterval {
+		t.Errorf("キー操作後の間隔 = %v, want %v(即座に通常へ)", got, testPollInterval)
+	}
+	// 読み直しも通常どおり出るようになる。
+	refresh := &countingRefresh{}
+	p.inFlight = 0
+	if cmd := p.tick(refresh.cmd); cmd == nil {
+		t.Error("読み直しが出ていません")
+	}
+	if len(refresh.calls) != 1 {
+		t.Errorf("読み直し = %v, want 1 本", refresh.calls)
+	}
 }

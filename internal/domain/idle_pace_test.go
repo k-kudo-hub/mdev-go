@@ -78,9 +78,11 @@ func TestIdlePaceInterval(t *testing.T) {
 			want: normal,
 		},
 		{
+			// 未アタッチ中は読み直しを止め、attach の確認だけを続ける。
+			// したがって合図の間隔は確認の間隔と同じになる。
 			name: "誰も開いていない",
 			pace: domain.IdlePace{}.MarkChecked(paceBase).Observe(false),
-			want: 60 * time.Second,
+			want: domain.AttachCheckInterval,
 		},
 	}
 	for _, tt := range tests {
@@ -126,14 +128,11 @@ func TestIdlePaceRecoversImmediately(t *testing.T) {
 }
 
 // TestIdlePaceConstants は刻みの値を固定する。
-// 変えると「閉じたセッションが無害になる」度合いが変わる。
+// 変えると「閉じたセッションが無害になる」度合いと、attach 復帰の速さが変わる。
 func TestIdlePaceConstants(t *testing.T) {
 	t.Parallel()
 
 	if domain.AttachCheckInterval != 30*time.Second {
 		t.Errorf("AttachCheckInterval = %v, want 30s", domain.AttachCheckInterval)
-	}
-	if domain.IdlePollInterval != 60*time.Second {
-		t.Errorf("IdlePollInterval = %v, want 60s", domain.IdlePollInterval)
 	}
 }
