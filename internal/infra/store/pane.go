@@ -117,11 +117,44 @@ func (s *PaneStore) DeleteByName(session, name string) error {
 // Remove はスクリーン検出の状態ファイルを削除する。
 // 存在しない場合も成功として扱う。
 func (s *PaneStore) Remove(session, slug string) error {
-	path := filepath.Join(s.sessionDir(session), screenStateDirName, slug)
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("スクリーン検出の状態 %s の削除に失敗しました: %w", path, err)
+	if err := os.Remove(s.screenStatePath(session, slug)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("スクリーン検出の状態 %s の削除に失敗しました: %w",
+			s.screenStatePath(session, slug), err)
 	}
 	return nil
+}
+
+// screenStatePath は状態ファイルのパスを返す。
+func (s *PaneStore) screenStatePath(session, slug string) string {
+	return filepath.Join(s.sessionDir(session), screenStateDirName, slug)
+}
+
+// ReadScreenState は状態ファイルの中身をそのまま返す。
+//
+// ファイルが無い場合と読めない場合はいずれも空文字を返す(現行版の
+// `cat "$state_file" 2>/dev/null || true`)。呼び出し側は空を初回観測として扱う。
+func (s *PaneStore) ReadScreenState(session, slug string) string {
+	b, err := os.ReadFile(s.screenStatePath(session, slug)) //nolint:gosec // pending 配下の規約どおりのパス
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// WriteScreenState は状態を 1 行として書く。
+//
+// 現行版の `echo "$effective" > "$state_file"` に合わせて末尾へ改行を足す。
+// 書き込みは同一ディレクトリの一時ファイル経由で置き換えるため、並行して読む側
+// が書きかけの内容を見ることはない。
+func (s *PaneStore) WriteScreenState(session, slug, line string) error {
+	return writeFileAtomic(s.screenStatePath(session, slug), []byte(line+"\n"))
+}
+
+// IsFile は path が実在する通常ファイルかどうかを返す。
+// 復元処理が transcript の実在を確かめる `[ -f "$TRANSCRIPT_PATH" ]` に対応する。
+func (s *PaneStore) IsFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // ReadToday は date の daily ファイルを全セッションぶん読み、行の並びを返す。

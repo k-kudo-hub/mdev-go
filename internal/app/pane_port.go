@@ -93,6 +93,69 @@ type ScreenStateRemover interface {
 	Remove(session, slug string) error
 }
 
+// ScreenStateStore はスクリーン検出の状態ファイルを読み書きする。
+//
+// タブごとに 1 ファイル、中身は 1 行(domain.ScreenState)である。
+// 検出はこれを「前回どう見えていたか」として使う。
+type ScreenStateStore interface {
+	// ReadScreenState は状態ファイルの中身をそのまま返す。
+	// ファイルが無い・読めない場合は空文字を返す(初回観測として扱われる)。
+	ReadScreenState(session, slug string) string
+	// WriteScreenState は line を 1 行として書く(実装が末尾へ改行を足す)。
+	WriteScreenState(session, slug, line string) error
+}
+
+// AgentPane はスクリーン検出の対象になりうるペイン 1 枚である。
+//
+// タスクタブのエージェントペインは create_task がコマンド行へ入れる
+// `TASK_AGENT=<name>` で見分ける。レジストリを引かずに済むので、まだ 1 度も
+// 完了していない(= エントリの無い)タブでも最初のターンから走査できる。
+type AgentPane struct {
+	// Tab はペインが属するタブ名。
+	Tab string
+	// ID はペインの id(zellij の数値 id を文字列にしたもの)。
+	ID string
+	// Agent は TASK_AGENT の値。
+	Agent string
+}
+
+// PaneLister はセッションのエージェントペインを列挙する。
+type PaneLister interface {
+	// ListAgentPanes は `TASK_AGENT=` を持つ端末ペインを返す。
+	// 失敗した場合は空を返す(その回は何も検出しなかった扱いになる)。
+	ListAgentPanes() []AgentPane
+}
+
+// ScreenDumper はペインの画面を文字列として取り出す。
+type ScreenDumper interface {
+	// DumpScreen はペインの見えている内容を返す。
+	// 失敗した場合と空だった場合はいずれも空文字を返し、呼び出し側は
+	// そのペインを飛ばす(現行版の `|| true` + `[[ -n "$text" ]]`)。
+	DumpScreen(paneID string) string
+}
+
+// RegistryTabLookup はタブに対応するレジストリのエントリを 1 件引く。
+//
+// スクリーン検出が書く pending は、レジストリから dir / task_type /
+// transcript_path を借りる。これらが無いと、そのタブの唯一の pending が
+// screen 由来になったときに削除時のログ収集や Done からの復元が壊れる。
+type RegistryTabLookup interface {
+	// LatestByTabMtime はタブ名が一致するエントリのうち、**ファイルの更新時刻が
+	// 最も新しい** 1 件を返す。
+	//
+	// 復元(domain.LatestPerTab)が updated_at で選ぶのとはキーが違う。
+	// 現行版の非対称をそのまま維持している(evidence §2-6)。
+	LatestByTabMtime(session, tab string) (domain.RegistryEntry, bool)
+}
+
+// PendingSaver は pending を 1 件書き込む。
+//
+// スクリーン検出は自分が所有する 1 ファイル(screen-<slug>.json)だけを書く。
+type PendingSaver interface {
+	// Save は pending を書き込む。既存の内容は完全に置き換える。
+	Save(session, sessionID string, pending domain.Pending) error
+}
+
 // DailyReader は当日の daily log を全セッション横断で読む。
 type DailyReader interface {
 	// ReadToday は date(YYYY-MM-DD)の daily ファイルを全セッションぶん探し、
