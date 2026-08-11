@@ -94,7 +94,7 @@ func TestCommandRunsNormally(t *testing.T) {
 func TestCommandReturnsExitError(t *testing.T) {
 	t.Parallel()
 
-	// 非 0 終了は従来どおりエラーとして返る(UploadLog はこれでタブ削除を止める)。
+	// 非 0 終了は従来どおりエラーとして返る(呼び出し側はこれで処理を止める)。
 	if err := Command(context.Background(), "false").Run(); err == nil {
 		t.Error("非 0 終了なのにエラーが返っていない")
 	}

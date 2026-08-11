@@ -38,9 +38,9 @@ Shell 版に残る upload-log / fetch-news / update 系を Go 化し、ShellRunn
 ### D. 検証・仕上げ
 
 - [x] golden テスト: gen-golden-upload.sh(Shell filter_secrets / build_markdown と Go 出力の差分テスト)
-- [ ] 型チェック・Lint・カバレッジ確認(domain/app 90%)
+- [x] 型チェック・Lint・カバレッジ確認(domain/app 90%)
 
-### E. conductor 側 PR(別リポジトリ・小変更)
+### E. conductor 側 PR(別リポジトリ・小変更) — **本タスクの対象外**(別タスクで実施)
 
 - [ ] install.sh に FLAVOR 分岐のテスト+実装($CONDUCTOR_HOME/FLAVOR が go なら layouts を mdev pane 版に書き換え、hooks マージを mdev hook 版で実施、bin/ 温存を明文化)
 
