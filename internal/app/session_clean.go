@@ -12,6 +12,17 @@ import (
 // セッションの起動前に走るため、待ちすぎると起動が遅れる。
 const zombieGrace = 3 * time.Second
 
+// ZombieServer は止める対象の zellij サーバ 1 つである。
+//
+// 中身は domain.ZellijServer と同じだが、cli / tui は app にしか依存
+// できない(ADR-0002)ため、境界に出す型は app が持つ。
+type ZombieServer struct {
+	// PID はサーバのプロセス ID。
+	PID int
+	// Session はサーバが持つセッション名。
+	Session string
+}
+
 // CleanupPlan は掃除で何をするかである。
 //
 // dry-run はこれを組み立てて表示するだけで実行しない。実行時も同じものを
@@ -23,7 +34,7 @@ type CleanupPlan struct {
 	// mdev 管理セッションの名前。
 	DetachedSessions []string
 	// ZombieServers は止める zellij サーバ。
-	ZombieServers []domain.ZellijServer
+	ZombieServers []ZombieServer
 	// OrphanClients は止める孤児 `zellij action` の PID。
 	OrphanClients []int
 }
@@ -103,7 +114,7 @@ func (c *SessionCleaner) plan() (CleanupPlan, error) {
 	return CleanupPlan{
 		ExitedSessions:   domain.ExitedSessionNames(sessions),
 		DetachedSessions: c.detachedSessions(sessions, managed),
-		ZombieServers:    domain.ZombieServers(domain.ZellijServers(processes), sessions),
+		ZombieServers:    toZombieServers(domain.ZombieServers(domain.ZellijServers(processes), sessions)),
 		OrphanClients:    orphanPIDs(domain.OrphanZellijClients(processes)),
 	}, nil
 }
@@ -158,7 +169,7 @@ func (c *SessionCleaner) apply(plan CleanupPlan) {
 // まず TERM を送って後始末の機会を与え、猶予の後にまだ居るものだけ KILL する。
 // いきなり KILL するとソケットのファイルが残り、zellij が次に同じ名前の
 // セッションを作るときに失敗しうる。
-func (c *SessionCleaner) stopZombies(servers []domain.ZellijServer) {
+func (c *SessionCleaner) stopZombies(servers []ZombieServer) {
 	if len(servers) == 0 {
 		return
 	}
@@ -172,6 +183,18 @@ func (c *SessionCleaner) stopZombies(servers []domain.ZellijServer) {
 			_ = c.Signaler.Kill(server.PID)
 		}
 	}
+}
+
+// toZombieServers は domain の型を境界の型へ移し替える。
+func toZombieServers(servers []domain.ZellijServer) []ZombieServer {
+	if len(servers) == 0 {
+		return nil
+	}
+	out := make([]ZombieServer, 0, len(servers))
+	for _, server := range servers {
+		out = append(out, ZombieServer{PID: server.PID, Session: server.Session})
+	}
+	return out
 }
 
 // orphanPIDs は孤児クライアントの PID だけを取り出す。

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
-	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
 // fakeSessionStore は zellij のセッション操作の代役である。
@@ -135,7 +134,7 @@ func TestCleanPlan(t *testing.T) {
 	if want := []string{"idle"}; !slices.Equal(got.Plan.DetachedSessions, want) {
 		t.Errorf("detached = %v, want %v", got.Plan.DetachedSessions, want)
 	}
-	want := []domain.ZellijServer{{PID: 400, Session: "zombie"}}
+	want := []app.ZombieServer{{PID: 400, Session: "zombie"}}
 	if !slices.Equal(got.Plan.ZombieServers, want) {
 		t.Errorf("ゾンビ = %v, want %v", got.Plan.ZombieServers, want)
 	}
@@ -326,7 +325,7 @@ func TestCleanupPlanIsEmpty(t *testing.T) {
 	filled := []app.CleanupPlan{
 		{ExitedSessions: []string{"a"}},
 		{DetachedSessions: []string{"a"}},
-		{ZombieServers: []domain.ZellijServer{{PID: 1}}},
+		{ZombieServers: []app.ZombieServer{{PID: 1}}},
 		{OrphanClients: []int{1}},
 	}
 	for _, plan := range filled {

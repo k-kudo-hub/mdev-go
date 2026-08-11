@@ -13,6 +13,7 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/git"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/news"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/procscan"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/release"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/shell"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
@@ -201,6 +202,11 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	updateState := store.NewUpdateStateStore(conductorHome)
 	remoteTags := git.NewRemoteTags()
 
+	// セッションの掃除(起動前の自動掃除と手動の一括回収)。zellij の CLI と
+	// ps を叩くので、どちらも上限つきの adapter を通す。
+	zellijSessions := zellij.NewSessionController()
+	processes := procscan.NewScanner()
+
 	return cli.Deps{
 		Hooks:        hooks,
 		Record:       record,
@@ -211,6 +217,14 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Remote:    remoteTags,
 			Installer: release.NewInstaller(),
 			Getenv:    getenv,
+		},
+		SessionClean: &app.SessionCleaner{
+			Sessions:  zellijSessions,
+			Clients:   zellijSessions,
+			Remover:   zellijSessions,
+			Processes: processes,
+			Signaler:  processes,
+			Sleeper:   sleeper,
 		},
 		UpdateCheck: &app.UpdateChecker{
 			Config: paneStore,
