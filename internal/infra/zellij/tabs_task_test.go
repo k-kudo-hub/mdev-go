@@ -19,12 +19,14 @@ type recorder struct {
 	calls    [][]string
 	timeouts []time.Duration
 	out      string
-	err      error
+	// outErr は output が返す失敗。空の出力と区別するために持つ。
+	outErr error
+	err    error
 }
 
-func (r *recorder) output(timeout time.Duration, name string, args ...string) string {
+func (r *recorder) output(timeout time.Duration, name string, args ...string) (string, error) {
 	r.record(timeout, name, args)
-	return r.out
+	return r.out, r.outErr
 }
 
 func (r *recorder) run(timeout time.Duration, name string, args ...string) error {
@@ -140,7 +142,10 @@ func TestTabControllerQueryTabNames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			r := &recorder{out: tc.out}
-			got := r.controller().QueryTabNames(time.Second)
+			got, err := r.controller().QueryTabNames(time.Second)
+			if err != nil {
+				t.Fatalf("QueryTabNames() = %v", err)
+			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("QueryTabNames() = %#v, want %#v", got, tc.want)
 			}
@@ -230,4 +235,22 @@ func TestTabControllerCloseActiveTabIgnoresFailure(t *testing.T) {
 	// 既に閉じられている場合など。削除フローとしては進んでよい。
 	r := &recorder{err: errors.New("失敗")}
 	r.controller().CloseActiveTab()
+}
+
+// TestTabControllerQueryTabNamesReportsFailure は問い合わせの失敗を
+// 空の一覧と区別して返すことを固定する。
+//
+// 上限で打ち切られた結果を空と読むと、復元処理が生きているタブを作り直して
+// 同じ名前のタブが二重になる。
+func TestTabControllerQueryTabNamesReportsFailure(t *testing.T) {
+	t.Parallel()
+
+	r := &recorder{outErr: errStub}
+	got, err := r.controller().QueryTabNames(time.Second)
+	if err == nil {
+		t.Fatal("QueryTabNames() = nil, want エラー")
+	}
+	if got != nil {
+		t.Errorf("失敗時の一覧 = %#v, want nil", got)
+	}
 }

@@ -45,8 +45,12 @@ type TabCloser interface {
 // 数分固まる(現行 task-lib.sh の `_zj_budget_cap` に対応する)。
 // 実装側は渡された値を自分の上限(10 秒)で頭打ちにする。
 type TabActor interface {
-	// QueryTabNames は今あるタブの名前を返す。失敗時は空を返す。
-	QueryTabNames(timeout time.Duration) []string
+	// QueryTabNames は今あるタブの名前を返す。
+	//
+	// 失敗は空の一覧と区別して返す。上限で打ち切られたときに空を返すと、
+	// 呼び出し側が「タブが 1 つも無い」と読んでしまう(TabNameQuerier の
+	// コメントを参照)。タスク作成はこの error を捨て、期限まで再試行する。
+	QueryTabNames(timeout time.Duration) ([]string, error)
 	// FocusTabVerified は名前でタブへフォーカスを移し、実際に移ったかを返す。
 	// `go-to-tab-name` は存在しない名前でも rc=0 で戻るため、成否は実装が
 	// stdout の有無で判定する。
@@ -174,8 +178,12 @@ type RegistryLister interface {
 // 復元は「既に在るタブを飛ばす」ためだけに要るので、必要な操作 1 つに絞った
 // port を別に置いている(ADR-0002)。
 type TabNameQuerier interface {
-	// QueryTabNames は今あるタブの名前を返す。失敗時は空を返す。
-	QueryTabNames(timeout time.Duration) []string
+	// QueryTabNames は今あるタブの名前を返す。
+	//
+	// 失敗は空の一覧と区別して返す。上限で打ち切られたときに空を返すと、
+	// 呼び出し側が「タブが 1 つも無い」と読んでしまう(TabNameQuerier の
+	// コメントを参照)。タスク作成はこの error を捨て、期限まで再試行する。
+	QueryTabNames(timeout time.Duration) ([]string, error)
 }
 
 // PathChecker はパスの実在を確かめる。

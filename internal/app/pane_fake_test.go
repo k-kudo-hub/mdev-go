@@ -314,6 +314,9 @@ var errCreateFailed = errors.New("タブを作れなかった")
 // errRegistryRead はレジストリを読めなかった状況を表す。
 var errRegistryRead = errors.New("レジストリを読めない")
 
+// errTabQuery は既存タブの問い合わせが失敗した状況を表す。
+var errTabQuery = errors.New("タブ名の一覧を取得できない")
+
 // fakeRegistryReader はレジストリの読み取りと削除を記録する。
 type fakeRegistryReader struct {
 	journal *paneJournal
@@ -338,11 +341,15 @@ func (f *fakeRegistryReader) RemoveByTab(session, tab string) error {
 type fakeTabNames struct {
 	names []string
 	calls int
+	err   error
 }
 
-func (f *fakeTabNames) QueryTabNames(time.Duration) []string {
+func (f *fakeTabNames) QueryTabNames(time.Duration) ([]string, error) {
 	f.calls++
-	return f.names
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.names, nil
 }
 
 // fakePathChecker は dir と transcript の実在を差し替える。

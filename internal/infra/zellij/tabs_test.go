@@ -7,14 +7,17 @@ import (
 	"time"
 )
 
+// errStub はコマンドが失敗した状況を表す。
+var errStub = errors.New("コマンドが失敗した")
+
 func TestTabControllerListTabs(t *testing.T) {
 	t.Parallel()
 
 	var got []string
 	c := &TabController{
-		output: func(_ time.Duration, name string, args ...string) string {
+		output: func(_ time.Duration, name string, args ...string) (string, error) {
 			got = append([]string{name}, args...)
-			return "ID POS NAME\n1 x alpha\n"
+			return "ID POS NAME\n1 x alpha\n", nil
 		},
 	}
 
@@ -31,7 +34,7 @@ func TestTabControllerListTabsReturnsEmptyOnFailure(t *testing.T) {
 	t.Parallel()
 
 	// zellij の外で動いた場合など。タブが 1 つも無い扱いになる。
-	c := &TabController{output: func(time.Duration, string, ...string) string { return "" }}
+	c := &TabController{output: func(time.Duration, string, ...string) (string, error) { return "", errStub }}
 	if out := c.ListTabs(); out != "" {
 		t.Errorf("ListTabs() = %q, want 空", out)
 	}
@@ -75,14 +78,17 @@ func TestNewTabControllerIsWired(t *testing.T) {
 func TestCommandOutputCutsOffAtTimeout(t *testing.T) {
 	t.Parallel()
 
-	// 返らない zellij は上限で切られ、空文字(= タブが 1 つも無い扱い)になる。
-	// 切れないとダッシュボードのポーリングがそこで止まる。
+	// 返らない zellij は上限で切られ、エラーとして返る。切れないと
+	// ダッシュボードのポーリングがそこで止まる。
 	start := time.Now()
-	out := commandOutput(50*time.Millisecond, "sleep", "30")
+	out, err := commandOutput(50*time.Millisecond, "sleep", "30")
 	elapsed := time.Since(start)
 
 	if out != "" {
 		t.Errorf("出力 = %q, want 空", out)
+	}
+	if err == nil {
+		t.Error("打ち切りがエラーとして返っていない")
 	}
 	if elapsed > 10*time.Second {
 		t.Errorf("上限で切れていない: %v かかった", elapsed)

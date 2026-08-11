@@ -23,9 +23,9 @@ func TestTabControllerListAgentPanes(t *testing.T) {
 
 	var got []string
 	c := &TabController{
-		output: func(_ time.Duration, name string, args ...string) string {
+		output: func(_ time.Duration, name string, args ...string) (string, error) {
 			got = append([]string{name}, args...)
-			return listPanesJSON
+			return listPanesJSON, nil
 		},
 	}
 
@@ -70,7 +70,7 @@ func TestTabControllerListAgentPanesIgnoresBadOutput(t *testing.T) {
 			t.Parallel()
 
 			c := &TabController{
-				output: func(time.Duration, string, ...string) string { return tt.output },
+				output: func(time.Duration, string, ...string) (string, error) { return tt.output, nil },
 			}
 			if panes := c.ListAgentPanes(); len(panes) != 0 {
 				t.Errorf("ListAgentPanes() = %+v, want 空", panes)
@@ -84,9 +84,9 @@ func TestTabControllerDumpScreen(t *testing.T) {
 
 	var got []string
 	c := &TabController{
-		output: func(_ time.Duration, name string, args ...string) string {
+		output: func(_ time.Duration, name string, args ...string) (string, error) {
 			got = append([]string{name}, args...)
-			return "line1\nline2\n"
+			return "line1\nline2\n", nil
 		},
 	}
 
@@ -103,7 +103,7 @@ func TestTabControllerDumpScreenReturnsEmptyOnFailure(t *testing.T) {
 	t.Parallel()
 
 	// ハングして打ち切られた場合など。呼び出し側はこのペインを飛ばす。
-	c := &TabController{output: func(time.Duration, string, ...string) string { return "" }}
+	c := &TabController{output: func(time.Duration, string, ...string) (string, error) { return "", errStub }}
 	if out := c.DumpScreen("5"); out != "" {
 		t.Errorf("DumpScreen() = %q, want 空", out)
 	}

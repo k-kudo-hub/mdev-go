@@ -92,9 +92,9 @@ func (a *recordingTabActor) add(parts ...string) {
 	a.calls = append(a.calls, strings.Join(parts, " "))
 }
 
-func (a *recordingTabActor) QueryTabNames(time.Duration) []string {
+func (a *recordingTabActor) QueryTabNames(time.Duration) ([]string, error) {
 	a.add("query-tab-names")
-	return a.tabs
+	return a.tabs, nil
 }
 
 func (a *recordingTabActor) FocusTabVerified(_ time.Duration, name string) bool {

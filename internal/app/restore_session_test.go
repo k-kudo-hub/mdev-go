@@ -354,3 +354,36 @@ func TestSessionRestorerQueriesTabsOnce(t *testing.T) {
 		t.Errorf("query-tab-names の呼び出し = %d 回, want 1", f.tabs.calls)
 	}
 }
+
+// TestSessionRestorerSkipsWhenTabQueryFails は既存タブの一覧を引けなかった
+// 回に復元そのものを見送ることを固定する。
+//
+// 上限で打ち切られた結果を「タブが 1 つも無い」と読むと、生きているタブを
+// 作り直して同じ名前のタブが二重になる。Shell 版はここでハングしていた
+// (復元が進まなかった)ので、上限を付けたことで初めて開く窓である。
+func TestSessionRestorerSkipsWhenTabQueryFails(t *testing.T) {
+	t.Parallel()
+
+	f := newRestoreFixture([]domain.RegistryEntry{
+		{Tab: "alive", Dir: "/w"},
+	}, []string{"Main", "alive"})
+	f.paths.dirs["/w"] = true
+	f.tabs.err = errTabQuery
+
+	f.warnings = f.restorer.Restore(dashboardEnv)
+
+	if len(f.creator.specs) != 0 {
+		t.Errorf("タブを作り直してしまった: %+v", f.creator.specs)
+	}
+	if len(f.registry.removed) != 0 {
+		t.Errorf("エントリを捨てた: %v", f.registry.removed)
+	}
+	if len(f.warnings) != 1 || !strings.Contains(f.warnings[0], "既存のタブを確認できなかった") {
+		t.Errorf("警告が返っていない: %q", f.warnings)
+	}
+	for _, entry := range f.journal.entries {
+		if entry == "go-to-tab-name Main" {
+			t.Error("何も復元していないのに Main へ戻った")
+		}
+	}
+}

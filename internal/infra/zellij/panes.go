@@ -49,8 +49,8 @@ type paneJSON struct {
 // 劣化した zellij サーバでは上限で打ち切られて空になり、その回は何も
 // 検出しなかった扱いになる(現行版の `2>/dev/null` と同じ)。
 func (c *TabController) ListAgentPanes() []app.AgentPane {
-	out := c.output(commandTimeout, binaryName, "action", "list-panes", "-t", "-c", "-j")
-	if out == "" {
+	out, err := c.output(commandTimeout, binaryName, "action", "list-panes", "-t", "-c", "-j")
+	if err != nil || out == "" {
 		return nil
 	}
 
@@ -91,5 +91,7 @@ func (c *TabController) ListAgentPanes() []app.AgentPane {
 // ハングしたときの蓄積が list-panes より速い。同じ上限で打ち切り、空なら
 // 呼び出し側がそのペインを飛ばす(現行版の `|| true` と同じ扱い)。
 func (c *TabController) DumpScreen(paneID string) string {
-	return c.output(commandTimeout, binaryName, "action", "dump-screen", "-p", "terminal_"+paneID)
+	// 失敗は空文字に潰す。呼び出し側はそのペインを飛ばす。
+	out, _ := c.output(commandTimeout, binaryName, "action", "dump-screen", "-p", "terminal_"+paneID)
+	return out
 }

@@ -61,8 +61,15 @@ func (r *SessionRestorer) Restore(env PaneEnv) []string {
 		return nil
 	}
 
+	// 既存タブの一覧を引けなかった回は復元そのものを見送る。空と取り違えると
+	// 生きているタブを作り直し、同じ名前のタブが二重になる。エントリは
+	// そのまま残るので、次の起動でやり直せる。
+	existing, err := r.Tabs.QueryTabNames(ZellijCallTimeout)
+	if err != nil {
+		return []string{fmt.Sprintf("既存のタブを確認できなかったため復元を見送りました: %v", err)}
+	}
+
 	var warnings []string
-	existing := r.Tabs.QueryTabNames(ZellijCallTimeout)
 	restored := 0
 	for _, entry := range domain.LatestPerTab(entries) {
 		if entry.Tab == "" || containsName(existing, entry.Tab) {

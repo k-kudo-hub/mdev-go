@@ -73,6 +73,8 @@ type fakeTabActor struct {
 	tabToRegister string
 	registerAfter int
 	queryCalls    int
+	// queryErr は問い合わせが失敗する状況を作る。
+	queryErr error
 
 	// focusEmptyUntil 回目までの FocusTabVerified は偽を返す。
 	focusEmptyUntil int
@@ -108,15 +110,18 @@ func (f *fakeTabActor) tick(action string, limit time.Duration) {
 	}
 }
 
-func (f *fakeTabActor) QueryTabNames(limit time.Duration) []string {
+func (f *fakeTabActor) QueryTabNames(limit time.Duration) ([]string, error) {
 	f.tick("query-tab-names", limit)
 	f.queryCalls++
 	f.journal.add("query-tab-names")
+	if f.queryErr != nil {
+		return nil, f.queryErr
+	}
 	names := f.tabNames
 	if f.tabToRegister != "" && f.queryCalls >= f.registerAfter {
 		names = append(append([]string{}, names...), f.tabToRegister)
 	}
-	return names
+	return names, nil
 }
 
 func (f *fakeTabActor) FocusTabVerified(limit time.Duration, name string) bool {
