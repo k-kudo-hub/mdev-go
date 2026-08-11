@@ -32,7 +32,7 @@ Shell 版に残る upload-log / fetch-news / update 系を Go 化し、ShellRunn
 
 - [x] domain: バージョン比較 / repo slug / latest tag 選択のテスト+実装(uc_* 互換。空 VERSION は v0.0.0 に正規化 = Shell 版の算術エラーを修正)
 - [x] app+infra: check-update のテスト+実装(1 日 1 回キャッシュ `.update-check`・全失敗無言 fail-open・enabled==false 明示判定)
-- [ ] app+infra: `mdev update` のテスト+実装(git ls-remote タイムアウト・tarball DL curl 相当 60s・install.sh 検証つき実行・env 注入)
+- [x] app+infra: `mdev update` のテスト+実装(git ls-remote タイムアウト・tarball DL curl 相当 60s・install.sh 検証つき実行・env 注入)
 - [ ] cli: `mdev update` / `mdev check-update` サブコマンド配線
 
 ### D. 検証・仕上げ

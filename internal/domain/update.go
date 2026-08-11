@@ -156,3 +156,32 @@ func RenderUpdateNotice(latest, current string) string {
 		"     'mdev update' で更新できます。\n" +
 		"\n"
 }
+
+// TarballURL は GitHub のソース tarball の URL を返す。
+// 現行 update.sh の
+// `https://github.com/$SLUG/archive/refs/tags/$LATEST.tar.gz` に対応する。
+func TarballURL(slug, tag string) string {
+	return "https://github.com/" + slug + "/archive/refs/tags/" + tag + ".tar.gz"
+}
+
+// 更新コマンドが出す文言。現行 update.sh の日本語と装飾をそのまま写す。
+
+// RenderUpdateChecking は最新版の確認を始めるときの 1 行を返す。
+func RenderUpdateChecking() string {
+	return ansiBold + "最新バージョンを確認しています..." + ansiReset + "\n"
+}
+
+// RenderUpdateUpToDate は既に最新だったときの 1 行を返す。
+func RenderUpdateUpToDate(current string) string {
+	return "既に最新です（" + current + "）。\n"
+}
+
+// RenderUpdateStarting は更新に取りかかるときの 1 行を返す。
+func RenderUpdateStarting(current, latest string) string {
+	return current + " -> " + latest + " に更新します...\n"
+}
+
+// RenderUpdateDone は更新が終わったときの 2 行を返す。
+func RenderUpdateDone(latest string) string {
+	return "\n" + ansiGreen + ansiBold + "✅ " + latest + " に更新しました。" + ansiReset + "\n"
+}
