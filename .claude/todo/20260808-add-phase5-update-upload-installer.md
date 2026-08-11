@@ -15,7 +15,7 @@ Shell 版に残る upload-log / fetch-news / update 系を Go 化し、ShellRunn
 
 - [x] domain: SecretFilter のテストを作成(test.sh 3613-3670 の全ケースを移植: PEM 状態機械・base64 行・7 パターン ERE・未終端 PEM の over-mask)
 - [x] domain: SecretFilter を実装(awk 相当の行単位状態機械 + sed 7 パターンを順序保存で適用)
-- [ ] domain: 要約用会話抽出のテスト+実装(claude/codex v1/v2 両対応、既存 transcript_* を拡張。Reasoning/response_item 除外)
+- [x] domain: 要約用会話抽出のテスト+実装(claude/codex v1/v2 両対応、既存 transcript_* を拡張。Reasoning/response_item 除外)
 - [ ] domain: BuildLogPath / BuildMarkdown のテスト+実装(固定オフセット日付切り出し・taskname サニタイズ・11 フィールド・.message 非包含)
 - [ ] domain+store: daily 横断レコード選択のテスト+実装(全ファイル走査・最後の一致・プレースホルダ合成)
 - [ ] infra/git: LogRepository のテスト+実装(upload-cache 永続 clone・fetch 成否で checkout -B 分岐・同一内容 no-op・chore: add work log メッセージ・-c user.email/name)
