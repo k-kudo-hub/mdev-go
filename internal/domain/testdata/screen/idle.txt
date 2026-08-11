@@ -1,0 +1,10 @@
+• probe.txt をカレントディレクトリに作成しました。
+
+───────────────────────────────────────────
+
+
+› Summarize recent commits
+
+  gpt-5.6-sol default · ~/projects/claude-conductor
+
+

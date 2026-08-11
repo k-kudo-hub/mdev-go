@@ -1,0 +1,6 @@
+  Some brand-new dialog this version added
+
+› 1. Do the thing
+  2. Do not
+
+  Press y to continue or n to abort
