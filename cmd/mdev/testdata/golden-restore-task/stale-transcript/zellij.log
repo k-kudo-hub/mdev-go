@@ -1,0 +1,38 @@
+new-tab -n stale-task --cwd {SANDBOX}/proj2 -- env TASK_TAB_NAME=stale-task TASK_TYPE=dev claude
+query-tab-names
+go-to-tab-name stale-task
+new-pane --direction down --cwd {SANDBOX}/proj2 -- {TASK_CONTROL} stale-task
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+focus-previous-pane
+new-pane --direction right --cwd {SANDBOX}/proj2 -- nvim
+new-pane --direction down --cwd {SANDBOX}/proj2 -- lazygit
+move-focus left

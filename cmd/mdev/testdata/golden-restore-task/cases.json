@@ -1,0 +1,91 @@
+[
+  {
+    "name": "resume",
+    "description": "transcript が残っていれば前回の会話を再開して作り直す",
+    "tab": "restore-me",
+    "session": "restore-sess",
+    "completed_at": "2026-08-11T10:00:00+0900",
+    "daily": "{\"tab\":\"restore-me\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T10:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"dev\",\"claude_session_id\":\"sess-restore\",\"transcript_path\":\"{SANDBOX}/transcript.jsonl\"}\n{\"tab\":\"other\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T09:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"dev\"}\n"
+  },
+  {
+    "name": "stale-transcript",
+    "description": "transcript が消えていれば新規セッションで起動する",
+    "tab": "stale-task",
+    "session": "restore-sess",
+    "completed_at": "2026-08-11T08:00:00+0900",
+    "daily": "{\"tab\":\"stale-task\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T08:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj2\",\"task_type\":\"dev\",\"claude_session_id\":\"sess-stale\",\"transcript_path\":\"{SANDBOX}/gone.jsonl\"}\n"
+  },
+  {
+    "name": "no-transcript-field",
+    "description": "transcript のパスが記録されていなければ新規セッションで起動する",
+    "tab": "notrans",
+    "session": "restore-sess",
+    "completed_at": "2026-08-11T06:00:00+0900",
+    "daily": "{\"tab\":\"notrans\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T06:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj2\",\"task_type\":\"dev\",\"claude_session_id\":\"sess-notrans\"}\n"
+  },
+  {
+    "name": "codex-resume",
+    "description": "codex は resume_args が違う(codex resume <id>)",
+    "tab": "cx-task",
+    "session": "codex-restore",
+    "completed_at": "2026-08-11T12:00:00+0900",
+    "daily": "{\"tab\":\"cx-task\",\"session\":\"codex-restore\",\"completed_at\":\"2026-08-11T12:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"dev\",\"claude_session_id\":\"thread-cx1\",\"transcript_path\":\"{SANDBOX}/transcript.jsonl\",\"agent\":\"codex\"}\n"
+  },
+  {
+    "name": "no-dir",
+    "description": "dir の記録が無いエントリは復元できない(exit 2)",
+    "tab": "legacy-task",
+    "session": "restore-sess",
+    "completed_at": "2026-08-11T09:00:00+0900",
+    "daily": "{\"tab\":\"legacy-task\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T09:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false}}\n"
+  },
+  {
+    "name": "gone-dir",
+    "description": "dir が消えたエントリは復元せず Done に残す(exit 3)",
+    "tab": "gone-task",
+    "session": "restore-sess",
+    "completed_at": "2026-08-11T07:00:00+0900",
+    "daily": "{\"tab\":\"gone-task\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T07:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/removed\",\"task_type\":\"dev\",\"claude_session_id\":\"sess-gone\",\"transcript_path\":\"{SANDBOX}/transcript.jsonl\"}\n"
+  },
+  {
+    "name": "not-found",
+    "description": "完了時刻が一致しなければ何もしない(exit 1)",
+    "tab": "restore-me",
+    "session": "restore-sess",
+    "completed_at": "2026-08-11T23:59:59+0900",
+    "daily": "{\"tab\":\"restore-me\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T10:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"dev\"}\n"
+  },
+  {
+    "name": "already-restored",
+    "description": "restored 済みのエントリは対象にならない(exit 1)",
+    "tab": "restore-me",
+    "session": "restore-sess",
+    "completed_at": "2026-08-11T10:00:00+0900",
+    "daily": "{\"tab\":\"restore-me\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T10:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"dev\",\"restored\":true}\n"
+  },
+  {
+    "name": "duplicate",
+    "description": "同じ (tab, completed_at) が並んでも片方だけ restored にする",
+    "tab": "dup-task",
+    "session": "dup-sess",
+    "completed_at": "2026-08-11T12:00:00+0900",
+    "daily": "{\"tab\":\"dup-task\",\"session\":\"dup-sess\",\"completed_at\":\"2026-08-11T12:00:00+0900\",\"message\":\"first\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"dev\"}\n{\"tab\":\"dup-task\",\"session\":\"dup-sess\",\"completed_at\":\"2026-08-11T12:00:00+0900\",\"message\":\"second\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"dev\"}\n"
+  },
+  {
+    "name": "no-layout-task-type",
+    "description": "レイアウトを持たない task_type ではレイアウト操作が出ない",
+    "tab": "review-task",
+    "session": "restore-sess",
+    "completed_at": "2026-08-11T05:00:00+0900",
+    "daily": "{\"tab\":\"review-task\",\"session\":\"restore-sess\",\"completed_at\":\"2026-08-11T05:00:00+0900\",\"message\":\"done\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"review\"}\n"
+  },
+  {
+    "name": "screen-session-id",
+    "description": "スクリーン検出が合成したセッション ID で再開してしまう現行のバグ",
+    "known_difference": "Shell 版は screen- 前置の合成 ID をそのまま resume に渡す。Go 版は弾いて新規セッションで起動する(evidence §5-1)。zellij 呼び出し列は比較せず、Go 側が合成 ID を渡さないことだけを確かめる。",
+    "tab": "cx-screen",
+    "session": "codex-restore",
+    "completed_at": "2026-08-11T13:00:00+0900",
+    "daily": "{\"tab\":\"cx-screen\",\"session\":\"codex-restore\",\"completed_at\":\"2026-08-11T13:00:00+0900\",\"message\":\"Task complete\",\"summary\":null,\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false},\"dir\":\"{SANDBOX}/proj\",\"task_type\":\"dev\",\"claude_session_id\":\"screen-cx_screen-123456789\",\"transcript_path\":\"{SANDBOX}/transcript.jsonl\",\"agent\":\"codex\"}\n"
+  }
+]

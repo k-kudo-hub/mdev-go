@@ -1,0 +1,38 @@
+new-tab -n restore-me --cwd {SANDBOX}/proj -- env TASK_TAB_NAME=restore-me TASK_TYPE=dev claude --resume sess-restore
+query-tab-names
+go-to-tab-name restore-me
+new-pane --direction down --cwd {SANDBOX}/proj -- {TASK_CONTROL} restore-me
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+focus-previous-pane
+new-pane --direction right --cwd {SANDBOX}/proj -- nvim
+new-pane --direction down --cwd {SANDBOX}/proj -- lazygit
+move-focus left

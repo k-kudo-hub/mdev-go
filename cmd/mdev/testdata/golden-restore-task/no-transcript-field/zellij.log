@@ -1,0 +1,38 @@
+new-tab -n notrans --cwd {SANDBOX}/proj2 -- env TASK_TAB_NAME=notrans TASK_TYPE=dev claude
+query-tab-names
+go-to-tab-name notrans
+new-pane --direction down --cwd {SANDBOX}/proj2 -- {TASK_CONTROL} notrans
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+focus-previous-pane
+new-pane --direction right --cwd {SANDBOX}/proj2 -- nvim
+new-pane --direction down --cwd {SANDBOX}/proj2 -- lazygit
+move-focus left
