@@ -76,8 +76,12 @@ type DashboardPane struct {
 // 失敗は返らない。復元は最善努力で、作り直せなかったタスクはレジストリに
 // 残って次回の起動で再試行される。ここで止まってダッシュボードが出ないほうが
 // 害が大きい。
-func (p *DashboardPane) Startup(env PaneEnv) {
-	p.Restorer.Restore(env)
+//
+// 戻り値は作り直せなかったタスクの説明である。標準エラーへ書かずに返すのは、
+// このペインが動作中の Bubble Tea プログラムであり、同じ端末へ直接書くと
+// インラインレンダラの描画が崩れるためである。
+func (p *DashboardPane) Startup(env PaneEnv) []string {
+	return p.Restorer.Restore(env)
 }
 
 // Refresh は 1 回ぶんの描画内容を組み立てる。

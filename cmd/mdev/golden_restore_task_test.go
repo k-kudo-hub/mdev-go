@@ -235,7 +235,7 @@ func runGoldenRestore(t *testing.T, tc goldenRestoreCase) goldenRestoreResult {
 		Paths: paneStore,
 	}
 
-	err = restorer.Restore(app.PaneEnv{ZellijSession: tc.Session}, tc.Tab, tc.Session, tc.CompletedAt)
+	_, err = restorer.Restore(app.PaneEnv{ZellijSession: tc.Session}, tc.Tab, tc.Session, tc.CompletedAt)
 
 	got, readErr := os.ReadFile(dailyPath) //nolint:gosec // テストの一時ディレクトリ
 	if readErr != nil {

@@ -374,11 +374,13 @@ var _ app.SessionStarter = (*fakeSessionStarter)(nil)
 type fakeSessionStarter struct {
 	journal  *paneJournal
 	sessions []string
+	warnings []string
 }
 
-func (f *fakeSessionStarter) Restore(env app.PaneEnv) {
+func (f *fakeSessionStarter) Restore(env app.PaneEnv) []string {
 	f.sessions = append(f.sessions, env.Session())
 	f.journal.add("restore-session " + env.Session())
+	return f.warnings
 }
 
 var _ app.DailyRestoreStore = (*fakeDailyRestore)(nil)
@@ -413,11 +415,12 @@ var _ app.TaskRestoreRunner = (*fakeTaskRestoreRunner)(nil)
 
 // fakeTaskRestoreRunner は Done ペインから見た復元の呼び出しを記録する。
 type fakeTaskRestoreRunner struct {
-	calls []string
-	err   error
+	calls   []string
+	warning string
+	err     error
 }
 
-func (f *fakeTaskRestoreRunner) Restore(env app.PaneEnv, tab, session, completedAt string) error {
+func (f *fakeTaskRestoreRunner) Restore(env app.PaneEnv, tab, session, completedAt string) (string, error) {
 	f.calls = append(f.calls, strings.Join([]string{env.Session(), tab, session, completedAt}, " "))
-	return f.err
+	return f.warning, f.err
 }

@@ -19,24 +19,20 @@ type taskRestoreFixture struct {
 	daily    *fakeDailyRestore
 	creator  *fakeTaskMaker
 	paths    *fakePathChecker
-	warn     *strings.Builder
 }
 
 func newTaskRestoreFixture(target domain.DailyRestoreTarget, found bool) *taskRestoreFixture {
 	journal := &paneJournal{}
-	warn := &strings.Builder{}
 	f := &taskRestoreFixture{
 		journal: journal,
 		daily:   &fakeDailyRestore{journal: journal, target: target, found: found},
 		creator: &fakeTaskMaker{journal: journal},
 		paths:   &fakePathChecker{dirs: map[string]bool{}, files: map[string]bool{}},
-		warn:    warn,
 	}
 	f.restorer = &app.TaskRestorer{
 		Daily:   f.daily,
 		Creator: f.creator,
 		Paths:   f.paths,
-		Warn:    warn,
 	}
 	return f
 }
@@ -53,7 +49,7 @@ func TestTaskRestorerRestoresEntry(t *testing.T) {
 	f.paths.dirs["/w/proj"] = true
 	f.paths.files["/w/t.jsonl"] = true
 
-	if err := f.restorer.Restore(dashboardEnv, "restore-me", "done-sess", restoreAt); err != nil {
+	if _, err := f.restorer.Restore(dashboardEnv, "restore-me", "done-sess", restoreAt); err != nil {
 		t.Fatalf("Restore() = %v", err)
 	}
 
@@ -130,7 +126,7 @@ func TestTaskRestorerResumeConditions(t *testing.T) {
 				f.paths.files[tt.target.TranscriptPath] = true
 			}
 
-			if err := f.restorer.Restore(dashboardEnv, "t", "s", restoreAt); err != nil {
+			if _, err := f.restorer.Restore(dashboardEnv, "t", "s", restoreAt); err != nil {
 				t.Fatalf("Restore() = %v", err)
 			}
 			if len(f.creator.specs) != 1 {
@@ -227,7 +223,7 @@ func TestTaskRestorerExitContract(t *testing.T) {
 			f.creator.err = tt.createErr
 			f.daily.markErr = tt.markErr
 
-			err := f.restorer.Restore(dashboardEnv, tt.tab, tt.session, tt.at)
+			_, err := f.restorer.Restore(dashboardEnv, tt.tab, tt.session, tt.at)
 			if tt.want == nil && err != nil {
 				t.Fatalf("Restore() = %v, want nil", err)
 			}
@@ -259,14 +255,15 @@ func TestTaskRestorerCountsHalfBuiltTabAsSuccess(t *testing.T) {
 			f.paths.dirs["/w"] = true
 			f.creator.err = createErr
 
-			if err := f.restorer.Restore(dashboardEnv, "halfbuilt", "s", restoreAt); err != nil {
+			warning, err := f.restorer.Restore(dashboardEnv, "halfbuilt", "s", restoreAt)
+			if err != nil {
 				t.Fatalf("Restore() = %v", err)
 			}
 			if f.daily.marked != 1 {
 				t.Errorf("restored を付けていない: %d", f.daily.marked)
 			}
-			if !strings.Contains(f.warn.String(), "halfbuilt") {
-				t.Errorf("警告が出ていない: %q", f.warn.String())
+			if !strings.Contains(warning, "halfbuilt") {
+				t.Errorf("警告が返っていない: %q", warning)
 			}
 		})
 	}
@@ -283,7 +280,7 @@ func TestTaskRestorerUsesCompletionDate(t *testing.T) {
 	f := newTaskRestoreFixture(domain.DailyRestoreTarget{Dir: "/w"}, true)
 	f.paths.dirs["/w"] = true
 
-	if err := f.restorer.Restore(dashboardEnv, "t", "s", "2026-08-10T23:59:00+0900"); err != nil {
+	if _, err := f.restorer.Restore(dashboardEnv, "t", "s", "2026-08-10T23:59:00+0900"); err != nil {
 		t.Fatalf("Restore() = %v", err)
 	}
 	if want := "2026-08-10"; f.daily.dates[0] != want {
@@ -297,7 +294,7 @@ func TestTaskRestorerWithShortCompletedAt(t *testing.T) {
 	t.Parallel()
 
 	f := newTaskRestoreFixture(domain.DailyRestoreTarget{}, false)
-	err := f.restorer.Restore(dashboardEnv, "t", "s", "2026")
+	_, err := f.restorer.Restore(dashboardEnv, "t", "s", "2026")
 	if !errors.Is(err, app.ErrRestoreEntryNotFound) {
 		t.Errorf("Restore() = %v, want %v", err, app.ErrRestoreEntryNotFound)
 	}

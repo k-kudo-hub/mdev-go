@@ -3,8 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"io"
-	"strings"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
@@ -53,8 +51,6 @@ type TaskRestorer struct {
 	Daily   DailyRestoreStore
 	Creator TaskMaker
 	Paths   PathChecker
-	// Warn はタブだけ復元できた場合の説明を書く先。
-	Warn io.Writer
 }
 
 // Restore は (tab, session, completedAt) のタスクをダッシュボードへ戻す。
@@ -67,9 +63,13 @@ type TaskRestorer struct {
 // エラーの種類は現行版の終了コード 0-5 に対応する。タブが出来たあとに
 // daily の更新で失敗した場合(ErrRestoreDailyUpdate)は、タスクが Done に
 // 残ったまま**タブも存在する**状態になる。現行版と同じ挙動である。
-func (r *TaskRestorer) Restore(env PaneEnv, tab, session, completedAt string) error {
+//
+// 第 1 戻り値はタブだけ復元できた場合の説明である(空なら何も無い)。
+// **標準エラーへは書かない。** この処理は動作中の Bubble Tea プログラムの
+// 中から呼ばれ、同じ端末へ直接書くとインラインレンダラの描画が崩れる。
+func (r *TaskRestorer) Restore(env PaneEnv, tab, session, completedAt string) (string, error) {
 	if tab == "" || session == "" || completedAt == "" {
-		return fmt.Errorf("%w: 引数が足りません", ErrRestoreEntryNotFound)
+		return "", fmt.Errorf("%w: 引数が足りません", ErrRestoreEntryNotFound)
 	}
 	date := completedAt
 	if len(date) > dailyDateLength {
@@ -78,81 +78,30 @@ func (r *TaskRestorer) Restore(env PaneEnv, tab, session, completedAt string) er
 
 	target, found := r.Daily.FindRestorable(session, date, tab, completedAt)
 	if !found {
-		return fmt.Errorf("%w: %s(%s)", ErrRestoreEntryNotFound, tab, completedAt)
+		return "", fmt.Errorf("%w: %s(%s)", ErrRestoreEntryNotFound, tab, completedAt)
 	}
 	if target.Dir == "" {
-		return fmt.Errorf("%w: %s", ErrRestoreDirUnknown, tab)
+		return "", fmt.Errorf("%w: %s", ErrRestoreDirUnknown, tab)
 	}
 	if !r.Paths.IsDir(target.Dir) {
-		return fmt.Errorf("%w: %s(%s)", ErrRestoreDirMissing, tab, target.Dir)
+		return "", fmt.Errorf("%w: %s(%s)", ErrRestoreDirMissing, tab, target.Dir)
 	}
 
-	if err := r.create(env, tab, target); err != nil {
-		return err
+	warning, err := recreateTask(r.Creator, env, TaskSpec{
+		Dir:    target.Dir,
+		Type:   target.TaskType,
+		Name:   tab,
+		Resume: resumeSessionID(r.Paths, target.ClaudeSessionID, target.TranscriptPath),
+		Agent:  target.Agent,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: %s: %w", ErrRestoreTabFailed, tab, err)
 	}
 
 	// タブが実際に出来たときだけ印を付ける。付けてしまうと Done から消え、
 	// 作業ログだけが残って手掛かりが無くなる。
 	if err := r.Daily.MarkRestored(session, date, tab, completedAt); err != nil {
-		return fmt.Errorf("%w: %s: %w", ErrRestoreDailyUpdate, tab, err)
+		return warning, fmt.Errorf("%w: %s: %w", ErrRestoreDailyUpdate, tab, err)
 	}
-	return nil
-}
-
-// create はタブを作り直す。
-//
-// タブは出来たがフォーカスを確認できずペインを組めなかった場合
-// (ErrTabNotRegistered / ErrFocusNotConfirmed = 現行版の rc=3)は成功として
-// 扱う。タブとエージェントは動いており、Done に残して再試行させると同名タブが
-// 増えるだけになる。
-func (r *TaskRestorer) create(env PaneEnv, tab string, target domain.DailyRestoreTarget) error {
-	_, err := r.Creator.Execute(env, TaskSpec{
-		Dir:    target.Dir,
-		Type:   target.TaskType,
-		Name:   tab,
-		Resume: r.resumeID(target),
-		Agent:  target.Agent,
-	})
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, ErrTabNotRegistered), errors.Is(err, ErrFocusNotConfirmed):
-		r.warnf("タスク %s はタブだけ復元しました(操作バーは作れていません): %v", tab, err)
-		return nil
-	default:
-		return fmt.Errorf("%w: %s: %w", ErrRestoreTabFailed, tab, err)
-	}
-}
-
-// resumeID は再開に使うエージェントのセッション ID を返す。
-//
-// 現行版の 3 条件(セッション ID がある / transcript のパスが記録されている /
-// そのファイルが実在する)に加えて、**スクリーン検出が合成した ID を除く**。
-//
-// hook を持たないエージェント(codex)の完了はタブの画面から検出するため、
-// その pending の claude_session_id は `screen-<slug>` というタブ名から作った
-// 合成 ID である(domain.ScreenPendingSessionID)。これは daily ログにもその
-// まま書かれ、transcript はレジストリから借りて実在するので、現行版の 3 条件を
-// そのまま通ってしまう。結果として Done から戻したときに
-// `codex resume screen-cx_task-1234567890` という存在しない ID で起動する。
-// Go 版で足した修正で、Shell 版との意図的な差異である(evidence §5-1)。
-func (r *TaskRestorer) resumeID(target domain.DailyRestoreTarget) string {
-	if target.ClaudeSessionID == "" || target.TranscriptPath == "" {
-		return ""
-	}
-	if strings.HasPrefix(target.ClaudeSessionID, domain.ScreenSessionIDPrefix) {
-		return ""
-	}
-	if !r.Paths.IsFile(target.TranscriptPath) {
-		return ""
-	}
-	return target.ClaudeSessionID
-}
-
-// warnf は警告を 1 行書く。書き込みの失敗を報告する先は無いため無視する。
-func (r *TaskRestorer) warnf(format string, args ...any) {
-	if r.Warn == nil {
-		return
-	}
-	_, _ = fmt.Fprintf(r.Warn, "mdev: "+format+"\n", args...)
+	return warning, nil
 }

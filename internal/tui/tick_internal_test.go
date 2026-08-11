@@ -28,11 +28,16 @@ type tickDashboard struct {
 	refreshes int
 	// calls は Startup と Refresh の呼び出し順。
 	calls []string
+	// warnings は Startup が返す起動時復元の説明。
+	warnings []string
 }
 
 var _ DashboardService = (*tickDashboard)(nil)
 
-func (s *tickDashboard) Startup(app.PaneEnv) { s.calls = append(s.calls, "startup") }
+func (s *tickDashboard) Startup(app.PaneEnv) []string {
+	s.calls = append(s.calls, "startup")
+	return s.warnings
+}
 
 func (s *tickDashboard) Refresh(app.PaneEnv) (app.DashboardSnapshot, error) {
 	s.refreshes++
@@ -60,7 +65,7 @@ func (s *tickDone) Refresh() app.DoneSnapshot {
 	return s.snapshot
 }
 
-func (s *tickDone) Restore(app.PaneEnv, app.DoneSnapshot, int) {}
+func (s *tickDone) Restore(app.PaneEnv, app.DoneSnapshot, int) (string, error) { return "", nil }
 
 type tickWaiting struct {
 	text      string

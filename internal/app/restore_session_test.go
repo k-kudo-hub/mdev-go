@@ -18,12 +18,12 @@ type restoreFixture struct {
 	creator  *fakeTaskMaker
 	paths    *fakePathChecker
 	focuser  *fakePaneFocuser
-	warn     *strings.Builder
+	// warnings は直近の Restore が返した説明。
+	warnings []string
 }
 
 func newRestoreFixture(entries []domain.RegistryEntry, existing []string) *restoreFixture {
 	journal := &paneJournal{}
-	warn := &strings.Builder{}
 	f := &restoreFixture{
 		journal:  journal,
 		registry: &fakeRegistryReader{journal: journal, entries: map[string][]domain.RegistryEntry{"s1": entries}},
@@ -31,7 +31,6 @@ func newRestoreFixture(entries []domain.RegistryEntry, existing []string) *resto
 		creator:  &fakeTaskMaker{journal: journal},
 		paths:    &fakePathChecker{dirs: map[string]bool{}, files: map[string]bool{}},
 		focuser:  &fakePaneFocuser{journal: journal},
-		warn:     warn,
 	}
 	f.restorer = &app.SessionRestorer{
 		Registry: f.registry,
@@ -39,7 +38,6 @@ func newRestoreFixture(entries []domain.RegistryEntry, existing []string) *resto
 		Creator:  f.creator,
 		Paths:    f.paths,
 		Focuser:  f.focuser,
-		Warn:     warn,
 	}
 	return f
 }
@@ -57,7 +55,7 @@ func TestSessionRestorerRecreatesTasks(t *testing.T) {
 	f.paths.dirs["/w/alpha"] = true
 	f.paths.files["/w/t.jsonl"] = true
 
-	f.restorer.Restore(dashboardEnv)
+	f.warnings = f.restorer.Restore(dashboardEnv)
 
 	want := []app.TaskSpec{
 		{Dir: "/w/alpha", Type: "dev", Name: "alpha-dev", Resume: "sid-1", Agent: "codex"},
@@ -112,7 +110,7 @@ func TestSessionRestorerResumeConditions(t *testing.T) {
 				f.paths.files[tt.entry.TranscriptPath] = true
 			}
 
-			f.restorer.Restore(dashboardEnv)
+			f.warnings = f.restorer.Restore(dashboardEnv)
 
 			if len(f.creator.specs) != 1 {
 				t.Fatalf("作り直したタスク = %d 件, want 1", len(f.creator.specs))
@@ -169,7 +167,7 @@ func TestSessionRestorerSkipsAndDrops(t *testing.T) {
 				f.paths.dirs[tt.entry.Dir] = true
 			}
 
-			f.restorer.Restore(dashboardEnv)
+			f.warnings = f.restorer.Restore(dashboardEnv)
 
 			if len(f.creator.specs) != 0 {
 				t.Errorf("作り直してしまった: %+v", f.creator.specs)
@@ -212,13 +210,13 @@ func TestSessionRestorerCountsHalfBuiltTabs(t *testing.T) {
 			f.paths.dirs["/w"] = true
 			f.creator.err = err
 
-			f.restorer.Restore(dashboardEnv)
+			f.warnings = f.restorer.Restore(dashboardEnv)
 
 			if want := []string{"create-task halfbuilt", "go-to-tab-name Main"}; !reflect.DeepEqual(f.journal.entries, want) {
 				t.Errorf("副作用の並び = %v, want %v", f.journal.entries, want)
 			}
-			if !strings.Contains(f.warn.String(), "halfbuilt") {
-				t.Errorf("警告が出ていない: %q", f.warn.String())
+			if len(f.warnings) != 1 || !strings.Contains(f.warnings[0], "halfbuilt") {
+				t.Errorf("警告が返っていない: %q", f.warnings)
 			}
 			// エントリは残す(次回の起動で既存タブとしてスキップされる)。
 			if len(f.registry.removed) != 0 {
@@ -237,13 +235,13 @@ func TestSessionRestorerDoesNotCountHardFailures(t *testing.T) {
 	f.paths.dirs["/w"] = true
 	f.creator.err = errCreateFailed
 
-	f.restorer.Restore(dashboardEnv)
+	f.warnings = f.restorer.Restore(dashboardEnv)
 
 	if want := []string{"create-task broken"}; !reflect.DeepEqual(f.journal.entries, want) {
 		t.Errorf("副作用の並び = %v, want %v", f.journal.entries, want)
 	}
-	if !strings.Contains(f.warn.String(), "broken") {
-		t.Errorf("警告が出ていない: %q", f.warn.String())
+	if len(f.warnings) != 1 || !strings.Contains(f.warnings[0], "broken") {
+		t.Errorf("警告が返っていない: %q", f.warnings)
 	}
 	// エントリは残す(次回の起動で再試行できるように)。
 	if len(f.registry.removed) != 0 {
@@ -268,7 +266,7 @@ func TestSessionRestorerPicksNewestEntryPerTab(t *testing.T) {
 	f.paths.dirs["/w"] = true
 	f.paths.files["/w/t.jsonl"] = true
 
-	f.restorer.Restore(dashboardEnv)
+	f.warnings = f.restorer.Restore(dashboardEnv)
 
 	if len(f.creator.specs) != 1 {
 		t.Fatalf("作り直したタスク = %d 件, want 1", len(f.creator.specs))
@@ -290,7 +288,7 @@ func TestSessionRestorerRestoresInTabNameOrder(t *testing.T) {
 	}, []string{"Main"})
 	f.paths.dirs["/w"] = true
 
-	f.restorer.Restore(dashboardEnv)
+	f.warnings = f.restorer.Restore(dashboardEnv)
 
 	got := []string{}
 	for _, spec := range f.creator.specs {
@@ -323,7 +321,7 @@ func TestSessionRestorerIsSilentWithoutEntries(t *testing.T) {
 			f := newRestoreFixture(tt.entries, []string{"Main"})
 			f.registry.err = tt.err
 
-			f.restorer.Restore(dashboardEnv)
+			f.warnings = f.restorer.Restore(dashboardEnv)
 
 			if len(f.journal.entries) != 0 {
 				t.Errorf("副作用が起きた: %v", f.journal.entries)
@@ -350,7 +348,7 @@ func TestSessionRestorerQueriesTabsOnce(t *testing.T) {
 	}, []string{"Main"})
 	f.paths.dirs["/w"] = true
 
-	f.restorer.Restore(dashboardEnv)
+	f.warnings = f.restorer.Restore(dashboardEnv)
 
 	if f.tabs.calls != 1 {
 		t.Errorf("query-tab-names の呼び出し = %d 回, want 1", f.tabs.calls)

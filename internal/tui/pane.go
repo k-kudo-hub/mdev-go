@@ -166,6 +166,16 @@ func errorLine(err error) string {
 	return "\033[0;31m\033[1mError: " + err.Error() + "\033[0m"
 }
 
+// warningLine は警告を画面へ出す 1 行にする。
+//
+// エラー(赤)と分けるのは、警告が「処理は進んだが完全ではない」ことを表す
+// ためである。復元で言えば、タブは出来ているので押し直す必要は無い。
+// ユースケースが標準エラーへ書かずに文字列で返すのは、ペインが動作中の
+// Bubble Tea プログラムであり、同じ端末へ直接書くと描画が崩れるからである。
+func warningLine(message string) string {
+	return "\033[0;33m\033[1mWarning: " + message + "\033[0m"
+}
+
 // keyIndex はキーが 1-9 のときに 1 始まりの番号を返す。
 //
 // 現行版はいずれのペインも `[[ "$key" =~ [1-9] ]]` で 1 文字だけを見るため、
@@ -194,7 +204,7 @@ type Once interface {
 type (
 	// DashboardService は Dashboard ペインのユースケース。
 	DashboardService interface {
-		Startup(app.PaneEnv)
+		Startup(app.PaneEnv) []string
 		Refresh(app.PaneEnv) (app.DashboardSnapshot, error)
 		Jump(app.PaneEnv, app.DashboardSnapshot, int) error
 		PrepareDelete(app.PaneEnv, string) (app.DeletePreparation, error)
@@ -209,7 +219,7 @@ type (
 	// DoneService は Done ペインのユースケース。
 	DoneService interface {
 		Refresh() app.DoneSnapshot
-		Restore(app.PaneEnv, app.DoneSnapshot, int)
+		Restore(app.PaneEnv, app.DoneSnapshot, int) (string, error)
 	}
 
 	// NewsService は News ペインのユースケース。

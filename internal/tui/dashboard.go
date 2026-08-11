@@ -21,6 +21,9 @@ type (
 	dashboardRefreshedMsg struct {
 		snapshot app.DashboardSnapshot
 		err      error
+		// warnings は起動時の復元で作り直せなかったタスクの説明。
+		// 起動の 1 回だけ入り、それ以降の読み直しでは空である。
+		warnings []string
 		// poll はこの読み直しがポーリング起源かどうかを表す。真のときだけ
 		// 着弾で次の合図を張る(pane.go の「完了起点」の説明を参照)。
 		poll bool
@@ -49,6 +52,13 @@ type DashboardModel struct {
 
 	snapshot app.DashboardSnapshot
 	err      error
+
+	// warnings は起動時の復元で作り直せなかったタスクの説明である。
+	//
+	// 一時的な通知(notice)ではなく出しっぱなしにする。作り直せなかった
+	// タスクは画面に出てこないままなので、2 秒で消すと「そのタスクが無い」
+	// ことに気づく手掛かりが残らない。ペインを開き直すまで残す。
+	warnings []string
 
 	// awaiting は d の後の番号入力を待っている状態。
 	awaiting bool
@@ -85,9 +95,9 @@ func (m DashboardModel) Init() tea.Cmd {
 // チェーンの起点なのでポーリング起源として返す。
 func (m DashboardModel) startupCmd() tea.Cmd {
 	return func() tea.Msg {
-		m.pane.Startup(m.env)
+		warnings := m.pane.Startup(m.env)
 		snapshot, err := m.pane.Refresh(m.env)
-		return dashboardRefreshedMsg{snapshot: snapshot, err: err, poll: true}
+		return dashboardRefreshedMsg{snapshot: snapshot, err: err, warnings: warnings, poll: true}
 	}
 }
 
@@ -95,7 +105,7 @@ func (m DashboardModel) startupCmd() tea.Cmd {
 //
 // 起動時の復元とスクリーン検出は現行の ONCE 経路と同じく走らせる。
 func (m DashboardModel) Once() (string, error) {
-	m.pane.Startup(m.env)
+	m.warnings = m.pane.Startup(m.env)
 	snapshot, err := m.pane.Refresh(m.env)
 	if err != nil {
 		return "", err
@@ -115,6 +125,9 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// また失敗していても、必ずここを通す(実行中の数を減らし、ポーリング
 		// 起源なら次の合図を張る)。
 		next := m.polling.arrive(msg.poll)
+		if len(msg.warnings) > 0 {
+			m.warnings = msg.warnings
+		}
 		if m.awaiting {
 			// 待ち受けに入る前に発行した読み直しが着弾した。ここで一覧を
 			// 差し替えると押した番号が別のタブを指すため、捨てる。
@@ -324,6 +337,9 @@ func (m DashboardModel) body() string {
 	}
 	if m.err != nil {
 		out += "  " + errorLine(m.err) + "\n"
+	}
+	for _, warning := range m.warnings {
+		out += "  " + warningLine(warning) + "\n"
 	}
 	return out
 }

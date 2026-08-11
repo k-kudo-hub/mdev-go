@@ -21,8 +21,12 @@ type DoneSnapshot struct {
 
 // TaskRestoreRunner は Done のタスクをダッシュボードへ戻す。
 // 実体は TaskRestorer である。
+//
+// 第 1 戻り値はタブだけ復元できた場合の説明である。**標準エラーへ書いては
+// ならない。** この処理は動作中の Bubble Tea プログラムの中から呼ばれ、
+// 同じ端末へ直接書くとインラインレンダラの描画が崩れる。
 type TaskRestoreRunner interface {
-	Restore(env PaneEnv, tab, session, completedAt string) error
+	Restore(env PaneEnv, tab, session, completedAt string) (string, error)
 }
 
 // DonePane は Done ペインのユースケースである(現行 done-loop.sh 相当)。
@@ -43,19 +47,19 @@ func (p *DonePane) Refresh() DoneSnapshot {
 
 // Restore は snapshot の number 番目(1 始まり)のタスクをダッシュボードへ戻す。
 //
-// 失敗は返さない。現行版も終了コードを `2>/dev/null` で握り潰しており、
-// 失敗した場合はエントリが Done に残ったままになる(次のポーリングで
-// 再表示される)ことで利用者が気づく作りになっている。ここは TUI の中なので、
-// 標準エラーへ書くと画面が崩れる。
+// 戻り値は「画面へ出す説明」と失敗である。現行 Shell 版は終了コードを
+// `2>/dev/null` で握り潰しており、失敗しても画面には何も出ない。復元は
+// キーを押した結果として起きるので、無反応だと利用者は押し直す。同じ名前の
+// タブが増えるだけなので、失敗は必ず出す(意図的な改善)。
 //
 // 渡す 3 つ組は表示に使ったものと同じである。現行版の読み直しで値がずれた
 // 行では、ずれたままの値が渡る(domain.DoneRow のコメントを参照)。
-func (p *DonePane) Restore(env PaneEnv, snapshot DoneSnapshot, number int) {
+func (p *DonePane) Restore(env PaneEnv, snapshot DoneSnapshot, number int) (string, error) {
 	if number < 1 || number > len(snapshot.rows) {
-		return
+		return "", nil
 	}
 	row := snapshot.rows[number-1]
-	_ = p.Restorer.Restore(env, row.Tab, row.Session, row.CompletedAt)
+	return p.Restorer.Restore(env, row.Tab, row.Session, row.CompletedAt)
 }
 
 // WaitingPane は Waiting ペインのユースケースである(現行 waiting-loop.sh 相当)。

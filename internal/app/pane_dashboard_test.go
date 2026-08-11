@@ -420,3 +420,20 @@ func TestDashboardPaneCommitDeleteWithoutResolvableTabID(t *testing.T) {
 			f.remover.deletedTabs, f.registry.removed)
 	}
 }
+
+// TestDashboardPaneStartupReturnsWarnings は復元の警告を戻り値で返すことを
+// 固定する。
+//
+// 標準エラーへ書かないのは、このペインが動作中の Bubble Tea プログラムであり、
+// 同じ端末へ直接書くとインラインレンダラの描画が崩れるためである。
+func TestDashboardPaneStartupReturnsWarnings(t *testing.T) {
+	t.Parallel()
+
+	f := newDashboardFixture(nil, "")
+	f.restorer.warnings = []string{"タスク alpha を復元できませんでした"}
+
+	got := f.pane.Startup(dashboardEnv)
+	if want := []string{"タスク alpha を復元できませんでした"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Startup() = %v, want %v", got, want)
+	}
+}

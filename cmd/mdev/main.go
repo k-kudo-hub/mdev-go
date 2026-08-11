@@ -111,24 +111,25 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	}
 
 	// セッション復元(起動時にレジストリからタスクタブを作り直す)。
-	// 最善努力なので、作り直せなかったタスクの説明は stderr に出すだけで
-	// ダッシュボードの起動は止めない。
+	// 最善努力なので、作り直せなかったタスクの説明は戻り値で受け取り、
+	// ダッシュボードの画面へ出す。ペインは動作中の Bubble Tea プログラム
+	// なので、標準エラーへ直接書くと描画が崩れる。
 	restorer := &app.SessionRestorer{
 		Registry: registry,
 		Tabs:     tabs,
 		Creator:  creator,
 		Paths:    paneStore,
 		Focuser:  zellij.NewFocuser(),
-		Warn:     os.Stderr,
 	}
 
 	// Done からの復元。daily ログの読み書きは DailyStore が持ち、タブの
-	// 作り直しはタスク作成をそのまま再利用する。
+	// 作り直しはタスク作成をそのまま再利用する。警告の出力先を渡さない
+	// (nil)のは、この経路がロックを取れなければ書き込まずにエラーを返し、
+	// 標準エラーへ書くことが無いためである。
 	taskRestorer := &app.TaskRestorer{
-		Daily:   store.NewDailyStore(store.DailyRoot(conductorHome), os.Stderr),
+		Daily:   store.NewDailyStore(store.DailyRoot(conductorHome), nil),
 		Creator: creator,
 		Paths:   paneStore,
-		Warn:    os.Stderr,
 	}
 
 	panes := tui.Panes{
