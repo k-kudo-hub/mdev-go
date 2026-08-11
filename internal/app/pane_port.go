@@ -234,7 +234,7 @@ type URLOpener interface {
 
 // ShellRunner は移行期に Shell のまま残るスクリプトを呼ぶ。
 //
-// いずれもフェーズ 4 以降で Go 化する予定で、それまでは env
+// いずれもフェーズ 5 で Go 化する予定で、それまでは env
 // (ZELLIJ_SESSION_NAME / CONDUCTOR_HOME)を引き継いだ同期呼び出しにする。
 type ShellRunner interface {
 	// UploadLog は upload-log.sh を呼ぶ。
@@ -245,20 +245,6 @@ type ShellRunner interface {
 	// `upload-log: ` を取り除いたもので、空なら表示するものが無い。
 	UploadLog(tab string) (output string, err error)
 
-	// RestoreTask は restore-task.sh を呼ぶ。終了コードは見ない(現行と同じ)。
-	RestoreTask(tab, session, completedAt string)
-
 	// FetchNews は fetch-news.sh --force を同期で呼ぶ。
 	FetchNews()
-
-	// RestoreSession は restore-session.sh を呼ぶ(Dashboard の起動時)。
-	RestoreSession()
-
-	// ScreenDetectTick は screen-detect-lib.sh の screen_detect_tick を呼ぶ。
-	//
-	// Dashboard のポーリングの先頭で走らせる。設定に screen 方式のエージェント
-	// (codex)がある場合に限り毎回呼ぶ。呼ばないとそのエージェントのタスクが
-	// 一覧に出てこない。1 つも設定されていない場合は呼ばない
-	// (DashboardPane.Refresh を参照)。
-	ScreenDetectTick(session string)
 }

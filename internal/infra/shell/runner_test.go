@@ -2,8 +2,6 @@ package shell
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -89,7 +87,7 @@ func TestRunnerPassesEnvToChildren(t *testing.T) {
 	// スクリプトは CONDUCTOR_HOME と ZELLIJ_SESSION_NAME を見るため、
 	// 子プロセスへの引き継ぎが欠かせない。
 	r, calls := newTestRunner("", nil)
-	r.RestoreSession()
+	r.FetchNews()
 
 	env := (*calls)[0].env
 	for _, want := range []string{"CONDUCTOR_HOME=/ch", "ZELLIJ_SESSION_NAME=s1"} {
@@ -108,19 +106,14 @@ func TestRunnerScriptCalls(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "restore-task は 3 つの引数を渡す",
-			call: func(r *Runner) { r.RestoreTask("alpha", "s1", "2026-08-09T10:00:00+0900") },
-			want: []string{"/ch/scripts/restore-task.sh", "alpha", "s1", "2026-08-09T10:00:00+0900"},
+			name: "upload-log はタブ名を渡す",
+			call: func(r *Runner) { _, _ = r.UploadLog("alpha") },
+			want: []string{"/ch/scripts/upload-log.sh", "alpha"},
 		},
 		{
 			name: "fetch-news は --force を付ける",
 			call: func(r *Runner) { r.FetchNews() },
 			want: []string{"/ch/scripts/fetch-news.sh", "--force"},
-		},
-		{
-			name: "restore-session は引数なし",
-			call: func(r *Runner) { r.RestoreSession() },
-			want: []string{"/ch/scripts/restore-session.sh"},
 		},
 	}
 
@@ -133,66 +126,6 @@ func TestRunnerScriptCalls(t *testing.T) {
 				t.Errorf("引数 = %v, want %v", (*calls)[0].args, tt.want)
 			}
 		})
-	}
-}
-
-func TestRunnerScreenDetectTickSourcesLibrary(t *testing.T) {
-	t.Parallel()
-
-	// screen-detect-lib.sh は関数を定義するだけなので、source してから呼ぶ。
-	r, calls := newTestRunner("", nil)
-	r.ScreenDetectTick("s1")
-
-	args := (*calls)[0].args
-	if args[0] != "-c" {
-		t.Fatalf("bash -c で呼んでいない: %v", args)
-	}
-	if !strings.Contains(args[1], "screen_detect_tick") {
-		t.Errorf("関数を呼んでいない: %q", args[1])
-	}
-	// パスもセッション名も位置パラメータで渡す。本文へ埋め込むと、値に含まれる
-	// `$` やバッククォートを bash が展開してしまう。
-	if strings.Contains(args[1], "/ch/scripts/screen-detect-lib.sh") {
-		t.Errorf("パスを本文へ埋め込んでいる: %q", args[1])
-	}
-	want := []string{"_", "/ch/scripts/screen-detect-lib.sh", "s1"}
-	if !reflect.DeepEqual(args[2:], want) {
-		t.Errorf("位置パラメータ = %v, want %v", args[2:], want)
-	}
-}
-
-func TestRunnerScreenDetectTickDoesNotExpandConductorHome(t *testing.T) {
-	// 実際の bash で確かめる。os.Chdir を伴うため並列化しない。
-	root := t.TempDir()
-	t.Chdir(root)
-
-	// `$(...)` とバッククォートを含む CONDUCTOR_HOME。fmt の %q は shell の
-	// エスケープではないので、スクリプト本文へ埋め込むと bash がこれを
-	// コマンド置換として実行し、source 先のパスも別物に化ける。
-	home := filepath.Join(root, "h $(touch pwned) `touch pwned`")
-	scripts := filepath.Join(home, "scripts")
-	if err := os.MkdirAll(scripts, 0o755); err != nil {
-		t.Fatalf("ディレクトリの作成に失敗: %v", err)
-	}
-
-	// 呼ばれたことと引数を記録するだけのライブラリを置く。
-	called := filepath.Join(root, "called")
-	lib := "screen_detect_tick() { printf '%s' \"$1\" > \"" + called + "\"; }\n"
-	if err := os.WriteFile(filepath.Join(scripts, "screen-detect-lib.sh"), []byte(lib), 0o600); err != nil {
-		t.Fatalf("ライブラリの配置に失敗: %v", err)
-	}
-
-	NewRunner(home).ScreenDetectTick("s1")
-
-	if _, err := os.Stat(filepath.Join(root, "pwned")); err == nil {
-		t.Error("CONDUCTOR_HOME に含まれる文字列がコマンドとして実行された")
-	}
-	got, err := os.ReadFile(called)
-	if err != nil {
-		t.Fatalf("screen_detect_tick が呼ばれていない: %v", err)
-	}
-	if string(got) != "s1" {
-		t.Errorf("渡されたセッション名 = %q, want s1", got)
 	}
 }
 
@@ -223,32 +156,17 @@ func TestNewRunnerSetsConductorHome(t *testing.T) {
 func TestRunnerAppliesTimeoutPerScript(t *testing.T) {
 	t.Parallel()
 
-	// ポーリングと起動の経路にだけ上限を付ける。ここが返らないとポーリングが
-	// 止まる(完了起点なので、着弾しないと次の合図が張られない)。
-	// 利用者が起こす長時間処理は待つほうが安全なので上限を付けない。
+	// ここに残っているのは利用者が起こす長時間処理だけで、いずれも途中で
+	// 切ると作業ログを失う・取得が中途半端に終わる。ポーリングのチェーンも
+	// 止めない経路なので上限は付けない。
 	tests := []struct {
 		name string
 		call func(*Runner)
 		want time.Duration
 	}{
 		{
-			name: "スクリーン検出は 15 秒",
-			call: func(r *Runner) { r.ScreenDetectTick("s1") },
-			want: 15 * time.Second,
-		},
-		{
-			name: "セッション復元は 60 秒",
-			call: func(r *Runner) { r.RestoreSession() },
-			want: 60 * time.Second,
-		},
-		{
 			name: "アップロードは上限なし",
 			call: func(r *Runner) { _, _ = r.UploadLog("alpha") },
-			want: 0,
-		},
-		{
-			name: "restore-task は上限なし",
-			call: func(r *Runner) { r.RestoreTask("alpha", "s1", "2026-08-10T10:00:00+0900") },
 			want: 0,
 		},
 		{

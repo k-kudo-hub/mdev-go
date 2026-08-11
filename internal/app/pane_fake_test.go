@@ -187,10 +187,7 @@ type fakeShellRunner struct {
 	uploadErr    error
 
 	uploadedTabs   []string
-	restoredTasks  []string
 	fetchNewsCalls int
-	restoreCalls   int
-	detectSessions []string
 }
 
 func (f *fakeShellRunner) UploadLog(tab string) (string, error) {
@@ -199,24 +196,9 @@ func (f *fakeShellRunner) UploadLog(tab string) (string, error) {
 	return f.uploadOutput, f.uploadErr
 }
 
-func (f *fakeShellRunner) RestoreTask(tab, session, completedAt string) {
-	f.restoredTasks = append(f.restoredTasks, strings.Join([]string{tab, session, completedAt}, " "))
-	f.journal.add("restore-task " + tab)
-}
-
 func (f *fakeShellRunner) FetchNews() {
 	f.fetchNewsCalls++
 	f.journal.add("fetch-news")
-}
-
-func (f *fakeShellRunner) RestoreSession() {
-	f.restoreCalls++
-	f.journal.add("restore-session")
-}
-
-func (f *fakeShellRunner) ScreenDetectTick(session string) {
-	f.detectSessions = append(f.detectSessions, session)
-	f.journal.add("screen-detect-tick " + session)
 }
 
 // --- スクリーン検出用の fake ---
