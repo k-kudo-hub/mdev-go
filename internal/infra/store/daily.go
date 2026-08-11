@@ -121,24 +121,33 @@ func (s *DailyStore) FindRestorable(session, date, tab, completedAt string) (dom
 // MarkRestored は (tab, completedAt) に一致する最初の 1 件へ
 // `restored: true` を付ける。
 //
-// 読み書き直しの間は daily ログのロックを握る。並行する Append(完了の記録)が
-// 追記した行を、こちらの書き戻しで消してしまわないようにするためである。
-// ロックを取れなかった場合は警告したうえで続ける(fail-open)。ロック待ちで
-// 復元が止まるほうが、まれな競合よりも実害が大きい。
+// **ロックを取れなければ書き戻さずエラーを返す。** これはファイル全体の
+// 読み書き直しであり、読んでから rename するまでの窓に並行する Append
+// (完了の記録)の追記が挟まると、その行ごと消えてしまう。Append の側は
+// O_APPEND なので競合しても行を失わず、ロックが取れないときは追記だけを
+// 続ける(fail-open)。書き直す側だけがロックを必須にするという分担で、
+// Append の removeSupersededDaily も同じ規則である。
 //
-// ファイルを読めない場合と、1 行でも JSON として読めない場合はエラーを返し、
-// ファイルには一切触れない(現行版の exit 5 に対応する)。
+// 現行 Shell 版はロックを取れなくても書き戻すが、そちらへは揃えない。
+// 取り損ねたときの被害が「復元が 1 回失敗する(Done に残って再試行できる)」と
+// 「完了の記録が消える(取り戻せない)」で釣り合わないためである
+// (意図的な差異。evidence §5-3)。
+//
+// ファイルを読めない場合と、1 行でも JSON として読めない場合もエラーを返し、
+// ファイルには一切触れない(いずれも現行版の exit 5 に対応する)。
 func (s *DailyStore) MarkRestored(session, date, tab, completedAt string) error {
 	path := s.path(session, date)
 
 	lock := NewLock(path + ".lock")
 	acquired, err := lock.Acquire(DailyLockTimeout)
-	if err != nil || !acquired {
-		s.warnLockUnavailable(path, err)
+	if err != nil {
+		return fmt.Errorf("daily ログ %s のロックの取得に失敗しました: %w", path, err)
 	}
-	if acquired {
-		defer func() { _ = lock.Release() }()
+	if !acquired {
+		return fmt.Errorf("daily ログ %s のロックを取得できませんでした(%s)",
+			path, DailyLockTimeout)
 	}
+	defer func() { _ = lock.Release() }()
 
 	content, err := os.ReadFile(path) //nolint:gosec // daily の規約どおりのパス
 	if err != nil {

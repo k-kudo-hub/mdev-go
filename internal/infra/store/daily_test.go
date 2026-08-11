@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -648,5 +649,50 @@ func TestDailyStoreMarkRestoredFailsWithoutFile(t *testing.T) {
 	s := store.NewDailyStore(t.TempDir(), io.Discard)
 	if err := s.MarkRestored("s1", "2026-08-11", "t", "x"); err == nil {
 		t.Error("MarkRestored() = nil, want エラー")
+	}
+}
+
+// TestDailyStoreMarkRestoredRequiresLock はロックを取れないときに
+// **書き戻さず**エラーを返すことを固定する。
+//
+// MarkRestored はファイル全体の読み書き直しなので、読んでから rename するまでの
+// 窓に並行する Append の追記が挟まるとその行ごと消える。Append は O_APPEND で
+// 行を失わないため、書き直す側だけがロックを必須にする。現行 Shell 版は
+// ロック無しでも書き戻すが、被害の大きさが釣り合わないので揃えない。
+func TestDailyStoreMarkRestoredRequiresLock(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := store.NewDailyStore(root, io.Discard)
+
+	const at = "2026-08-11T12:00:00+0900"
+	dir := filepath.Join(root, "s1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("ディレクトリの作成に失敗: %v", err)
+	}
+	path := filepath.Join(dir, "2026-08-11.jsonl")
+	content := `{"tab":"t","completed_at":"` + at + `","dir":"/w"}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("daily の作成に失敗: %v", err)
+	}
+
+	// 生きているプロセス(このテスト自身)が持っているロックは stale として
+	// 回収されないため、待ち時間ぶん待ってから諦める。
+	held := store.NewLock(path + ".lock")
+	acquired, err := held.Acquire(time.Second)
+	if err != nil || !acquired {
+		t.Fatalf("前提のロックを取得できない: %v", err)
+	}
+	defer func() { _ = held.Release() }()
+
+	if err := s.MarkRestored("s1", "2026-08-11", "t", at); err == nil {
+		t.Error("MarkRestored() = nil, want エラー")
+	}
+	got, err := os.ReadFile(path) //nolint:gosec // テストの一時ディレクトリ
+	if err != nil {
+		t.Fatalf("読み直しに失敗: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("ロック無しで書き戻した:\n%s", got)
 	}
 }
