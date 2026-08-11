@@ -38,7 +38,7 @@ codex の状態検出(`screen_detect_tick`)と復元(`restore-session.sh` / `res
 
 - [x] ゴールデン: restore-task 相当(stub zellij + fixture daily/registry で Shell を隔離実行し、daily の restored マーキングと zellij 呼び出し列を比較)。screen 検出は domain テーブルテストが一次(test.sh のケース網羅)+ 実 rollout ではなく fixture ダンプでの分類一致確認
 - [x] 既存ゴールデン 101 ケース不変・`make check` 緑
-- [ ] ユーザーテスト手順書 `docs/user-test-04-screen-restore.md`(codex タスクの blocked/done 検出、再起動復元(mdev 再起動で --resume が効く)、Done の r 復元、チェックリストと復元手順)
+- [x] ユーザーテスト手順書 `docs/user-test-04-screen-restore.md`(codex タスクの blocked/done 検出、再起動復元(mdev 再起動で --resume が効く)、Done の r 復元、チェックリストと復元手順)
 
 ## 完了条件
 
