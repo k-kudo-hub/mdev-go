@@ -2,7 +2,6 @@ package git
 
 import (
 	"os"
-	"os/exec"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -57,16 +56,4 @@ func (t *RemoteTags) LatestTag(url string) (string, bool) {
 		return "", false
 	}
 	return domain.LatestSemverTag(out)
-}
-
-// runGitWithEnv は環境変数を差し替えて git を実行し、標準出力を返す。
-// 標準エラー出力は捨てる(現行版も 2>/dev/null)。
-func runGitWithEnv(env []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...) //nolint:gosec // 引数は呼び出し側が組み立てた固定の並び
-	cmd.Env = env
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
 }

@@ -119,3 +119,92 @@ func TestPushReturnsReferenceWithSha(t *testing.T) {
 		t.Errorf("参照文字列 = %q, want %q", got, want)
 	}
 }
+
+// TestPushIgnoresRevParseFailure は push が済んだ後の rev-parse の失敗を
+// 握り潰して成功として返すことを確かめる。
+//
+// ここで error を返すと、ログは既にリポジトリへ残っているのに呼び出し側が
+// アップロードを失敗と見なし、タブの削除を中止してしまう(次の dd でまた
+// 同じログを push しにいく)。現行版も
+// `sha=$(git rev-parse HEAD 2>/dev/null)` の失敗を無視し、空の sha を
+// 埋めた参照文字列を出して正常終了する。
+func TestPushIgnoresRevParseFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		repo string
+		want string
+	}{
+		{
+			// ローカルパスは sha を使う形なので、空のまま埋まる。
+			// 現行版の `printf '%s @ %s\n'` と同じく末尾に空白が残る。
+			name: "ローカルパスは空の sha が埋まる",
+			repo: "/tmp/local.git",
+			want: "work-log/a.md @ ",
+		},
+		{
+			// owner/name は sha を使わないので、そもそも影響を受けない。
+			name: "owner/name は sha を使わないので影響しない",
+			repo: "owner/name",
+			want: "https://github.com/owner/name/blob/main/work-log/a.md",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := NewLogRepository(t.TempDir())
+			repo.lookGit = func() error { return nil }
+			repo.run = func(_ string, args ...string) (string, error) {
+				switch args[0] {
+				case "diff":
+					return "", errors.New("differences")
+				case "rev-parse":
+					return "", errors.New("HEAD を読めない")
+				}
+				return "", nil
+			}
+
+			got, err := repo.Push(tt.repo, "main", "work-log/a.md", "body")
+			if err != nil {
+				t.Fatalf("rev-parse の失敗で error になりました: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("参照文字列 = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPushStillFailsBeforeReference は push までの失敗は error のままである
+// ことを確かめる。rev-parse だけを握り潰したつもりが、その手前の失敗まで
+// 通してしまうと作業ログを失ったままタブが消える。
+func TestPushStillFailsBeforeReference(t *testing.T) {
+	for _, failing := range []string{"clone", "fetch", "checkout", "add", "commit", "push"} {
+		t.Run(failing, func(t *testing.T) {
+			repo := NewLogRepository(t.TempDir())
+			repo.lookGit = func() error { return nil }
+			repo.run = func(_ string, args ...string) (string, error) {
+				// commit は -c ... の後ろに来るため、並び全体で見る。
+				line := strings.Join(args, " ")
+				switch {
+				case args[0] == failing || strings.Contains(line, " "+failing+" "):
+					return "", errors.New("失敗")
+				case args[0] == "diff":
+					return "", errors.New("differences")
+				}
+				return "", nil
+			}
+
+			// fetch の失敗はブランチを作り直す正常な分岐なので、error にならない。
+			_, err := repo.Push("owner/name", "main", "work-log/a.md", "body")
+			if failing == "fetch" {
+				if err != nil {
+					t.Errorf("fetch の失敗は分岐であって error ではない: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Errorf("%s が失敗したのに error になりませんでした", failing)
+			}
+		})
+	}
+}

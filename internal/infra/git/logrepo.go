@@ -8,7 +8,6 @@
 package git
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,7 +53,7 @@ var _ app.LogPusher = (*LogRepository)(nil)
 func NewLogRepository(conductorHome string) *LogRepository {
 	return &LogRepository{
 		conductorHome: conductorHome,
-		run:           runGit,
+		run:           runGitIn,
 		lookGit:       func() error { _, err := exec.LookPath("git"); return err },
 	}
 }
@@ -92,10 +91,12 @@ func (r *LogRepository) Push(repo, branch, relPath, content string) (string, err
 		return "", err
 	}
 
-	sha, err := r.run(cache, "rev-parse", "HEAD")
-	if err != nil {
-		return "", fmt.Errorf("HEAD の取得に失敗しました: %w", err)
-	}
+	// **push が済んだ後の失敗は握り潰す。** ここまで来ればログは残っており、
+	// sha が読めないことを理由に error を返すと、呼び出し側がアップロードを
+	// 失敗と見なしてタブの削除を中止してしまう(次の dd でまた同じログを
+	// push しようとする)。現行版も `sha=$(git rev-parse HEAD 2>/dev/null)` の
+	// 失敗を無視し、空の sha を埋めた参照文字列を出して正常終了する。
+	sha, _ := r.run(cache, "rev-parse", "HEAD")
 	return LogReference(repo, branch, relPath, strings.TrimSpace(sha)), nil
 }
 
@@ -198,27 +199,4 @@ func LogReference(repo, branch, relPath, sha string) string {
 		return relPath + " @ " + sha
 	}
 	return "https://github.com/" + repo + "/blob/" + branch + "/" + relPath
-}
-
-// runGit は git を実行して標準出力を返す。
-//
-// dir が空でなければ `git -C <dir>` として実行する。標準エラー出力は捨てる
-// (現行版も 2>/dev/null)。上限は設けない。clone と push は回線と
-// リポジトリの大きさ次第で時間がかかり、途中で切ると作業ログを失うためで、
-// これは現行版と同じ判断である。
-func runGit(dir string, args ...string) (string, error) {
-	full := args
-	if dir != "" {
-		full = append([]string{"-C", dir}, args...)
-	}
-	cmd := exec.Command("git", full...) //nolint:gosec // 引数は呼び出し側が組み立てた固定の並び
-	out, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return string(out), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-		}
-		return "", fmt.Errorf("git の起動に失敗しました: %w", err)
-	}
-	return string(out), nil
 }
