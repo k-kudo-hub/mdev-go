@@ -1,0 +1,9 @@
+{
+  "tab": "done-task",
+  "session": "s1",
+  "claude_session_id": "sid-3",
+  "message": "m",
+  "event": "Stop",
+  "time": "23:05:58",
+  "agent": "claude"
+}

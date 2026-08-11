@@ -1,0 +1,1 @@
+[2m  m: Main  |  w: Waiting  |  dd: Delete tab[0m

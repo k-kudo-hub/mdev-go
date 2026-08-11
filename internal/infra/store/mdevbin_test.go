@@ -3,13 +3,17 @@ package store_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
 )
 
-var _ app.MdevBinaryLocator = (*store.MdevBinaryStore)(nil)
+var (
+	_ app.MdevBinaryLocator   = (*store.MdevBinaryStore)(nil)
+	_ app.TaskControlLauncher = (*store.MdevBinaryStore)(nil)
+)
 
 func TestMdevBinaryStore(t *testing.T) {
 	t.Parallel()
@@ -73,5 +77,16 @@ func TestMdevBinaryStore(t *testing.T) {
 				t.Errorf("exists = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMdevBinaryStoreTaskControlCommand(t *testing.T) {
+	t.Parallel()
+
+	// タブ名の手前に `--` を置く。`-` で始まる名前をフラグと解釈させないため。
+	s := store.NewMdevBinaryStore("/ch")
+	want := []string{filepath.Join("/ch", "bin", "mdev"), "pane", "task-control", "--", "-wip"}
+	if got := s.TaskControlCommand("-wip"); !reflect.DeepEqual(got, want) {
+		t.Errorf("TaskControlCommand() = %v, want %v", got, want)
 	}
 }

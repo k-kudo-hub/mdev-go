@@ -1,6 +1,10 @@
 package app
 
-import "github.com/k-kudo-hub/mdev-go/internal/domain"
+import (
+	"time"
+
+	"github.com/k-kudo-hub/mdev-go/internal/domain"
+)
 
 // ダッシュボード系 4 ペインのユースケースが必要とする port。
 //
@@ -18,13 +22,45 @@ type TabLister interface {
 	ListTabs() string
 }
 
-// TabCloser は id を指定してタブを閉じる。
+// TabCloser はタブを閉じる。
 //
-// 現行 Dashboard は close-tab のフォールバックを持たず、id が解決できなければ
-// 何もしない。その非対称(task-control 側にはフォールバックがある)も含めて
-// 呼び出し側で再現するため、この port は id を受ける形だけを持つ。
+// id で閉じるのが本筋である。削除フローは同期のアップロードを挟むため、その間に
+// 別のタブへ移っている可能性があり、`close-tab`(今のタブを閉じる)は無関係な
+// タブを巻き込みうる。
+//
+// フォールバックへ落ちるかどうかは呼び出し側が決める(TaskDeleter の
+// CloseActiveOnMissingID)。現行 Dashboard は id を引けなければ何もせず、
+// task-control だけが close-tab へ落ちるという非対称をそのまま再現している。
 type TabCloser interface {
 	CloseTabByID(id string)
+	// CloseActiveTab は今フォーカスしているタブを閉じる。
+	CloseActiveTab()
+}
+
+// TabActor はタスク作成とレイアウト適用が行う zellij 操作である。
+//
+// どのメソッドも「この 1 回を諦めるまでの時間」を先頭に受ける。劣化した
+// zellij サーバでは `zellij action` が返らないことがあり、35 回近い操作を
+// 積み上げるタスク作成は、全体の予算から逆算した上限を 1 回ごとに渡さないと
+// 数分固まる(現行 task-lib.sh の `_zj_budget_cap` に対応する)。
+// 実装側は渡された値を自分の上限(10 秒)で頭打ちにする。
+type TabActor interface {
+	// QueryTabNames は今あるタブの名前を返す。失敗時は空を返す。
+	QueryTabNames(timeout time.Duration) []string
+	// FocusTabVerified は名前でタブへフォーカスを移し、実際に移ったかを返す。
+	// `go-to-tab-name` は存在しない名前でも rc=0 で戻るため、成否は実装が
+	// stdout の有無で判定する。
+	FocusTabVerified(timeout time.Duration, name string) bool
+	// NewTab はタブを作る。戻り値でタブ作成の成否が分かる。
+	NewTab(timeout time.Duration, name, cwd string, command []string) error
+	// NewPane は今のタブへペインを足す。command が空なら素のシェルになる。
+	NewPane(timeout time.Duration, direction, cwd string, command []string) error
+	// MoveFocus は方向を指定してペインのフォーカスを移す。
+	MoveFocus(timeout time.Duration, direction string) error
+	// FocusPreviousPane は 1 つ前のペインへフォーカスを戻す。
+	FocusPreviousPane(timeout time.Duration) error
+	// Resize はペインの大きさを変える。引数の数は呼び出し元で違う。
+	Resize(timeout time.Duration, args ...string) error
 }
 
 // PendingLister は 1 セッションの pending をまとめて読む。

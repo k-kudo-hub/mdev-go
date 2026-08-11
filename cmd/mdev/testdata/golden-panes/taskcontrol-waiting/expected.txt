@@ -1,0 +1,1 @@
+[0;33m[1m  ● WAITING[0m[2m  |  m: Main  |  w: Resume  |  dd: Delete tab[0m

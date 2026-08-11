@@ -240,5 +240,47 @@
     "files": {
       "news/{TODAY}.json": "{\"items\":[{\"title\":\"n1\",\"url\":\"https://1\",\"description\":\"d1\"},{\"title\":\"n2\",\"url\":\"https://2\",\"description\":\"d2\"},{\"title\":\"n3\",\"url\":\"https://3\",\"description\":\"d3\"},{\"title\":\"n4\",\"url\":\"https://4\",\"description\":\"d4\"},{\"title\":\"n5\",\"url\":\"https://5\",\"description\":\"d5\"},{\"title\":\"n6\",\"url\":\"https://6\",\"description\":\"d6\"},{\"title\":\"n7\",\"url\":\"https://7\",\"description\":\"d7\"}]}"
     }
+  },
+  {
+    "name": "taskcontrol-basic",
+    "description": "pending が無いタスクの操作バー(通常表示)",
+    "pane": "task-control",
+    "arg": "my-task",
+    "session": "s1",
+    "tabs": "Main my-task",
+    "files": {}
+  },
+  {
+    "name": "taskcontrol-waiting",
+    "description": "pending が Waiting のタスクの操作バー(WAITING 表示)",
+    "pane": "task-control",
+    "arg": "my-task",
+    "session": "s1",
+    "tabs": "Main my-task",
+    "files": {
+      "pending/s1/a.json": "{\"tab\":\"my-task\",\"session\":\"s1\",\"message\":\"pr review\",\"event\":\"Waiting\",\"time\":\"10:00:00\",\"agent\":\"claude\"}"
+    }
+  },
+  {
+    "name": "taskcontrol-notification",
+    "description": "Waiting 以外の event(Notification)は通常表示のまま",
+    "pane": "task-control",
+    "arg": "my-task",
+    "session": "s1",
+    "tabs": "Main my-task",
+    "files": {
+      "pending/s1/a.json": "{\"tab\":\"my-task\",\"session\":\"s1\",\"message\":\"needs permission\",\"event\":\"Notification\",\"time\":\"10:00:00\",\"agent\":\"claude\"}"
+    }
+  },
+  {
+    "name": "taskcontrol-other-tab",
+    "description": "別タブの Waiting は自分の表示に影響しない",
+    "pane": "task-control",
+    "arg": "my-task",
+    "session": "s1",
+    "tabs": "Main my-task other",
+    "files": {
+      "pending/s1/a.json": "{\"tab\":\"other\",\"session\":\"s1\",\"message\":\"pr review\",\"event\":\"Waiting\",\"time\":\"10:00:00\",\"agent\":\"claude\"}"
+    }
   }
 ]

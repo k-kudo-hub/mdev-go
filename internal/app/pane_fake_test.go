@@ -50,13 +50,19 @@ func (f *fakeTabLister) ListTabs() string {
 }
 
 type fakeTabCloser struct {
-	journal *paneJournal
-	ids     []string
+	journal      *paneJournal
+	ids          []string
+	closedActive int
 }
 
 func (f *fakeTabCloser) CloseTabByID(id string) {
 	f.ids = append(f.ids, id)
 	f.journal.add("close-tab-by-id " + id)
+}
+
+func (f *fakeTabCloser) CloseActiveTab() {
+	f.closedActive++
+	f.journal.add("close-tab")
 }
 
 type fakePendingLister struct {

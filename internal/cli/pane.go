@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -10,38 +11,90 @@ import (
 // paneNames は `mdev pane` が受け付けるペイン名である。
 // 実体のモデルは internal/tui にあるが、cli は tui を参照できない
 // (ADR-0002)ため、引数の検証に使う名前だけをここに持つ。
-var paneNames = []string{"dashboard", "waiting", "done", "news"}
+var paneNames = []string{"dashboard", "waiting", "done", "news", "task-create", "task-control"}
+
+// paneTaskControl はタブ名を第 2 引数に取る唯一のペインである。
+const paneTaskControl = "task-control"
 
 // PaneService はダッシュボード系ペインを動かすユースケースである。
 // 実体は internal/tui の Panes で、組み立ては cmd/mdev が行う。
 type PaneService interface {
 	// Run はペインを対話モードで動かす。ペインが終了するまで戻らない。
-	Run(name string) error
+	// arg は task-control のタブ名で、他のペインでは空文字である。
+	Run(name, arg string) error
 	// Once はペインを 1 回だけ描画した文字列を返す。
-	Once(name string) (string, error)
+	Once(name, arg string) (string, error)
 }
 
-// newPaneCommand は `mdev pane <name> [--once]` を組み立てる。
+// paneArgs は引数の数と中身を検証する。
+//
+// 第 2 引数は任意のタブ名なので、名前の検証は第 1 引数だけに掛ける
+// (cobra.OnlyValidArgs は全引数を検証してしまう)。数はペインごとに
+// 厳密に見る。範囲だけで受けると `mdev pane dashboard 余計な引数` のような
+// 打ち間違いを黙って捨ててしまい、利用者は指定が効いたと誤解する。
+func paneArgs(cmd *cobra.Command, args []string) error {
+	if err := cobra.RangeArgs(1, 2)(cmd, args); err != nil {
+		return err
+	}
+	if err := validPaneName(args[0]); err != nil {
+		return err
+	}
+
+	if args[0] != paneTaskControl {
+		if len(args) != 1 {
+			return fmt.Errorf("ペイン %s は引数を取りません(%q が余計です)", args[0], args[1])
+		}
+		return nil
+	}
+	if len(args) != 2 {
+		return fmt.Errorf("%s はタブ名を引数に取ります", paneTaskControl)
+	}
+	if args[1] == "" {
+		return fmt.Errorf("%s のタブ名が空です", paneTaskControl)
+	}
+	return nil
+}
+
+// validPaneName はペイン名として正しいかを検証する。
+func validPaneName(name string) error {
+	for _, valid := range paneNames {
+		if name == valid {
+			return nil
+		}
+	}
+	return fmt.Errorf("不正な引数 %q です。使えるのは %s のいずれかです",
+		name, strings.Join(paneNames, ", "))
+}
+
+// newPaneCommand は `mdev pane <name> [タブ名] [--once]` を組み立てる。
 func newPaneCommand(deps Deps) *cobra.Command {
 	var once bool
 
 	cmd := &cobra.Command{
-		Use:   "pane <" + paneNames[0] + "|" + paneNames[1] + "|" + paneNames[2] + "|" + paneNames[3] + ">",
-		Short: "ダッシュボード系のペインを表示する",
-		Long: "Zellij の Main タブに並ぶ 4 つのペインを表示する。\n" +
-			"レイアウト(layouts/multi.kdl)のペイン起動コマンドから呼ばれる。\n\n" +
-			"  dashboard  実行中タスクの一覧([番号] で移動 / d+[番号] で削除)\n" +
-			"  waiting    外部の返答待ちタスクの一覧(キー操作なし)\n" +
-			"  done       当日の完了タスクの一覧(r+[番号] でダッシュボードへ戻す)\n" +
-			"  news       AI 関連ニュース([番号] で開く / r で取得し直す)",
-		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
+		Use:   "pane <" + strings.Join(paneNames, "|") + "> [タブ名]",
+		Short: "conductor のペインを表示する",
+		Long: "Zellij のペイン起動コマンド(layouts/multi.kdl と create_task)から呼ばれる。\n\n" +
+			"  dashboard     実行中タスクの一覧([番号] で移動 / d+[番号] で削除)\n" +
+			"  waiting       外部の返答待ちタスクの一覧(キー操作なし)\n" +
+			"  done          当日の完了タスクの一覧(r+[番号] でダッシュボードへ戻す)\n" +
+			"  news          AI 関連ニュース([番号] で開く / r で取得し直す)\n" +
+			"  task-create   タスク作成(n で開始)\n" +
+			"  task-control  タスクタブの操作バー(m: Main / w: Waiting / dd: 削除)\n" +
+			"                第 2 引数にタブ名を取る\n\n" +
+			"タブ名が `-` で始まる場合は `--` で区切る:\n" +
+			"  mdev pane task-control -- -my-tab",
+		Args:      paneArgs,
 		ValidArgs: paneNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if !once {
-				return deps.Panes.Run(name)
+			arg := ""
+			if len(args) > 1 {
+				arg = args[1]
 			}
-			out, err := deps.Panes.Once(name)
+			if !once {
+				return deps.Panes.Run(name, arg)
+			}
+			out, err := deps.Panes.Once(name, arg)
 			if err != nil {
 				return err
 			}

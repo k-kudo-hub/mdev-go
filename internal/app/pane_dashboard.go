@@ -155,53 +155,30 @@ func (p *DashboardPane) jump(env PaneEnv, item domain.PendingView) error {
 	return nil
 }
 
-// PrepareDelete は削除フローの前半を行う。
-//
-// 作業サマリを daily log へ記録してから、作業ログを同期でアップロードする。
-// アップロードが失敗した場合は Cancelled を立てて戻り、**何も消さない**。
-// タブを消してしまうと作業ログを永久に失うためで、これがこのフローで最も
-// 重要な契約である。
-//
-// 後半は CommitDelete が行う。呼び出し側は Message が空でなければ、その内容を
-// 表示してから CommitDelete を呼ぶ(タブが閉じる前に URL を確認できるように
-// するため、現行版もこの順で待ちを入れている)。
+// PrepareDelete は削除フローの前半(記録とアップロード)を行う。
+// 実処理は TaskDeleter が持ち、Dashboard と task-control で共有する。
 func (p *DashboardPane) PrepareDelete(env PaneEnv, tab string) (DeletePreparation, error) {
-	// PaneEnv と RecordEnv は同じ形(ZELLIJ_SESSION_NAME だけ)なので変換で渡す。
-	if err := p.Recorder.Execute(tab, RecordEnv(env)); err != nil {
-		return DeletePreparation{}, fmt.Errorf("作業サマリの記録に失敗しました: %w", err)
-	}
-
-	output, err := p.Shell.UploadLog(tab)
-	if err != nil {
-		return DeletePreparation{Cancelled: true}, nil
-	}
-	return DeletePreparation{Message: output}, nil
+	return p.deleter().Prepare(env, tab)
 }
 
-// CommitDelete は削除フローの後半を行う。
-//
-// pending → レジストリ → スクリーン検出の状態 → タブ、の順に片付ける。
-// レジストリを消すのは、削除したタスクが次回のセッション復元で蘇らないように
-// するためである(issue #36)。スクリーン検出の状態を消すのは、同じ名前の
-// タブが後で作られたときに前のタスクの状態を引き継がせないためである。
-//
-// タブの id が引けなかった場合はタブを閉じない。現行 Dashboard は close-tab への
-// フォールバックを持たないため、その非対称もそのまま再現している。
+// CommitDelete は削除フローの後半(片付けとタブを閉じる)を行う。
 func (p *DashboardPane) CommitDelete(env PaneEnv, tab string) error {
-	session := env.Session()
+	return p.deleter().Commit(env, tab)
+}
 
-	if err := p.Remover.DeleteByTab(session, tab); err != nil {
-		return fmt.Errorf("pending の削除に失敗しました: %w", err)
+// deleter は Dashboard 用の削除フローを組み立てる。
+//
+// CloseActiveOnMissingID を立てないのは、現行 Dashboard が id を引けなければ
+// タブを閉じずに終わるためである(close-tab へ落ちるのは task-control だけ)。
+// この非対称は現行版のものをそのまま再現している。
+func (p *DashboardPane) deleter() *TaskDeleter {
+	return &TaskDeleter{
+		Remover:     p.Remover,
+		Registry:    p.Registry,
+		ScreenState: p.ScreenState,
+		Tabs:        p.Tabs,
+		Closer:      p.Closer,
+		Recorder:    p.Recorder,
+		Shell:       p.Shell,
 	}
-	if err := p.Registry.RemoveByTab(session, tab); err != nil {
-		return fmt.Errorf("レジストリからの削除に失敗しました: %w", err)
-	}
-	if err := p.ScreenState.Remove(session, domain.ScreenTabSlug(tab)); err != nil {
-		return fmt.Errorf("スクリーン検出の状態の削除に失敗しました: %w", err)
-	}
-
-	if id := domain.ResolveTabID(p.Tabs.ListTabs(), tab); id != "" {
-		p.Closer.CloseTabByID(id)
-	}
-	return nil
 }

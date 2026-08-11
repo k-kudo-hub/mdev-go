@@ -226,6 +226,10 @@ const (
 	NameWaiting   = "waiting"
 	NameDone      = "done"
 	NameNews      = "news"
+	// NameTaskCreate は Main タブ下部のタスク作成ペイン。
+	NameTaskCreate = "task-create"
+	// NameTaskControl は各タスクタブ下部の操作バー。引数にタブ名を取る。
+	NameTaskControl = "task-control"
 )
 
 // Panes は 4 つのペインをまとめて起動できるようにしたものである。
@@ -234,15 +238,20 @@ const (
 // Run / Once だけを持つ interface としてこれを受け取り、実体の組み立ては
 // cmd/mdev が行う。
 type Panes struct {
-	Dashboard DashboardService
-	Waiting   WaitingService
-	Done      DoneService
-	News      NewsService
-	Env       app.PaneEnv
+	Dashboard   DashboardService
+	Waiting     WaitingService
+	Done        DoneService
+	News        NewsService
+	TaskCreate  TaskCreateService
+	TaskControl TaskControlService
+	Env         app.PaneEnv
 }
 
 // model は名前に対応するモデルを返す。
-func (p Panes) model(name string) (tea.Model, error) {
+//
+// arg はペインが取る引数である。task-control だけがタブ名を必要とし、
+// 他のペインは無視する。
+func (p Panes) model(name, arg string) (tea.Model, error) {
 	switch name {
 	case NameDashboard:
 		return NewDashboardModel(p.Dashboard, p.Env), nil
@@ -252,14 +261,18 @@ func (p Panes) model(name string) (tea.Model, error) {
 		return NewDoneModel(p.Done), nil
 	case NameNews:
 		return NewNewsModel(p.News), nil
+	case NameTaskCreate:
+		return NewTaskCreateModel(p.TaskCreate, p.Env), nil
+	case NameTaskControl:
+		return NewTaskControlModel(p.TaskControl, p.Env, arg), nil
 	default:
 		return nil, fmt.Errorf("不明なペインです: %s", name)
 	}
 }
 
 // Run は名前のペインを対話モードで動かす。ペインが終了するまで戻らない。
-func (p Panes) Run(name string) error {
-	model, err := p.model(name)
+func (p Panes) Run(name, arg string) error {
+	model, err := p.model(name, arg)
 	if err != nil {
 		return err
 	}
@@ -273,8 +286,8 @@ func (p Panes) Run(name string) error {
 //
 // Bubble Tea のプログラムは起動しないため端末を必要としない。現行 Shell 版の
 // CONDUCTOR_*_ONCE と同じ経路で、ゴールデンテストもここを通る。
-func (p Panes) Once(name string) (string, error) {
-	model, err := p.model(name)
+func (p Panes) Once(name, arg string) (string, error) {
+	model, err := p.model(name, arg)
 	if err != nil {
 		return "", err
 	}

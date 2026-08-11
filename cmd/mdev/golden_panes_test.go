@@ -35,6 +35,8 @@ type goldenPaneCase struct {
 	Description string `json:"description"`
 	// Pane は `mdev pane` に渡す名前。
 	Pane string `json:"pane"`
+	// Arg は `mdev pane <name> <arg>` の第 2 引数(task-control のタブ名)。
+	Arg string `json:"arg"`
 	// Session は ZELLIJ_SESSION_NAME。
 	Session string `json:"session"`
 	// Tabs は zellij スタブが list-tabs で返すタブ名(空白区切り)。
@@ -69,6 +71,15 @@ func loadGoldenPaneCases(t *testing.T) []goldenPaneCase {
 type goldenClock struct{ now time.Time }
 
 func (c goldenClock) Now() time.Time { return c.now }
+
+// noSleep は待たない app.Sleeper である。
+//
+// ゴールデンテストが通る経路(--once)は待ちを持たないが、依存グラフの
+// 組み立てには要る。実時間で待つ実装を差すとテストが遅くなるだけで、
+// 得るものが無い。
+type noSleep struct{}
+
+func (noSleep) Sleep(time.Duration) {}
 
 // writeGoldenFile は入力ファイルを 1 つ配置する。
 func writeGoldenFile(t *testing.T, path, content string) {
@@ -170,13 +181,18 @@ func TestGoldenPanesMatchShellVersion(t *testing.T) {
 				"CONDUCTOR_HOME":      conductorHome,
 				"ZELLIJ_SESSION_NAME": tc.Session,
 			}
-			deps := buildDeps(home, func(key string) string { return env[key] }, goldenClock{now: at})
+			deps := buildDeps(home, func(key string) string { return env[key] },
+				goldenClock{now: at}, noSleep{})
 
 			out := &bytes.Buffer{}
 			cmd := cli.NewRootCommand(deps)
 			cmd.SetOut(out)
 			cmd.SetErr(out)
-			cmd.SetArgs([]string{"pane", tc.Pane, "--once"})
+			args := []string{"pane", tc.Pane}
+			if tc.Arg != "" {
+				args = append(args, tc.Arg)
+			}
+			cmd.SetArgs(append(args, "--once"))
 			if err := cmd.Execute(); err != nil {
 				t.Fatalf("mdev pane %s --once = %v", tc.Pane, err)
 			}
