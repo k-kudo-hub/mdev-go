@@ -61,13 +61,7 @@ func NormalizeVersion(s string) string {
 func VersionGreater(a, b string) bool {
 	left, _ := ParseVersion(a)
 	right, _ := ParseVersion(b)
-	if left.Major != right.Major {
-		return left.Major > right.Major
-	}
-	if left.Minor != right.Minor {
-		return left.Minor > right.Minor
-	}
-	return left.Patch > right.Patch
+	return greater(left, right)
 }
 
 // RepoSlug は git の URL から "owner/repo" を取り出す(現行 uc_repo_slug)。
@@ -135,6 +129,9 @@ func LatestSemverTag(output string) (string, bool) {
 }
 
 // greater は Version 同士の大小を返す。
+//
+// major → minor → patch の順に数値で比べる。辞書順ではないので
+// v1.2.10 は v1.2.9 より新しい。
 func greater(a, b Version) bool {
 	if a.Major != b.Major {
 		return a.Major > b.Major

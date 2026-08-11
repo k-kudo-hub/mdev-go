@@ -76,8 +76,6 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 
 	// ダッシュボード系 4 ペイン。pending はホーム直下、daily とニュースは
 	// CONDUCTOR_HOME 配下という置き場所の違いを PaneStore がそのまま持つ。
-	// fetch-news はまだ Shell のままで、shell.Runner が env を引き継いで
-	// 同期で呼ぶ。
 	paneStore := store.NewPaneStore(store.PendingRoot(home), conductorHome)
 	tabs := zellij.NewTabController()
 	binary := store.NewMdevBinaryStore(conductorHome)
