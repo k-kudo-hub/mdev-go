@@ -16,7 +16,7 @@ detached セッションの無限ポーリング蓄積(zellij サーバ劣化 �
 
 - [x] domain: セッション一覧パースと掃除対象判定のテスト+実装(list-sessions 出力 → EXITED / alive の分類、mdev 管理セッションの識別は「bin/mdev pane を実行しているサーバ」で行う)
 - [x] domain: ps 出力からのゾンビ検出のテスト+実装(zellij --server プロセスと list-sessions の突き合わせ、PPID=1 の zellij action クライアント検出)
-- [ ] infra: zellij セッション操作(kill-session / delete-session / list-clients)と プロセス操作(ps / kill)の adapter(すべて既存 proc 経由・タイムアウト付き)
+- [x] infra: zellij セッション操作(kill-session / delete-session / list-clients)と プロセス操作(ps / kill)の adapter(すべて既存 proc 経由・タイムアウト付き)
 - [ ] app: SessionCleaner usecase のテスト+実装 — (1) EXITED を全 delete (2) detached な mdev セッション(list-clients が 0 行)を kill+delete (3) ゾンビサーバを TERM→KILL (4) 孤児クライアント(PPID=1 の zellij action)を kill。**使用中(attach あり)セッションには絶対に触れない**。dry-run 対応
 - [ ] cli: `mdev sessions clean [--dry-run] [--auto]` 配線(--auto は起動前掃除用: 出力を 1〜2 行に抑え、失敗しても exit 0 = セッション起動を止めない)
 
