@@ -61,3 +61,30 @@ func (c *Config) unmarshalUploadKeys(data []byte) {
 		Branch:  fallback(jqOptionalString(raw.Branch), DefaultUploadBranch),
 	}
 }
+
+// UpdateCheckConfig は起動時の更新確認の設定(`.update_check`)である。
+type UpdateCheckConfig struct {
+	// Disabled は `update_check.enabled` が **明示的に** false のときだけ真になる。
+	//
+	// キーが無い場合は確認を行う(既定は有効)。現行 check-update.sh:20-26 が
+	// jq の `//` を使わず生の値を読んでいるのは、`false // true` が true を
+	// 返してしまい「明示的に切った」設定が無視されるためである。
+	Disabled bool
+}
+
+// unmarshalUpdateCheckKeys は Config の更新確認向けフィールドを埋める。
+func (c *Config) unmarshalUpdateCheckKeys(data []byte) {
+	var root struct {
+		UpdateCheck json.RawMessage `json:"update_check"`
+	}
+	if err := json.Unmarshal(data, &root); err != nil {
+		return
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(root.UpdateCheck, &fields); err != nil {
+		return
+	}
+	// 現行版は `jq -r '.update_check.enabled'` の出力を "false" と比べるため、
+	// 真偽値の false と文字列の "false" のどちらでも無効になる。
+	c.UpdateCheck.Disabled = jqRawString(fields["enabled"]) == "false"
+}

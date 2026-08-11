@@ -144,3 +144,15 @@ func greater(a, b Version) bool {
 	}
 	return a.Patch > b.Patch
 }
+
+// RenderUpdateNotice は新しい版があるときの案内を組み立てる。
+//
+// 文言と字下げは現行 check-update.sh:49-52 の 4 行そのままである。
+// 前後の空行は、zellij が画面を取る前に利用者が読めるようにするための
+// 間である。
+func RenderUpdateNotice(latest, current string) string {
+	return "\n" +
+		"  📦 新しいバージョン " + latest + " があります（現在: " + current + "）。\n" +
+		"     'mdev update' で更新できます。\n" +
+		"\n"
+}
