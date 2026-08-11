@@ -3,6 +3,7 @@ package app_test
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ type screenDetectFixture struct {
 	saver    *fakePendingSaver
 	registry *fakeRegistryLookup
 	focuser  *fakePaneFocuser
+	clock    *advancingClock
 }
 
 // codexScreenConfig は codex を screen 方式にした設定である。
@@ -54,6 +56,7 @@ func newScreenDetectFixture(panes []app.AgentPane, dumps map[string]string) *scr
 		saver:    &fakePendingSaver{journal: journal},
 		registry: &fakeRegistryLookup{},
 		focuser:  &fakePaneFocuser{journal: journal},
+		clock:    newAdvancingClock(),
 	}
 	f.detector = &app.ScreenDetector{
 		Panes:    f.panes,
@@ -65,7 +68,7 @@ func newScreenDetectFixture(panes []app.AgentPane, dumps map[string]string) *scr
 		Writer:   f.saver,
 		Registry: f.registry,
 		Focuser:  f.focuser,
-		Clock:    paneClock{now: time.Date(2026, 8, 11, 10, 20, 30, 0, time.UTC)},
+		Clock:    f.clock,
 	}
 	return f
 }
@@ -121,8 +124,8 @@ func TestScreenDetectorTickSurfacesApproval(t *testing.T) {
 	if saved.ClaudeSessionID != domain.ScreenPendingSessionID("cx-task") {
 		t.Errorf("claude_session_id = %q", saved.ClaudeSessionID)
 	}
-	if saved.Time != "10:20:30" {
-		t.Errorf("time = %q, want 10:20:30", saved.Time)
+	if saved.Time != "10:00:00" {
+		t.Errorf("time = %q, want 10:00:00", saved.Time)
 	}
 }
 
@@ -320,8 +323,9 @@ func TestScreenDetectorTickUsesPreviousState(t *testing.T) {
 		map[string]string{"5": idleDump},
 	)
 	slug := domain.ScreenTabSlug("cx-task")
-	// 5 秒前(1786443630 - 5)から idle 保留中。今回の観測で確定して Stop が書かれる。
-	f.state.lines["s1/"+slug] = "idle_pending 1786443625\n"
+	// 5 秒前から idle 保留中。今回の観測で確定して Stop が書かれる。
+	f.state.lines["s1/"+slug] = "idle_pending " +
+		strconv.FormatInt(f.clock.Now().Add(-5*time.Second).Unix(), 10) + "\n"
 
 	if err := f.detector.Tick(dashboardEnv); err != nil {
 		t.Fatalf("Tick() = %v", err)
@@ -461,5 +465,37 @@ func TestScreenDetectorTickScansEveryScreenPane(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(f.dumper.ids, " "), "2") {
 		t.Errorf("2 枚目を dump していない: %v", f.dumper.ids)
+	}
+}
+
+// TestScreenDetectorTickStopsAtBudget は検出全体の予算を使い切ったら残りの
+// ペインを飛ばすことを固定する。
+//
+// 移行前は Shell 呼び出しに 15 秒の上限が付いていた。内製化でこれが消えると、
+// 劣化した zellij サーバではペインの枚数だけ dump-screen の上限(10 秒)が
+// 積み上がり、2 秒ごとのポーリングが追い越されて表示が止まる。
+func TestScreenDetectorTickStopsAtBudget(t *testing.T) {
+	t.Parallel()
+
+	f := newScreenDetectFixture(
+		[]app.AgentPane{
+			{Tab: "a", ID: "1", Agent: "codex"},
+			{Tab: "b", ID: "2", Agent: "codex"},
+			{Tab: "c", ID: "3", Agent: "codex"},
+		},
+		map[string]string{"1": blockedDump, "2": blockedDump, "3": blockedDump},
+	)
+	// 1 枚目の取得で予算を使い切る。
+	f.dumper.clock, f.dumper.spend = f.clock, app.ScreenDetectBudget
+
+	if err := f.detector.Tick(dashboardEnv); err != nil {
+		t.Fatalf("Tick() = %v", err)
+	}
+	if want := []string{"1"}; !reflect.DeepEqual(f.dumper.ids, want) {
+		t.Errorf("dump したペイン = %v, want %v", f.dumper.ids, want)
+	}
+	// 1 枚目の観測は最後まで反映する(途中で捨てない)。
+	if len(f.saver.saved) != 1 || f.saver.saved[0].Tab != "a" {
+		t.Errorf("1 枚目の観測が反映されていない: %+v", f.saver.saved)
 	}
 }

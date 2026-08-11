@@ -2,9 +2,22 @@ package app
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
+
+// ScreenDetectBudget は 1 回の検出全体に与える時間である。
+//
+// 移行前の Shell 呼び出しに付いていた上限(15 秒)をそのまま引き継ぐ。内製化で
+// この上限が消えると、劣化した zellij サーバではペインの枚数だけ
+// `dump-screen` の上限(10 秒)が積み上がり、2 秒ごとのポーリングが
+// 追い越されてダッシュボードが更新されなくなる。
+//
+// 予算はペインを 1 枚ずつ処理する前に見る。切れたら残りのペインを飛ばす。
+// 飛ばしたペインは次の周期で先頭から見直されるので、状態が失われることは無い
+// (画面から状態を読むだけで、観測を溜めていないため)。
+const ScreenDetectBudget = 15 * time.Second
 
 // ScreenTicker は 1 回ぶんのスクリーン検出を走らせる。実体は ScreenDetector。
 //
@@ -50,6 +63,7 @@ var _ ScreenTicker = (*ScreenDetector)(nil)
 //   - タブ名かペイン id が空
 //   - 検出方式が screen ではない
 //   - 画面のダンプが空(打ち切られた・まだ描画されていない)
+//   - 検出全体の予算(ScreenDetectBudget)を使い切った
 //
 // 最後のものが特に重要で、空のダンプから状態を決めると「何も映っていない
 // 画面 = idle」になり、動いているタスクが done として一覧に並ぶ。
@@ -67,7 +81,12 @@ func (d *ScreenDetector) Tick(env PaneEnv) error {
 
 	config, _ := d.Config.Load()
 	session := env.Session()
+	start := d.Clock.Now()
 	for _, pane := range panes {
+		// 予算が尽きたら残りのペインを飛ばす。次の周期で先頭から見直される。
+		if d.Clock.Now().Sub(start) >= ScreenDetectBudget {
+			break
+		}
 		if pane.Tab == "" || pane.ID == "" {
 			continue
 		}

@@ -2,9 +2,24 @@ package app
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
+
+// SessionRestoreBudget は起動時の復元全体に与える時間である。
+//
+// 移行前の Shell 呼び出しに付いていた上限(60 秒)をそのまま引き継ぐ。内製化で
+// この上限が消えると、劣化した zellij サーバでは 1 タスクあたり最大で
+// タスク作成の予算(30 秒)+ 各コマンドの上限(10 秒)ぶん待たされ、登録済み
+// タスクの数だけ積み上がってダッシュボードが出てこなくなる。
+//
+// 予算はタスクを 1 つ作り始める前にだけ見る。作り始めたタスクは
+// TaskCreator が自分の予算(TaskSetupBudget)で打ち切るので、全体は
+// おおよそこの値 + タスク 1 つぶんで収まる。途中で切った場合もエントリは
+// 残るため、次の起動で続きから復元される。
+const SessionRestoreBudget = 60 * time.Second
 
 // SessionStarter は起動時にタスクタブを作り直す。実体は SessionRestorer。
 //
@@ -30,6 +45,7 @@ type SessionRestorer struct {
 	Creator  TaskMaker
 	Paths    PathChecker
 	Focuser  Focuser
+	Clock    Clock
 }
 
 var _ SessionStarter = (*SessionRestorer)(nil)
@@ -61,17 +77,26 @@ func (r *SessionRestorer) Restore(env PaneEnv) []string {
 		return nil
 	}
 
+	start := r.Clock.Now()
+
 	// 既存タブの一覧を引けなかった回は復元そのものを見送る。空と取り違えると
 	// 生きているタブを作り直し、同じ名前のタブが二重になる。エントリは
 	// そのまま残るので、次の起動でやり直せる。
-	existing, err := r.Tabs.QueryTabNames(ZellijCallTimeout)
+	existing, err := r.Tabs.QueryTabNames(callCap(SessionRestoreBudget))
 	if err != nil {
 		return []string{fmt.Sprintf("既存のタブを確認できなかったため復元を見送りました: %v", err)}
 	}
 
 	var warnings []string
 	restored := 0
-	for _, entry := range domain.LatestPerTab(entries) {
+	candidates := domain.LatestPerTab(entries)
+	for i, entry := range candidates {
+		// 予算はタスクを作り始める前にだけ見る。残っていなければ、まだ
+		// 手を付けていないタスクをまとめて次回へ回す。
+		if r.Clock.Now().Sub(start) >= SessionRestoreBudget {
+			warnings = append(warnings, budgetWarning(candidates[i:]))
+			break
+		}
 		if entry.Tab == "" || containsName(existing, entry.Tab) {
 			continue
 		}
@@ -98,6 +123,16 @@ func (r *SessionRestorer) Restore(env PaneEnv) []string {
 		_ = r.Focuser.FocusTab(domain.MainTabName)
 	}
 	return warnings
+}
+
+// budgetWarning は予算切れで手を付けなかったタスクの説明を返す。
+func budgetWarning(remaining []domain.RegistryEntry) string {
+	names := make([]string, 0, len(remaining))
+	for _, entry := range remaining {
+		names = append(names, entry.Tab)
+	}
+	return fmt.Sprintf("復元の予算(%s)を使い切ったため、%d 件(%s)は次回の起動へ回しました",
+		SessionRestoreBudget, len(names), strings.Join(names, ", "))
 }
 
 // create は 1 件のエントリからタブを作り、「復元した」と数えてよいかと、

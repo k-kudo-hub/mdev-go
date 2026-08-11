@@ -18,6 +18,7 @@ type restoreFixture struct {
 	creator  *fakeTaskMaker
 	paths    *fakePathChecker
 	focuser  *fakePaneFocuser
+	clock    *advancingClock
 	// warnings は直近の Restore が返した説明。
 	warnings []string
 }
@@ -31,6 +32,7 @@ func newRestoreFixture(entries []domain.RegistryEntry, existing []string) *resto
 		creator:  &fakeTaskMaker{journal: journal},
 		paths:    &fakePathChecker{dirs: map[string]bool{}, files: map[string]bool{}},
 		focuser:  &fakePaneFocuser{journal: journal},
+		clock:    newAdvancingClock(),
 	}
 	f.restorer = &app.SessionRestorer{
 		Registry: f.registry,
@@ -38,6 +40,7 @@ func newRestoreFixture(entries []domain.RegistryEntry, existing []string) *resto
 		Creator:  f.creator,
 		Paths:    f.paths,
 		Focuser:  f.focuser,
+		Clock:    f.clock,
 	}
 	return f
 }
@@ -386,4 +389,46 @@ func TestSessionRestorerSkipsWhenTabQueryFails(t *testing.T) {
 			t.Error("何も復元していないのに Main へ戻った")
 		}
 	}
+}
+
+// TestSessionRestorerStopsAtBudget は復元全体の予算を使い切ったら、
+// まだ手を付けていないタスクを次回へ回すことを固定する。
+//
+// 移行前は Shell 呼び出しに 60 秒の上限が付いていた。内製化でこれが消えると、
+// 劣化した zellij サーバでは 1 タスクあたり最大で 40 秒近く待たされ、登録済み
+// タスクの数だけ積み上がってダッシュボードが出てこなくなる。
+func TestSessionRestorerStopsAtBudget(t *testing.T) {
+	t.Parallel()
+
+	f := newRestoreFixture([]domain.RegistryEntry{
+		{Tab: "a", Dir: "/w"},
+		{Tab: "b", Dir: "/w"},
+		{Tab: "c", Dir: "/w"},
+	}, []string{"Main"})
+	f.paths.dirs["/w"] = true
+	// 1 件目のタスク作成で予算を使い切る。
+	f.creator.spend, f.creator.clock = app.SessionRestoreBudget, f.clock
+
+	f.warnings = f.restorer.Restore(dashboardEnv)
+
+	if len(f.creator.specs) != 1 || f.creator.specs[0].Name != "a" {
+		t.Errorf("作り直したタスク = %+v, want a の 1 件だけ", f.creator.specs)
+	}
+	if len(f.warnings) != 1 || !strings.Contains(f.warnings[0], "b, c") {
+		t.Errorf("次回へ回した旨の警告が無い: %q", f.warnings)
+	}
+	// 1 件は復元できているので Main へは戻る。
+	if !containsEntry(f.journal.entries, "go-to-tab-name Main") {
+		t.Errorf("Main へ戻っていない: %v", f.journal.entries)
+	}
+}
+
+// containsEntry は記録に entry が含まれるかを返す。
+func containsEntry(entries []string, entry string) bool {
+	for _, e := range entries {
+		if e == entry {
+			return true
+		}
+	}
+	return false
 }

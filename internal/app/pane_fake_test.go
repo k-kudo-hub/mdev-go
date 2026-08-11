@@ -225,11 +225,17 @@ type fakeScreenDumper struct {
 	journal *paneJournal
 	dumps   map[string]string
 	ids     []string
+	// clock と spend を入れると、1 枚の取得が時間を食ったことにできる。
+	clock *advancingClock
+	spend time.Duration
 }
 
 func (f *fakeScreenDumper) DumpScreen(paneID string) string {
 	f.ids = append(f.ids, paneID)
 	f.journal.add("dump-screen " + paneID)
+	if f.clock != nil {
+		f.clock.advance(f.spend)
+	}
 	return f.dumps[paneID]
 }
 
@@ -367,13 +373,33 @@ type fakeTaskMaker struct {
 	specs   []app.TaskSpec
 	result  app.TaskCreateResult
 	err     error
+	// clock と spend を入れると、1 回の作成が時間を食ったことにできる。
+	clock *advancingClock
+	spend time.Duration
 }
 
 func (f *fakeTaskMaker) Execute(_ app.PaneEnv, spec app.TaskSpec) (app.TaskCreateResult, error) {
 	f.specs = append(f.specs, spec)
 	f.journal.add("create-task " + spec.Name)
+	if f.clock != nil {
+		f.clock.advance(f.spend)
+	}
 	return f.result, f.err
 }
+
+// advancingClock は明示的に進めた分だけ時刻が動く時計である。
+//
+// 予算のテストで「この呼び出しが何秒かかったか」を組み立てるために使う。
+// 実時間で待つと予算(15 秒・60 秒)ぶんテストが止まってしまう。
+type advancingClock struct{ now time.Time }
+
+func newAdvancingClock() *advancingClock {
+	return &advancingClock{now: time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)}
+}
+
+func (c *advancingClock) Now() time.Time { return c.now }
+
+func (c *advancingClock) advance(d time.Duration) { c.now = c.now.Add(d) }
 
 var _ app.SessionStarter = (*fakeSessionStarter)(nil)
 

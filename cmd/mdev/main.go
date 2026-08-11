@@ -120,6 +120,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Creator:  creator,
 		Paths:    paneStore,
 		Focuser:  zellij.NewFocuser(),
+		Clock:    clock,
 	}
 
 	// Done からの復元。daily ログの読み書きは DailyStore が持ち、タブの
