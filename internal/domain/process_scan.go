@@ -3,6 +3,7 @@ package domain
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ps の出力から zellij のプロセスを見分けるための目印。
@@ -23,16 +24,33 @@ const (
 // orphanPPID は親を失ったプロセスの親 PID である(init に引き取られた状態)。
 const orphanPPID = 1
 
-// ProcessEntry は `ps -axo pid,ppid,command` の 1 行である。
+// ZombieMinAge はゾンビとみなすまでに必要な経過時間である。
+//
+// **起動しかけのサーバを掴まないための猶予である。** zellij のサーバは
+// 起動してから list-sessions に載るまでに一瞬の間があり、その隙に見ると
+// 「一覧に出ないのに動いているサーバ」に見える。実機でも、走査した瞬間だけ
+// 見えて次の瞬間には消えている短命なサーバを観測した。ここで撃つと、
+// 利用者が今まさに開こうとしているセッションを落とす。
+//
+// 取りこぼしても次回の掃除で拾えるので、長めに取って構わない。
+const ZombieMinAge = 60 * time.Second
+
+// ProcessEntry は `ps -axo pid,ppid,etime,command` の 1 行である。
 type ProcessEntry struct {
-	PID     int
-	PPID    int
+	PID  int
+	PPID int
+	// Elapsed は起動からの経過時間である。
+	//
+	// 掃除は「起動しかけのものを掴まない」ために使う。ps が出す値なので、
+	// domain が時計を持つ必要はない。読めなかった場合は 0 になる
+	// (= 起動直後の扱いになり、掃除の対象から外れる)。
+	Elapsed time.Duration
 	Command string
 }
 
-// ParseProcessList は `ps -axo pid,ppid,command` の出力を読む。
+// ParseProcessList は `ps -axo pid,ppid,etime,command` の出力を読む。
 //
-// 見出し行と、先頭 2 列が数値でない行は読み飛ばす。command は 3 列目以降を
+// 見出し行と、先頭 2 列が数値でない行は読み飛ばす。command は 4 列目以降を
 // そのまま(空白を含めて)持つ。
 //
 // 読めない行を error にしないのは、掃除が最善努力であるためと、判断できない
@@ -52,18 +70,62 @@ func ParseProcessList(out string) []ProcessEntry {
 		if err != nil {
 			continue
 		}
-		// command は元の空白のまま残したいので、3 列目の位置から切り出す。
-		command := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), fields[0]))
-		command = strings.TrimSpace(strings.TrimPrefix(command, fields[1]))
-		entries = append(entries, ProcessEntry{PID: pid, PPID: ppid, Command: command})
+		// command は元の空白のまま残したいので、先頭 3 列を順に落とす。
+		command := strings.TrimSpace(line)
+		for _, column := range fields[:3] {
+			command = strings.TrimSpace(strings.TrimPrefix(command, column))
+		}
+		entries = append(entries, ProcessEntry{
+			PID:     pid,
+			PPID:    ppid,
+			Elapsed: parseElapsed(fields[2]),
+			Command: command,
+		})
 	}
 	return entries
+}
+
+// parseElapsed は ps の ELAPSED 列を読む。
+//
+// 書式は `[[DD-]HH:]MM:SS` である(実機: `01:00:59` / `54-10:00:41`)。
+// 読めない場合は 0 を返す。0 は「起動直後」と同じ扱いになり、掃除の対象から
+// 外れるので安全側である。
+func parseElapsed(field string) time.Duration {
+	days := 0
+	rest := field
+	if i := strings.Index(field, "-"); i >= 0 {
+		parsed, err := strconv.Atoi(field[:i])
+		if err != nil {
+			return 0
+		}
+		days, rest = parsed, field[i+1:]
+	}
+
+	parts := strings.Split(rest, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0
+	}
+	units := []time.Duration{time.Hour, time.Minute, time.Second}
+	// MM:SS のときは時間の桁が無い。
+	units = units[len(units)-len(parts):]
+
+	total := time.Duration(days) * 24 * time.Hour
+	for i, part := range parts {
+		value, err := strconv.Atoi(part)
+		if err != nil {
+			return 0
+		}
+		total += time.Duration(value) * units[i]
+	}
+	return total
 }
 
 // ZellijServer は動いている zellij サーバ 1 つである。
 type ZellijServer struct {
 	// PID はサーバのプロセス ID。
 	PID int
+	// Elapsed は起動からの経過時間。ゾンビ判定の猶予に使う。
+	Elapsed time.Duration
 	// Session はサーバが持つセッション名。
 	//
 	// サーバのコマンド行の末尾がソケットのパスで、その最後の要素が
@@ -96,7 +158,7 @@ func ZellijServers(entries []ProcessEntry) []ZellijServer {
 		if name == "" {
 			continue
 		}
-		servers = append(servers, ZellijServer{PID: entry.PID, Session: name})
+		servers = append(servers, ZellijServer{PID: entry.PID, Elapsed: entry.Elapsed, Session: name})
 	}
 	return servers
 }
@@ -136,6 +198,10 @@ func MdevManagedSessions(entries []ProcessEntry) map[string]bool {
 //
 // **一覧に生きていると出ているセッションのサーバは決して含めない。**
 // 使用中のセッションを落とす唯一の経路になりうるためである。
+//
+// 起動から ZombieMinAge に満たないサーバも外す。起動しかけのサーバは
+// まだ list-sessions に載っておらず、そのままでは「一覧に出ないのに
+// 動いている」に見えるためである。
 func ZombieServers(servers []ZellijServer, sessions []SessionEntry) []ZellijServer {
 	alive := map[string]bool{}
 	for _, name := range AliveSessionNames(sessions) {
@@ -144,7 +210,7 @@ func ZombieServers(servers []ZellijServer, sessions []SessionEntry) []ZellijServ
 
 	var zombies []ZellijServer
 	for _, server := range servers {
-		if alive[server.Session] {
+		if alive[server.Session] || server.Elapsed < ZombieMinAge {
 			continue
 		}
 		zombies = append(zombies, server)

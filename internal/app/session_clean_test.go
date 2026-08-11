@@ -82,15 +82,15 @@ const (
 		"gone-1 [Created 12m ago] (EXITED - attach to resurrect)\n" +
 		"gone-2 [Created 12m ago] (EXITED - attach to resurrect)\n"
 
-	cleanProcessList = "  PID  PPID COMMAND\n" +
-		"100     1 /opt/homebrew/bin/zellij --server /tmp/z/in-use\n" +
-		"101   100 /home/u/.claude-conductor/bin/mdev pane dashboard\n" +
-		"200     1 /opt/homebrew/bin/zellij --server /tmp/z/idle\n" +
-		"201   200 /home/u/.claude-conductor/bin/mdev pane dashboard\n" +
-		"300     1 /opt/homebrew/bin/zellij --server /tmp/z/manual\n" +
-		"301   300 -zsh\n" +
-		"400     1 /opt/homebrew/bin/zellij --server /tmp/z/zombie\n" +
-		"500     1 zellij action list-tabs\n"
+	cleanProcessList = "  PID  PPID     ELAPSED COMMAND\n" +
+		"100     1 40:00 /opt/homebrew/bin/zellij --server /tmp/z/in-use\n" +
+		"101   100 40:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n" +
+		"200     1 30:00 /opt/homebrew/bin/zellij --server /tmp/z/idle\n" +
+		"201   200 30:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n" +
+		"300     1 20:00 /opt/homebrew/bin/zellij --server /tmp/z/manual\n" +
+		"301   300 20:00 -zsh\n" +
+		"400     1 12:00 /opt/homebrew/bin/zellij --server /tmp/z/zombie\n" +
+		"500     1 12:00 zellij action list-tabs\n"
 )
 
 // newCleaner は既定の状況(in-use に 1 つ attach、idle は誰も居ない)の
@@ -348,8 +348,8 @@ func TestCleanWithNothingToDo(t *testing.T) {
 		clientErrs: map[string]error{},
 	}
 	processes := &fakeProcessStore{
-		out: "100     1 /opt/homebrew/bin/zellij --server /tmp/z/in-use\n" +
-			"101   100 /home/u/.claude-conductor/bin/mdev pane dashboard\n",
+		out: "100     1 40:00 /opt/homebrew/bin/zellij --server /tmp/z/in-use\n" +
+			"101   100 40:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n",
 		aliveAfterTerm: map[int]bool{},
 	}
 	cleaner := &app.SessionCleaner{

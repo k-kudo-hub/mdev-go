@@ -25,13 +25,13 @@ detached セッションの無限ポーリング蓄積(zellij サーバ劣化 �
 - [x] domain: 減速判定の純粋関数のテスト+実装(attach 確認は 30 秒間隔、未アタッチが確認できたら poll 間隔を通常 → 60 秒へ、attach 復帰で即通常へ)
 - [x] infra+tui: poller への組み込み(`zellij action list-clients` の呼び出しは既存 zellij adapter 経由・10 秒上限。list-clients 自体の失敗は「attach あり」扱い = 安全側)
 
-### C. conductor 側: init.zsh から自動掃除を呼ぶ(小 PR)
+### C. conductor 側: init.zsh から自動掃除を呼ぶ(小 PR) — **本タスクの対象外**(別エージェントが担当)
 
 - [ ] init.zsh の mdev 関数: セッション作成前(fetch-news の隣)に `$CONDUCTOR_HOME/bin/mdev sessions clean --auto` を実行(bin/mdev が実行可能なときのみ・失敗無視)。test.sh にテスト追加
 
 ### D. 検証・仕上げ
 
-- [ ] make check(カバレッジ閾値維持)+ 実環境での動作確認手順の整理(detached セッションを 1 つ作って clean が回収すること、使用中セッションが無傷なこと)
+- [x] make check(カバレッジ閾値維持)+ 実環境での動作確認手順の整理(detached セッションを 1 つ作って clean が回収すること、使用中セッションが無傷なこと)
 
 ## 完了条件
 

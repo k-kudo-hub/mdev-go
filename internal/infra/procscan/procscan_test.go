@@ -13,7 +13,7 @@ import (
 )
 
 // TestListProcessesRunsPs は実際に ps を起動して、自分自身の行が
-// 取れることを確かめる。列の並び(pid ppid command)が前提である。
+// 取れることを確かめる。列の並び(pid ppid etime command)が前提である。
 func TestListProcessesRunsPs(t *testing.T) {
 	t.Parallel()
 
@@ -49,7 +49,7 @@ func TestListProcessesArgs(t *testing.T) {
 	if gotName != "ps" {
 		t.Errorf("コマンド = %q, want ps", gotName)
 	}
-	if want := []string{"-axo", "pid,ppid,command"}; !slices.Equal(gotArgs, want) {
+	if want := []string{"-axo", "pid,ppid,etime,command"}; !slices.Equal(gotArgs, want) {
 		t.Errorf("引数 = %v, want %v", gotArgs, want)
 	}
 	if gotTimeout != listTimeout {

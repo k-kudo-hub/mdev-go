@@ -22,7 +22,7 @@ import (
 const listTimeout = 10 * time.Second
 
 // psArgs は プロセス一覧の取り方である。macOS と Linux の両方で同じ列が出る。
-var psArgs = []string{"-axo", "pid,ppid,command"}
+var psArgs = []string{"-axo", "pid,ppid,etime,command"}
 
 // Scanner はプロセスの一覧取得とシグナル送信を行う。
 type Scanner struct {
@@ -42,7 +42,7 @@ func NewScanner() *Scanner {
 	return &Scanner{output: commandOutput, signal: sendSignal}
 }
 
-// ListProcesses は `ps -axo pid,ppid,command` の標準出力を返す。
+// ListProcesses は `ps -axo pid,ppid,etime,command` の標準出力を返す。
 func (s *Scanner) ListProcesses() (string, error) {
 	out, err := s.output(listTimeout, "ps", psArgs...)
 	if err != nil {
