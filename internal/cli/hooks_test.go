@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -553,7 +554,7 @@ func TestHooksSwitchShowsFlavorPath(t *testing.T) {
 			t.Parallel()
 
 			settings := &fakeHookSettingsService{switchResult: tt.result}
-			code, stdout, stderr := runHooksCLI(t, newHooksDeps(settings), "hooks", "switch")
+			code, stdout, stderr := runCLIOut(t, newHooksDeps(settings), "hooks", "switch")
 
 			if code != exitOK {
 				t.Errorf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
@@ -575,7 +576,7 @@ func TestHooksSwitchDryRunHidesFlavorPath(t *testing.T) {
 		Changes:      []app.HookCommandChange{{Event: "Stop", Before: "a", After: "b"}},
 		DryRun:       true,
 	}}
-	code, stdout, stderr := runHooksCLI(t, newHooksDeps(settings), "hooks", "switch", "--dry-run")
+	code, stdout, stderr := runCLIOut(t, newHooksDeps(settings), "hooks", "switch", "--dry-run")
 
 	if code != exitOK {
 		t.Errorf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
@@ -596,7 +597,7 @@ func TestHooksRestoreShowsFlavorPath(t *testing.T) {
 		Changes:      []app.HookCommandChange{{Event: "Stop", Before: "b", After: "a"}},
 		FlavorPath:   flavorPath,
 	}}
-	code, stdout, stderr := runHooksCLI(t, newHooksDeps(settings), "hooks", "restore")
+	code, stdout, stderr := runCLIOut(t, newHooksDeps(settings), "hooks", "restore")
 
 	if code != exitOK {
 		t.Errorf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
@@ -606,18 +607,246 @@ func TestHooksRestoreShowsFlavorPath(t *testing.T) {
 	}
 }
 
-// runHooksCLI はコマンドを実行して終了コードと標準出力・標準エラーを返す。
-func runHooksCLI(t *testing.T, deps Deps, args ...string) (int, string, string) {
-	t.Helper()
+// dryRunNotice は dry-run のときに出る断りの文言である。
+const dryRunNotice = "--dry-run のため書き込んでいません。"
 
-	cmd := NewRootCommand(deps)
-	var stdout, stderr bytes.Buffer
-	cmd.SetIn(strings.NewReader(""))
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs(args)
+// TestHooksDryRunNoticeAppearsOnce は dry-run の断りが経路に依らず
+// **1 回だけ**出ることを確かめる。
+//
+// 断りを経路ごとに書いていたため、settings.json 欠損 + バックアップあり +
+// dry-run の restore で 2 回出ていた。出す場所を 1 つに保つための回帰テスト。
+func TestHooksDryRunNoticeAppearsOnce(t *testing.T) {
+	t.Parallel()
 
-	var execErr bytes.Buffer
-	code := execute(cmd, &execErr)
-	return code, stdout.String(), stderr.String() + execErr.String()
+	const settingsPath = "/tmp/fake/.claude/settings.json"
+	tests := []struct {
+		name     string
+		settings *fakeHookSettingsService
+		args     []string
+	}{
+		{
+			name: "switch: 置き換えあり",
+			settings: &fakeHookSettingsService{switchResult: app.SwitchHooksResult{
+				SettingsPath: settingsPath, Changes: testChanges, DryRun: true,
+			}},
+			args: []string{"hooks", "switch", "--dry-run"},
+		},
+		{
+			name: "switch: 置き換えなし",
+			settings: &fakeHookSettingsService{switchResult: app.SwitchHooksResult{
+				SettingsPath: settingsPath, DryRun: true,
+			}},
+			args: []string{"hooks", "switch", "--dry-run"},
+		},
+		{
+			name: "restore: 置き換えあり",
+			settings: &fakeHookSettingsService{restoreResult: app.RestoreHooksResult{
+				SettingsPath: settingsPath, Changes: testChanges, DryRun: true,
+			}},
+			args: []string{"hooks", "restore", "--dry-run"},
+		},
+		{
+			name: "restore: 置き換えなし",
+			settings: &fakeHookSettingsService{restoreResult: app.RestoreHooksResult{
+				SettingsPath: settingsPath, DryRun: true,
+			}},
+			args: []string{"hooks", "restore", "--dry-run"},
+		},
+		{
+			// 以前ここだけ 2 回出ていた。
+			name: "restore: settings.json 欠損 + バックアップあり",
+			settings: &fakeHookSettingsService{restoreResult: app.RestoreHooksResult{
+				SettingsPath:       settingsPath,
+				SettingsMissing:    true,
+				RestoredFromBackup: true,
+				BackupPath:         "/tmp/fake/.claude/settings.json.mdev-backup-0",
+				DryRun:             true,
+			}},
+			args: []string{"hooks", "restore", "--dry-run"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			code, stdout, stderr := runCLIOut(t, newHooksDeps(tt.settings), tt.args...)
+			if code != exitOK {
+				t.Fatalf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
+			}
+			if got := strings.Count(stdout, dryRunNotice); got != 1 {
+				t.Errorf("dry-run の断り = %d 回, want 1 回:\n%s", got, stdout)
+			}
+		})
+	}
+}
+
+// TestHooksRestoreWithoutBackupSaysNothingElse は復元できなかったときに
+// dry-run の断りも印の行も出さないことを確かめる。
+//
+// 何も復元しておらず印にも触れていないので、どちらを出しても嘘になる。
+func TestHooksRestoreWithoutBackupSaysNothingElse(t *testing.T) {
+	t.Parallel()
+
+	for _, dryRun := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dryRun=%v", dryRun), func(t *testing.T) {
+			t.Parallel()
+
+			settings := &fakeHookSettingsService{restoreResult: app.RestoreHooksResult{
+				SettingsPath:    "/tmp/fake/.claude/settings.json",
+				SettingsMissing: true,
+				DryRun:          dryRun,
+			}}
+			args := []string{"hooks", "restore"}
+			if dryRun {
+				args = append(args, "--dry-run")
+			}
+			code, stdout, stderr := runCLIOut(t, newHooksDeps(settings), args...)
+
+			if code != exitOK {
+				t.Fatalf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
+			}
+			if !strings.Contains(stdout, "復元できません") {
+				t.Errorf("復元できない旨が出ていません:\n%s", stdout)
+			}
+			for _, unwanted := range []string{dryRunNotice, "印を消しました"} {
+				if strings.Contains(stdout, unwanted) {
+					t.Errorf("%q が出ています(何も復元していない):\n%s", unwanted, stdout)
+				}
+			}
+		})
+	}
+}
+
+// TestHooksSwitchFailureAfterWriteReportsSwitched は settings.json を書いた
+// 後に失敗したとき、「変更されていません」と **嘘をつかない** ことを確かめる。
+//
+// 印の書き込みだけが失敗する経路がこれに当たる。ここで元のままだと伝えると、
+// 利用者は切り替わった settings.json をそのままにしてしまう。
+func TestHooksSwitchFailureAfterWriteReportsSwitched(t *testing.T) {
+	t.Parallel()
+
+	const backupPath = "/tmp/fake/.claude/settings.json.mdev-backup-0"
+	settings := &fakeHookSettingsService{
+		switchResult: app.SwitchHooksResult{
+			SettingsPath:    "/tmp/fake/.claude/settings.json",
+			Changes:         testChanges,
+			BackupPath:      backupPath,
+			SettingsWritten: true,
+		},
+		switchErr: errors.New("印を書けませんでした"),
+	}
+	code, out, _ := runCLIOut(t, newHooksDeps(settings), "hooks", "switch")
+
+	if code != exitError {
+		t.Errorf("終了コード = %d, want %d", code, exitError)
+	}
+	if strings.Contains(out, "settings.json は変更されていません") {
+		t.Errorf("書き込み済みなのに変更なしと報告しています:\n%s", out)
+	}
+	for _, want := range []string{"切り替え済み", backupPath, "mdev hooks restore"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("出力に %q がありません:\n%s", want, out)
+		}
+	}
+}
+
+// TestHooksSwitchFailureBeforeWriteReportsUnchanged は書き込みまでに失敗した
+// ときは従来どおり「変更されていません」と伝えることを確かめる。
+func TestHooksSwitchFailureBeforeWriteReportsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	settings := &fakeHookSettingsService{
+		switchResult: app.SwitchHooksResult{
+			SettingsPath: "/tmp/fake/.claude/settings.json",
+			Changes:      testChanges,
+			BackupPath:   "/tmp/fake/.claude/settings.json.mdev-backup-0",
+		},
+		switchErr: errors.New("書けない"),
+	}
+	code, out, _ := runCLIOut(t, newHooksDeps(settings), "hooks", "switch")
+
+	if code != exitError {
+		t.Errorf("終了コード = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(out, "settings.json は変更されていません") {
+		t.Errorf("変更なしと報告していません:\n%s", out)
+	}
+}
+
+// TestHooksRestoreFailureReportsRestored は復元が済んだ後に失敗したとき
+// (印の削除だけ失敗)、settings.json が戻っていることを伝えることを確かめる。
+//
+// これが無いと、利用者は復元が丸ごと失敗したと思って restore を繰り返す。
+func TestHooksRestoreFailureReportsRestored(t *testing.T) {
+	t.Parallel()
+
+	const backupPath = "/tmp/fake/.claude/settings.json.mdev-backup-0"
+	tests := []struct {
+		name   string
+		result app.RestoreHooksResult
+		want   []string
+	}{
+		{
+			name: "逆向きの置き換えで復元した",
+			result: app.RestoreHooksResult{
+				SettingsPath:    "/tmp/fake/.claude/settings.json",
+				Changes:         testChanges,
+				SettingsWritten: true,
+			},
+			want: []string{"復元済み"},
+		},
+		{
+			// 復元元が分からないと利用者は次に何を見ればよいか分からない。
+			name: "バックアップの全文で復元した",
+			result: app.RestoreHooksResult{
+				SettingsPath:       "/tmp/fake/.claude/settings.json",
+				SettingsMissing:    true,
+				RestoredFromBackup: true,
+				BackupPath:         backupPath,
+				SettingsWritten:    true,
+			},
+			want: []string{"復元済み", backupPath},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := &fakeHookSettingsService{
+				restoreResult: tt.result,
+				restoreErr:    errors.New("印を消せませんでした"),
+			}
+			code, out, _ := runCLIOut(t, newHooksDeps(settings), "hooks", "restore")
+
+			if code != exitError {
+				t.Errorf("終了コード = %d, want %d", code, exitError)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("出力に %q がありません:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
+// TestHooksRestoreFailureBeforeWriteIsQuiet は復元に着手する前に失敗した
+// ときに「復元済み」と伝えないことを確かめる。
+func TestHooksRestoreFailureBeforeWriteIsQuiet(t *testing.T) {
+	t.Parallel()
+
+	settings := &fakeHookSettingsService{
+		restoreResult: app.RestoreHooksResult{SettingsPath: "/tmp/fake/.claude/settings.json"},
+		restoreErr:    errors.New("読めない"),
+	}
+	code, out, _ := runCLIOut(t, newHooksDeps(settings), "hooks", "restore")
+
+	if code != exitError {
+		t.Errorf("終了コード = %d, want %d", code, exitError)
+	}
+	if strings.Contains(out, "復元済み") {
+		t.Errorf("復元していないのに復元済みと報告しています:\n%s", out)
+	}
 }

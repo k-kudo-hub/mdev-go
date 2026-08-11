@@ -74,6 +74,12 @@ type SwitchHooksResult struct {
 	// FlavorPath は「Go 版を使う」印を書いたファイルのパス。
 	// dry-run のときは空になる。
 	FlavorPath string
+	// SettingsWritten は settings.json を実際に書き換えたことを表す。
+	//
+	// 失敗時の報告に要る。書き換えの後に印の書き込みで失敗した場合、
+	// 「settings.json は変更されていません」と伝えると嘘になる。
+	// BackupPath の有無では区別できない(退避は書き換えの前に済むため)。
+	SettingsWritten bool
 	// DryRun は書き込みを行わなかったことを表す。
 	DryRun bool
 }
@@ -95,8 +101,11 @@ type RestoreHooksResult struct {
 	// (dry-run では書き戻す予定である)ことを表す。
 	RestoredFromBackup bool
 	// FlavorPath は消した「Go 版を使う」印のファイルのパス。
-	// dry-run のときは空になる。
+	// dry-run のときと、何も復元しなかったときは空になる。
 	FlavorPath string
+	// SettingsWritten は settings.json を実際に書き換えたことを表す
+	// (SwitchHooksResult.SettingsWritten と同じ理由で失敗時の報告に要る)。
+	SettingsWritten bool
 	// DryRun は書き込みを行わなかったことを表す。
 	DryRun bool
 }
@@ -150,6 +159,7 @@ func (s *HookSwitcher) Switch(dryRun bool) (SwitchHooksResult, error) {
 		if err := s.Settings.Write(switched); err != nil {
 			return result, err
 		}
+		result.SettingsWritten = true
 	}
 
 	// **hooks に変更が無くても印は書く。** 印は「Go 版を使う」という意思表示で
@@ -157,12 +167,25 @@ func (s *HookSwitcher) Switch(dryRun bool) (SwitchHooksResult, error) {
 	// (install.sh が hooks を戻した直後など)場合に、ここで書き直せないと
 	// 次の更新でまた巻き戻る。
 	if err := s.Flavor.WriteFlavor(domain.FlavorGo); err != nil {
-		return result, fmt.Errorf(
-			"hooks は切り替えましたが、Go 版を使う印を書けませんでした"+
-				"(このままでは install.sh や mdev update で設定が Shell 版へ戻ります): %w", err)
+		return result, fmt.Errorf("%s、Go 版を使う印を書けませんでした"+
+			"(このままでは install.sh や mdev update で設定が Shell 版へ戻ります): %w",
+			switchedSettingsSummary(result.SettingsWritten), err)
 	}
 	result.FlavorPath = s.Flavor.Path()
 	return result, nil
+}
+
+// switchedSettingsSummary は印の書き込みに失敗したときの前置きを返す。
+//
+// 「hooks を切り替えたうえで印だけ失敗した」のか「hooks は元から切り替え
+// 済みで settings.json には触れていない」のかで、利用者が次に確かめる場所が
+// 変わる。前者は settings.json が新しい内容になっているので、印を手で置くか
+// 復元するかを選ぶことになる。
+func switchedSettingsSummary(settingsWritten bool) string {
+	if settingsWritten {
+		return "hooks は切り替えました"
+	}
+	return "hooks は既に mdev を指しており settings.json は変更していません"
 }
 
 // Restore は settings.json の hooks を conductor のスクリプト呼び出しへ戻す。
@@ -188,7 +211,10 @@ func (s *HookSwitcher) Restore(dryRun bool) (RestoreHooksResult, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		result.SettingsMissing = true
 		result, err = s.restoreFromBackup(result)
-		if err != nil || result.DryRun {
+		// 何も復元できなかった(バックアップが 1 つも無い)ときは印にも触れない。
+		// 「Shell 版へ戻した」と言える状態になっていないのに印だけ消すと、
+		// hooks が mdev を指したまま install.sh が切り替え直さなくなる。
+		if err != nil || dryRun || !result.RestoredFromBackup {
 			return result, err
 		}
 		return s.clearFlavor(result)
@@ -210,6 +236,7 @@ func (s *HookSwitcher) Restore(dryRun bool) (RestoreHooksResult, error) {
 		if err := s.Settings.Write(restored); err != nil {
 			return result, err
 		}
+		result.SettingsWritten = true
 	}
 	return s.clearFlavor(result)
 }
@@ -221,12 +248,21 @@ func (s *HookSwitcher) Restore(dryRun bool) (RestoreHooksResult, error) {
 // いるのに印だけが残っていると、その状態が正しいのかどうかが分からなくなる。
 func (s *HookSwitcher) clearFlavor(result RestoreHooksResult) (RestoreHooksResult, error) {
 	if err := s.Flavor.RemoveFlavor(); err != nil {
-		return result, fmt.Errorf(
-			"hooks は戻しましたが、Go 版を使う印を消せませんでした"+
-				"(このままでは install.sh が hooks を Go 版へ切り替え直します): %w", err)
+		return result, fmt.Errorf("%s、Go 版を使う印を消せませんでした"+
+			"(このままでは install.sh が hooks を Go 版へ切り替え直します): %w",
+			restoredSettingsSummary(result.SettingsWritten), err)
 	}
 	result.FlavorPath = s.Flavor.Path()
 	return result, nil
+}
+
+// restoredSettingsSummary は印の削除に失敗したときの前置きを返す。
+// switchedSettingsSummary と同じ理由で、settings.json に触れたかどうかで分ける。
+func restoredSettingsSummary(settingsWritten bool) string {
+	if settingsWritten {
+		return "hooks は戻しました"
+	}
+	return "hooks は既に conductor のスクリプトを指しており settings.json は変更していません"
 }
 
 // restoreFromBackup は settings.json が存在しないときのフォールバックである。
@@ -248,6 +284,7 @@ func (s *HookSwitcher) restoreFromBackup(result RestoreHooksResult) (RestoreHook
 	if err := s.Settings.Write(backup); err != nil {
 		return result, err
 	}
+	result.SettingsWritten = true
 	return result, nil
 }
 

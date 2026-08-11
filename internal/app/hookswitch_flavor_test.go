@@ -263,3 +263,134 @@ func TestSwitchRestoreRoundTripOnFlavor(t *testing.T) {
 		t.Errorf("再切り替え後の印 = %q(exists=%v)", flavor.written, flavor.exists)
 	}
 }
+
+// TestRestoreWithoutBackupLeavesFlavorAlone は settings.json も バックアップも
+// 無いときに印へ触れないことを確かめる。
+//
+// 何も復元していないのに印だけ消すと、hooks が mdev を指したままなのに
+// install.sh が切り替え直さなくなる(どちらでもない状態で固定される)。
+func TestRestoreWithoutBackupLeavesFlavorAlone(t *testing.T) {
+	t.Parallel()
+
+	settings := newFakeSettingsStore(settingsBefore)
+	settings.readErr = notExistErr()
+	flavor := newFakeFlavorStore()
+	flavor.exists = true
+
+	got, err := newSwitcherWithFlavor(settings, flavor).Restore(false)
+	if err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if len(flavor.calls) != 0 {
+		t.Errorf("印を触りました: %v", flavor.calls)
+	}
+	if !flavor.exists {
+		t.Error("何も復元していないのに印が消えています")
+	}
+	if got.FlavorPath != "" {
+		t.Errorf("FlavorPath = %q, want 空", got.FlavorPath)
+	}
+	if got.SettingsWritten {
+		t.Error("SettingsWritten = true, want false")
+	}
+}
+
+// TestSwitchReportsSettingsWritten は settings.json を書いたかどうかが
+// 結果に出ることを確かめる。失敗時の報告がこれで分かれる。
+func TestSwitchReportsSettingsWritten(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "切り替えた", content: settingsBefore, want: true},
+		{name: "既に切り替え済みで触っていない", content: settingsAfter, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := newSwitcher(newFakeSettingsStore(tt.content)).Switch(false)
+			if err != nil {
+				t.Fatalf("Switch() = %v", err)
+			}
+			if got.SettingsWritten != tt.want {
+				t.Errorf("SettingsWritten = %v, want %v", got.SettingsWritten, tt.want)
+			}
+		})
+	}
+}
+
+// TestFlavorFailureMessageMatchesWhatHappened は印の読み書きに失敗したときの
+// 文言が、settings.json に触れたかどうかと食い違わないことを確かめる。
+//
+// 「hooks は切り替えました」と書いてあるのに settings.json が元のままだと、
+// 利用者は在りもしない変更を探すことになる。
+func TestFlavorFailureMessageMatchesWhatHappened(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		content  string
+		restore  bool
+		want     string
+		unwanted string
+	}{
+		{
+			name:     "switch: 切り替えた",
+			content:  settingsBefore,
+			want:     "hooks は切り替えました",
+			unwanted: "settings.json は変更していません",
+		},
+		{
+			name:     "switch: 既に切り替え済み",
+			content:  settingsAfter,
+			want:     "settings.json は変更していません",
+			unwanted: "hooks は切り替えました、",
+		},
+		{
+			name:     "restore: 戻した",
+			content:  settingsAfter,
+			restore:  true,
+			want:     "hooks は戻しました",
+			unwanted: "settings.json は変更していません",
+		},
+		{
+			name:     "restore: 既にスクリプトを指している",
+			content:  settingsBefore,
+			restore:  true,
+			want:     "settings.json は変更していません",
+			unwanted: "hooks は戻しました、",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			flavor := newFakeFlavorStore()
+			flavor.exists = true
+			flavor.writeErr = errors.New("書けない")
+			flavor.removeErr = errors.New("消せない")
+			switcher := newSwitcherWithFlavor(newFakeSettingsStore(tt.content), flavor)
+
+			var err error
+			if tt.restore {
+				_, err = switcher.Restore(false)
+			} else {
+				_, err = switcher.Switch(false)
+			}
+			if err == nil {
+				t.Fatal("error になりませんでした")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v, want %q を含む", err, tt.want)
+			}
+			if strings.Contains(err.Error(), tt.unwanted) {
+				t.Errorf("error = %v, want %q を含まない", err, tt.unwanted)
+			}
+		})
+	}
+}
