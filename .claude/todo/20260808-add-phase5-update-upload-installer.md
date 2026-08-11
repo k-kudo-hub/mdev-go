@@ -25,7 +25,7 @@ Shell 版に残る upload-log / fetch-news / update 系を Go 化し、ShellRunn
 
 ### B. fetch-news の Go 化(ShellRunner 消滅)
 
-- [ ] fetch-news.sh の仕様確認+domain のテスト+実装(RSS パース)
+- [x] fetch-news.sh の仕様確認+domain のテスト+実装(RSS パース)
 - [ ] infra+app: NewsFetcher を実装し ShellRunner を完全削除
 
 ### C. update 系の Go 化
