@@ -26,7 +26,16 @@ func newSwitcher(store *fakeSettingsStore) *app.HookSwitcher {
 }
 
 func newSwitcherWithBinary(store *fakeSettingsStore, binary fakeMdevBinary) *app.HookSwitcher {
-	return &app.HookSwitcher{Settings: store, Binary: binary}
+	return &app.HookSwitcher{Settings: store, Binary: binary, Flavor: newFakeFlavorStore()}
+}
+
+// newSwitcherWithFlavor は印の置き場所を観測できる switcher を返す。
+func newSwitcherWithFlavor(store *fakeSettingsStore, flavor *fakeFlavorStore) *app.HookSwitcher {
+	return &app.HookSwitcher{
+		Settings: store,
+		Binary:   fakeMdevBinary{path: testMdevBinaryPath, exists: true},
+		Flavor:   flavor,
+	}
 }
 
 func TestHookSwitcherSwitchWarnsWhenBinaryIsNotInstalled(t *testing.T) {

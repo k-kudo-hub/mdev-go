@@ -107,16 +107,21 @@ func printSwitchResult(w io.Writer, result app.SwitchHooksResult) {
 
 	if len(result.Changes) == 0 {
 		_, _ = fmt.Fprintln(w, "hooks は既に mdev を指しています。変更はありません。")
-		return
+	} else {
+		printChanges(w, "置き換える hook コマンド", result.Changes)
+		if result.DryRun {
+			_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
+			return
+		}
+		_, _ = fmt.Fprintf(w, "バックアップ: %s\n", result.BackupPath)
+		_, _ = fmt.Fprintln(w, "hooks を mdev へ切り替えました。")
 	}
-	printChanges(w, "置き換える hook コマンド", result.Changes)
-
 	if result.DryRun {
 		_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
 		return
 	}
-	_, _ = fmt.Fprintf(w, "バックアップ: %s\n", result.BackupPath)
-	_, _ = fmt.Fprintln(w, "hooks を mdev へ切り替えました。")
+	// 印は hooks の変更の有無に依らず書き直すので、どちらの経路でも出す。
+	_, _ = fmt.Fprintf(w, "Go 版を使う印: %s\n", result.FlavorPath)
 }
 
 // printSwitchWarnings は切り替えは成功したが利用者が対処すべき事柄を書き出す。
@@ -163,20 +168,34 @@ func printRestoreResult(w io.Writer, result app.RestoreHooksResult) {
 
 	if result.SettingsMissing {
 		printBackupFallback(w, result)
+		printFlavorRemoved(w, result)
 		return
 	}
 
 	if len(result.Changes) == 0 {
 		_, _ = fmt.Fprintln(w, "hooks は既に conductor のスクリプトを指しています。変更はありません。")
-		return
+	} else {
+		printChanges(w, "元へ戻す hook コマンド", result.Changes)
+		if result.DryRun {
+			_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
+			return
+		}
+		_, _ = fmt.Fprintln(w, "hooks を conductor のスクリプトへ戻しました。")
 	}
-	printChanges(w, "元へ戻す hook コマンド", result.Changes)
+	printFlavorRemoved(w, result)
+}
 
+// printFlavorRemoved は消した印の置き場所を書き出す。
+//
+// 印は hooks の差分ではなく「どちらの実装を使うか」の意思表示なので、
+// hooks に変更が無くても、settings.json が無くても消す。どの経路でも
+// 同じ 1 行を出す。
+func printFlavorRemoved(w io.Writer, result app.RestoreHooksResult) {
 	if result.DryRun {
 		_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
 		return
 	}
-	_, _ = fmt.Fprintln(w, "hooks を conductor のスクリプトへ戻しました。")
+	_, _ = fmt.Fprintf(w, "Go 版を使う印を消しました: %s\n", result.FlavorPath)
 }
 
 // printBackupFallback は settings.json が無いときの復元結果を書き出す。

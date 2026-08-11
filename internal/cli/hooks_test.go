@@ -514,3 +514,110 @@ func TestHookAndHooksAreDistinctCommands(t *testing.T) {
 		t.Errorf("hooks ユースケースが呼ばれていない: %v", settings.switchDryRuns)
 	}
 }
+
+// TestHooksSwitchShowsFlavorPath は切り替えたときに印の置き場所を出す
+// ことを確かめる。
+//
+// 印は conductor の install.sh が読むファイルで、利用者から見ると
+// 「なぜ設定が巻き戻らなくなったのか」の根拠になる。どこに置いたかを
+// 出さないと、手で消したいときに探せない。
+func TestHooksSwitchShowsFlavorPath(t *testing.T) {
+	t.Parallel()
+
+	const flavorPath = "/tmp/fake/.claude-conductor/FLAVOR"
+	tests := []struct {
+		name   string
+		result app.SwitchHooksResult
+	}{
+		{
+			name: "hooks を切り替えた",
+			result: app.SwitchHooksResult{
+				SettingsPath: "/tmp/fake/.claude/settings.json",
+				Changes:      []app.HookCommandChange{{Event: "Stop", Before: "a", After: "b"}},
+				BackupPath:   "/tmp/fake/.claude/settings.json.mdev-backup-0",
+				FlavorPath:   flavorPath,
+			},
+		},
+		{
+			// 変更が無くても印は書き直すので、こちらでも出す。
+			name: "既に切り替え済みで変更が無い",
+			result: app.SwitchHooksResult{
+				SettingsPath: "/tmp/fake/.claude/settings.json",
+				FlavorPath:   flavorPath,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := &fakeHookSettingsService{switchResult: tt.result}
+			code, stdout, stderr := runHooksCLI(t, newHooksDeps(settings), "hooks", "switch")
+
+			if code != exitOK {
+				t.Errorf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
+			}
+			if !strings.Contains(stdout, flavorPath) {
+				t.Errorf("標準出力に印の置き場所がありません:\n%s", stdout)
+			}
+		})
+	}
+}
+
+// TestHooksSwitchDryRunHidesFlavorPath は dry-run で印の行を出さないことを
+// 確かめる。書いていないものを「書いた」と読める形で出してはならない。
+func TestHooksSwitchDryRunHidesFlavorPath(t *testing.T) {
+	t.Parallel()
+
+	settings := &fakeHookSettingsService{switchResult: app.SwitchHooksResult{
+		SettingsPath: "/tmp/fake/.claude/settings.json",
+		Changes:      []app.HookCommandChange{{Event: "Stop", Before: "a", After: "b"}},
+		DryRun:       true,
+	}}
+	code, stdout, stderr := runHooksCLI(t, newHooksDeps(settings), "hooks", "switch", "--dry-run")
+
+	if code != exitOK {
+		t.Errorf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
+	}
+	if strings.Contains(stdout, "FLAVOR") {
+		t.Errorf("dry-run なのに印の行が出ています:\n%s", stdout)
+	}
+}
+
+// TestHooksRestoreShowsFlavorPath は復元したときに印を消したことを出す
+// ことを確かめる。
+func TestHooksRestoreShowsFlavorPath(t *testing.T) {
+	t.Parallel()
+
+	const flavorPath = "/tmp/fake/.claude-conductor/FLAVOR"
+	settings := &fakeHookSettingsService{restoreResult: app.RestoreHooksResult{
+		SettingsPath: "/tmp/fake/.claude/settings.json",
+		Changes:      []app.HookCommandChange{{Event: "Stop", Before: "b", After: "a"}},
+		FlavorPath:   flavorPath,
+	}}
+	code, stdout, stderr := runHooksCLI(t, newHooksDeps(settings), "hooks", "restore")
+
+	if code != exitOK {
+		t.Errorf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, flavorPath) {
+		t.Errorf("標準出力に印の置き場所がありません:\n%s", stdout)
+	}
+}
+
+// runHooksCLI はコマンドを実行して終了コードと標準出力・標準エラーを返す。
+func runHooksCLI(t *testing.T, deps Deps, args ...string) (int, string, string) {
+	t.Helper()
+
+	cmd := NewRootCommand(deps)
+	var stdout, stderr bytes.Buffer
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs(args)
+
+	var execErr bytes.Buffer
+	code := execute(cmd, &execErr)
+	return code, stdout.String(), stderr.String() + execErr.String()
+}

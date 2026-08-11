@@ -19,6 +19,12 @@ type HookSwitcher struct {
 	Settings SettingsStore
 	// Binary は切り替え後の hooks が呼ぶ mdev の所在を調べる。
 	Binary MdevBinaryLocator
+	// Flavor は「Go 版を使う」という印を書く / 消す。
+	//
+	// hooks の切り替えは Go 版採用の意思表示そのものなので、印の更新も
+	// ここで行う。印が無いと install.sh と `mdev update` が layouts と
+	// hooks を Shell 版へ黙って戻してしまう。
+	Flavor FlavorStore
 }
 
 // HookCommandChange は置き換える hook コマンド 1 件である。
@@ -65,6 +71,9 @@ type SwitchHooksResult struct {
 	// スクリプト呼び出しである。置換規則に無い亜種がここに出る。
 	// 切り替え自体は成功しているため、エラーではなく警告として扱う。
 	RemainingScripts []HookCommand
+	// FlavorPath は「Go 版を使う」印を書いたファイルのパス。
+	// dry-run のときは空になる。
+	FlavorPath string
 	// DryRun は書き込みを行わなかったことを表す。
 	DryRun bool
 }
@@ -85,6 +94,9 @@ type RestoreHooksResult struct {
 	// RestoredFromBackup はバックアップの全文で書き戻した
 	// (dry-run では書き戻す予定である)ことを表す。
 	RestoredFromBackup bool
+	// FlavorPath は消した「Go 版を使う」印のファイルのパス。
+	// dry-run のときは空になる。
+	FlavorPath string
 	// DryRun は書き込みを行わなかったことを表す。
 	DryRun bool
 }
@@ -121,19 +133,35 @@ func (s *HookSwitcher) Switch(dryRun bool) (SwitchHooksResult, error) {
 	}
 	result.RemainingScripts = toHookCommands(remaining)
 
-	if len(changes) == 0 || dryRun {
+	if dryRun {
 		return result, nil
 	}
 
-	backupPath, err := s.Settings.Backup(current)
-	if err != nil {
-		return result, err
-	}
-	result.BackupPath = backupPath
+	// 既に切り替え済み(changes が空)なら settings.json には触らない。
+	// 変更が無いのにバックアップを作ると、Restore が探す「最新のバックアップ」が
+	// 切り替え後の内容になってしまう。
+	if len(changes) > 0 {
+		backupPath, err := s.Settings.Backup(current)
+		if err != nil {
+			return result, err
+		}
+		result.BackupPath = backupPath
 
-	if err := s.Settings.Write(switched); err != nil {
-		return result, err
+		if err := s.Settings.Write(switched); err != nil {
+			return result, err
+		}
 	}
+
+	// **hooks に変更が無くても印は書く。** 印は「Go 版を使う」という意思表示で
+	// あって hooks の差分ではない。切り替え済みの状態で印だけを失っている
+	// (install.sh が hooks を戻した直後など)場合に、ここで書き直せないと
+	// 次の更新でまた巻き戻る。
+	if err := s.Flavor.WriteFlavor(domain.FlavorGo); err != nil {
+		return result, fmt.Errorf(
+			"hooks は切り替えましたが、Go 版を使う印を書けませんでした"+
+				"(このままでは install.sh や mdev update で設定が Shell 版へ戻ります): %w", err)
+	}
+	result.FlavorPath = s.Flavor.Path()
 	return result, nil
 }
 
@@ -159,7 +187,11 @@ func (s *HookSwitcher) Restore(dryRun bool) (RestoreHooksResult, error) {
 	current, err := s.Settings.Read()
 	if errors.Is(err, fs.ErrNotExist) {
 		result.SettingsMissing = true
-		return s.restoreFromBackup(result)
+		result, err = s.restoreFromBackup(result)
+		if err != nil || result.DryRun {
+			return result, err
+		}
+		return s.clearFlavor(result)
 	}
 	if err != nil {
 		return result, err
@@ -171,12 +203,29 @@ func (s *HookSwitcher) Restore(dryRun bool) (RestoreHooksResult, error) {
 	}
 	result.Changes = toHookCommandChanges(changes)
 
-	if len(changes) == 0 || dryRun {
+	if dryRun {
 		return result, nil
 	}
-	if err := s.Settings.Write(restored); err != nil {
-		return result, err
+	if len(changes) > 0 {
+		if err := s.Settings.Write(restored); err != nil {
+			return result, err
+		}
 	}
+	return s.clearFlavor(result)
+}
+
+// clearFlavor は「Go 版を使う」印を消す。
+//
+// **hooks に変更が無くても消す。** Switch が変更の有無に依らず印を書くのと
+// 対称で、印は意思表示であって hooks の差分ではない。既に Shell 版を指して
+// いるのに印だけが残っていると、その状態が正しいのかどうかが分からなくなる。
+func (s *HookSwitcher) clearFlavor(result RestoreHooksResult) (RestoreHooksResult, error) {
+	if err := s.Flavor.RemoveFlavor(); err != nil {
+		return result, fmt.Errorf(
+			"hooks は戻しましたが、Go 版を使う印を消せませんでした"+
+				"(このままでは install.sh が hooks を Go 版へ切り替え直します): %w", err)
+	}
+	result.FlavorPath = s.Flavor.Path()
 	return result, nil
 }
 

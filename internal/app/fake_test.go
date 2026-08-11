@@ -211,6 +211,47 @@ func (b fakeMdevBinary) MdevBinary() (string, bool) { return b.path, b.exists }
 // testMdevBinaryPath は fake が返すバイナリのパスである。
 const testMdevBinaryPath = "/tmp/fake/.claude-conductor/bin/mdev"
 
+// fakeFlavorStore はメモリ上の FLAVOR ファイルを模す。
+//
+// 「今どうなっているか」(written / exists)と「何が起きたか」(calls)の
+// 両方を持つ。印は書いた・消したという操作そのものに意味があるため、
+// 結果の状態だけでは「変更が無いときに書き直したか」を確かめられない。
+type fakeFlavorStore struct {
+	// written は最後に書かれた印の値。
+	written string
+	// exists は印のファイルがあるかどうか。
+	exists bool
+	// calls は呼ばれたメソッド名を順に記録する。
+	calls []string
+
+	writeErr  error
+	removeErr error
+}
+
+func newFakeFlavorStore() *fakeFlavorStore { return &fakeFlavorStore{} }
+
+func (s *fakeFlavorStore) Path() string { return "/tmp/fake/.claude-conductor/FLAVOR" }
+
+func (s *fakeFlavorStore) WriteFlavor(flavor string) error {
+	s.calls = append(s.calls, "WriteFlavor")
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	s.written = flavor
+	s.exists = true
+	return nil
+}
+
+func (s *fakeFlavorStore) RemoveFlavor() error {
+	s.calls = append(s.calls, "RemoveFlavor")
+	if s.removeErr != nil {
+		return s.removeErr
+	}
+	s.written = ""
+	s.exists = false
+	return nil
+}
+
 // fakeSettingsStore はメモリ上の settings.json を模す。
 // バックアップは作った順に積み、最後の 1 件を「最新」として返す。
 type fakeSettingsStore struct {

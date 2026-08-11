@@ -148,6 +148,23 @@ type SettingsStore interface {
 	LatestBackup() (path string, data []byte, found bool, err error)
 }
 
+// FlavorStore は「どの実装の設定を使っているか」の印を読み書きする。
+// 実装は internal/infra/store にある。
+//
+// この印は conductor の install.sh が読む。install.sh も `mdev update` も
+// layouts と hooks を無条件に上書きするため、印が無いと Go 版へ寄せた設定が
+// 再実行のたびに黙って巻き戻る。書くのは「Go 版を採用する」という意思表示を
+// した時点(hooks の切り替え)である。
+type FlavorStore interface {
+	// Path は印のファイルのパスを返す。表示にのみ使う。
+	Path() string
+	// WriteFlavor は印を書く。既にあれば置き換える(冪等)。
+	WriteFlavor(flavor string) error
+	// RemoveFlavor は印を消す。**無い場合も成功**である。
+	// 印が無い状態が目的なので、既にそうなっているのは失敗ではない。
+	RemoveFlavor() error
+}
+
 // MdevBinaryLocator は切り替え後の hooks が呼ぶことになる mdev バイナリの
 // 所在を調べる。実装は internal/infra/store にある。
 //
