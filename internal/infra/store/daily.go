@@ -98,6 +98,36 @@ func (s *DailyStore) path(session, date string) string {
 	return filepath.Join(s.root, session, date+dailySuffix)
 }
 
+// ReadSession は session の daily ファイルを **ファイル名の昇順**で全部読む。
+//
+// 現行 upload-log.sh の `for df in "$DAILY_DIR"/*.jsonl` に対応する。
+// 当日ぶんだけを見ないのは、完了と削除が別の日にまたがっても記録を
+// 見つけられるようにするためである。ファイル名は YYYY-MM-DD.jsonl なので、
+// 名前の昇順がそのまま日付順になる。
+//
+// ディレクトリが無い・読めない場合は空を返す(記録が無いのと同じ扱いになり、
+// 呼び出し側がプレースホルダへ落ちる)。
+func (s *DailyStore) ReadSession(session string) [][]byte {
+	dir := filepath.Join(s.root, session)
+	// os.ReadDir はファイル名の昇順で返すため、並べ替えは要らない。
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var files [][]byte
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), dailySuffix) {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(dir, entry.Name())) //nolint:gosec // 列挙結果のパス
+		if err != nil {
+			continue
+		}
+		files = append(files, content)
+	}
+	return files
+}
+
 // FindRestorable は (tab, completedAt) が一致し、まだ復元されていない
 // 最初の 1 件を返す。
 //

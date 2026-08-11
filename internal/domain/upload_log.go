@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -214,4 +215,72 @@ func BuildMarkdown(raw []byte, summaryText string) string {
 		"\n" +
 		summaryText + "\n"
 	return strings.TrimRight(FilterSecrets(body), "\n")
+}
+
+// SelectUploadRecord は daily ファイル群からタブに一致するレコードを 1 件選ぶ。
+//
+// files は **ファイル名の昇順**(daily は YYYY-MM-DD.jsonl なので日付順)で
+// 渡す。各ファイルの中では最後に一致した行、ファイル間では後ろのファイルが
+// 勝つ。現行 upload-log.sh の
+//
+//	for df in "$DAILY_DIR"/*.jsonl; do
+//	    r=$(jq -c 'select(.tab == $tab)' "$df" | tail -1)
+//	    [ -n "$r" ] && RECORD="$r"
+//	done
+//
+// に対応する。当日ぶんだけを見ないのは、完了と削除が別の日にまたがった場合や、
+// record-output との間で日付が変わった場合でも記録を見つけるためである。
+//
+// 戻り値は一致した行そのもの(JSON)である。1 件も無ければ ok=false になり、
+// 呼び出し側は PlaceholderUploadRecord へ落ちる。
+func SelectUploadRecord(files [][]byte, tab string) ([]byte, bool) {
+	var selected []byte
+	for _, data := range files {
+		if match, ok := lastRecordForTab(data, tab); ok {
+			selected = match
+		}
+	}
+	return selected, selected != nil
+}
+
+// lastRecordForTab は 1 ファイルの中でタブ名が一致する最後の行を返す。
+//
+// 壊れた行に当たったらそこで走査をやめ、それまでに見つけた分を返す。
+// 現行版の jq は解釈できない行でその場で終了し、直前までの出力だけが
+// tail へ渡るためである。
+func lastRecordForTab(data []byte, tab string) ([]byte, bool) {
+	var selected []byte
+	dec := json.NewDecoder(bytes.NewReader(data))
+	for {
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			break
+		}
+		record, isObject := jsonObject(raw)
+		if !isObject {
+			break
+		}
+		if name, isString := jsonString(record["tab"]); isString && name == tab {
+			selected = raw
+		}
+	}
+	return selected, selected != nil
+}
+
+// PlaceholderUploadRecord は daily に記録が 1 件も無かったときのレコードを作る。
+//
+// 現行版の `jq -n '{tab:$tab, session:$session, completed_at:"", summary:null,
+// markers:{}}'` と同じ内容である。統計は空だが、タブ名とセッション名だけは
+// 分かるので、そのぶんはログに残す。
+func PlaceholderUploadRecord(tab, session string) []byte {
+	record := struct {
+		Tab         string          `json:"tab"`
+		Session     string          `json:"session"`
+		CompletedAt string          `json:"completed_at"`
+		Summary     json.RawMessage `json:"summary"`
+		Markers     struct{}        `json:"markers"`
+	}{Tab: tab, Session: session, Summary: json.RawMessage("null")}
+	// フィールドはすべて marshal 可能なので失敗しない。
+	b, _ := json.Marshal(record) //nolint:errchkjson // 失敗しない構造体
+	return b
 }
