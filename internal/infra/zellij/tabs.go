@@ -1,6 +1,7 @@
 package zellij
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,8 +16,12 @@ import (
 // 数分固まる(現行 task-lib.sh の `_zj_budget_cap` に対応する)。
 // 渡された値は commandTimeout(10 秒)で頭打ちにする。
 type TabController struct {
-	// output はコマンドの標準出力を返す。テストで差し替える。
-	output func(timeout time.Duration, name string, args ...string) string
+	// output はコマンドの標準出力と実行の成否を返す。テストで差し替える。
+	//
+	// 大半の呼び出しは失敗を「何も無かった」に潰してよいが、既存タブの
+	// 問い合わせだけは潰せない(空の一覧と失敗を取り違えると、生きている
+	// タブを復元処理が作り直してしまう)。そのため error も返す。
+	output func(timeout time.Duration, name string, args ...string) (string, error)
 	// run はコマンドを実行する。テストで差し替える。
 	run func(timeout time.Duration, name string, args ...string) error
 }
@@ -40,15 +45,17 @@ func NewTabController() *TabController {
 //
 // 解釈しないのは、タブ名の取り出し(3 列目)と id の解決(先頭 2 列を落とす)で
 // 規則が違い、その非対称ごと domain の純粋関数で再現しているためである。
-// zellij の外で動いた場合などコマンドが失敗したときは空文字を返す
+// zellij の外で動いた場合のようにコマンドが失敗したときは空文字を返す
 // (現行版も `2>/dev/null` で握り潰し、タブが 1 つも無い扱いにしている)。
 func (c *TabController) ListTabs() string {
-	return c.output(commandTimeout, binaryName, "action", "list-tabs")
+	// 失敗は空文字に潰す(タブが 1 つも無い扱い)。
+	out, _ := c.output(commandTimeout, binaryName, "action", "list-tabs")
+	return out
 }
 
 // CloseTabByID は id のタブを閉じる。
 //
-// 失敗しても何も返さない。既に閉じられている場合などが該当し、いずれも
+// 失敗しても何も返さない。既に閉じられているタブを指した場合が該当し、
 // 削除フローとしては進んでよい状態である(現行版も `2>/dev/null`)。
 func (c *TabController) CloseTabByID(id string) {
 	_ = c.run(commandTimeout, binaryName, "action", "close-tab-by-id", id)
@@ -57,7 +64,7 @@ func (c *TabController) CloseTabByID(id string) {
 // CloseActiveTab は今フォーカスしているタブを閉じる。
 //
 // task-control が id を引けなかったときのフォールバックである。id で閉じるのが
-// 本筋で(同期アップロードの間に別のタブへ移っている可能性がある)、こちらは
+// 本筋で(同期アップロードの間に別のタブへ移っていることがある)、こちらは
 // 「何も閉じられないよりはまし」という位置づけである。
 func (c *TabController) CloseActiveTab() {
 	_ = c.run(commandTimeout, binaryName, "action", "close-tab")
@@ -65,15 +72,23 @@ func (c *TabController) CloseActiveTab() {
 
 // QueryTabNames は `zellij action query-tab-names` の出力を 1 行 1 タブ名で返す。
 //
-// 失敗した場合は空を返す。タブ名の一意化(domain.UniqueTaskName)はこれを
-// 「既存のタブが 1 つも無い」と読み、候補をそのまま使う。現行
-// ensure_unique_tab_name がコマンド失敗時に元の名前を返すのと同じ結果になる。
-func (c *TabController) QueryTabNames(timeout time.Duration) []string {
-	out := strings.TrimRight(c.output(capTimeout(timeout), binaryName, "action", "query-tab-names"), "\n")
-	if out == "" {
-		return nil
+// **失敗は空の一覧と区別して返す。** 上限で打ち切られたときに空を返すと、
+// 呼び出し側が「タブが 1 つも無い」と読んでしまう。復元処理はそれを信じて
+// 生きているタブを作り直し、同じ名前のタブが二重になる。
+//
+// 呼び出し側の扱いは分かれる。タスク作成(タブ名の一意化・登録待ちの
+// ポーリング)は失敗を「まだ見えていない」として扱えるので error を捨てるが、
+// 復元は 1 回の判断で決め打つため、失敗したらその回の復元自体を見送る。
+func (c *TabController) QueryTabNames(timeout time.Duration) ([]string, error) {
+	out, err := c.output(capTimeout(timeout), binaryName, "action", "query-tab-names")
+	if err != nil {
+		return nil, fmt.Errorf("タブ名の一覧を取得できませんでした: %w", err)
 	}
-	return strings.Split(out, "\n")
+	trimmed := strings.TrimRight(out, "\n")
+	if trimmed == "" {
+		return nil, nil
+	}
+	return strings.Split(trimmed, "\n"), nil
 }
 
 // FocusTabVerified は名前でタブへフォーカスを移し、実際に移ったかを返す。
@@ -90,7 +105,8 @@ func (c *TabController) QueryTabNames(timeout time.Duration) []string {
 // 呼び出し側(CreateTask)はペインを作らずに失敗を返す。Main を壊すより
 // 中止を選ぶ方向へ倒れる。
 func (c *TabController) FocusTabVerified(timeout time.Duration, name string) bool {
-	out := c.output(capTimeout(timeout), binaryName, "action", "go-to-tab-name", name)
+	// 失敗は「移れなかった」に潰す。呼び出し側は期限まで再試行する。
+	out, _ := c.output(capTimeout(timeout), binaryName, "action", "go-to-tab-name", name)
 	return strings.TrimRight(out, "\n") != ""
 }
 
@@ -150,13 +166,13 @@ func capTimeout(timeout time.Duration) time.Duration {
 }
 
 // commandOutput は外部コマンドを実行して標準出力を返す。
-// 失敗した場合(上限でプロセスグループごと切られた場合を含む)は空文字を返す。
-func commandOutput(timeout time.Duration, name string, args ...string) string {
+// 上限でプロセスグループごと切られた場合もエラーとして返る。
+func commandOutput(timeout time.Duration, name string, args ...string) (string, error) {
 	cmd, cancel := command(timeout, name, args...)
 	defer cancel()
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return "", err //nolint:wrapcheck // 呼び出し側が用途に応じて包む
 	}
-	return string(out)
+	return string(out), nil
 }

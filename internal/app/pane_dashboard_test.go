@@ -41,6 +41,8 @@ type dashboardFixture struct {
 	focuser  *fakePaneFocuser
 	config   *fakeConfigLoader
 	recorder *fakeRecorder
+	detector *fakeScreenTicker
+	restorer *fakeSessionStarter
 	shell    *fakeShellRunner
 }
 
@@ -57,6 +59,8 @@ func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboar
 		focuser:  &fakePaneFocuser{journal: journal},
 		config:   &fakeConfigLoader{},
 		recorder: &fakeRecorder{journal: journal},
+		detector: &fakeScreenTicker{journal: journal},
+		restorer: &fakeSessionStarter{journal: journal},
 		shell:    &fakeShellRunner{journal: journal},
 	}
 	f.pane = &app.DashboardPane{
@@ -69,6 +73,8 @@ func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboar
 		Focuser:     f.focuser,
 		Config:      f.config,
 		Recorder:    f.recorder,
+		Detector:    f.detector,
+		Restorer:    f.restorer,
 		Shell:       f.shell,
 	}
 	return f
@@ -114,8 +120,8 @@ func TestDashboardPaneRefreshRunsScreenDetectionFirst(t *testing.T) {
 		t.Fatalf("Refresh() = %v", err)
 	}
 
-	if want := []string{"s1"}; !reflect.DeepEqual(f.shell.detectSessions, want) {
-		t.Errorf("screen_detect_tick の呼び出し = %v, want %v", f.shell.detectSessions, want)
+	if want := []string{"s1"}; !reflect.DeepEqual(f.detector.sessions, want) {
+		t.Errorf("スクリーン検出の呼び出し = %v, want %v", f.detector.sessions, want)
 	}
 	if len(f.journal.entries) == 0 || f.journal.entries[0] != "screen-detect-tick s1" {
 		t.Errorf("先頭が screen 検出ではない: %v", f.journal.entries)
@@ -154,8 +160,8 @@ func TestDashboardPaneRefreshSkipsScreenDetectionWithoutScreenAgent(t *testing.T
 			if _, err := f.pane.Refresh(dashboardEnv); err != nil {
 				t.Fatalf("Refresh() = %v", err)
 			}
-			if len(f.shell.detectSessions) != 0 {
-				t.Errorf("screen 検出を呼んでいる: %v", f.shell.detectSessions)
+			if len(f.detector.sessions) != 0 {
+				t.Errorf("screen 検出を呼んでいる: %v", f.detector.sessions)
 			}
 		})
 	}
@@ -174,8 +180,28 @@ func TestDashboardPaneRefreshRunsScreenDetectionWhenConfigIsUnreadable(t *testin
 	if _, err := f.pane.Refresh(dashboardEnv); err != nil {
 		t.Fatalf("Refresh() = %v", err)
 	}
-	if want := []string{"s1"}; !reflect.DeepEqual(f.shell.detectSessions, want) {
-		t.Errorf("screen_detect_tick の呼び出し = %v, want %v", f.shell.detectSessions, want)
+	if want := []string{"s1"}; !reflect.DeepEqual(f.detector.sessions, want) {
+		t.Errorf("スクリーン検出の呼び出し = %v, want %v", f.detector.sessions, want)
+	}
+}
+
+// TestDashboardPaneRefreshReportsScreenDetectionFailure はスクリーン検出の
+// 失敗をそのまま返すことを固定する。
+//
+// 観測を記録できないまま一覧を出すと、古い状態がいつまでも正しく見えて
+// しまう。現行 Shell 版は失敗を握り潰していたが、pending を読めなかった
+// ときと同じ扱いに揃える(意図的な差異)。
+func TestDashboardPaneRefreshReportsScreenDetectionFailure(t *testing.T) {
+	t.Parallel()
+
+	f := newDashboardFixture(nil, "ID POS NAME\n")
+	f.config.config = domain.Config{Agents: map[string]domain.AgentConfig{
+		"codex": {Detection: domain.DetectionScreen},
+	}}
+	f.detector.err = errScreenDetect
+
+	if _, err := f.pane.Refresh(dashboardEnv); !errors.Is(err, errScreenDetect) {
+		t.Errorf("Refresh() = %v, want %v を含むエラー", err, errScreenDetect)
 	}
 }
 
@@ -196,12 +222,12 @@ func TestDashboardPaneRefreshUsesUnknownSessionWhenOutsideZellij(t *testing.T) {
 func TestDashboardPaneStartupRestoresSession(t *testing.T) {
 	t.Parallel()
 
-	// 起動時に restore-session.sh を呼ぶ(issue #36)。ONCE 経路でも走る。
+	// 起動時に登録済みタスクのタブを作り直す(issue #36)。ONCE 経路でも走る。
 	f := newDashboardFixture(nil, "")
-	f.pane.Startup()
+	f.pane.Startup(dashboardEnv)
 
-	if f.shell.restoreCalls != 1 {
-		t.Errorf("restore-session の呼び出し = %d, want 1", f.shell.restoreCalls)
+	if want := []string{"s1"}; !reflect.DeepEqual(f.restorer.sessions, want) {
+		t.Errorf("セッション復元の呼び出し = %v, want %v", f.restorer.sessions, want)
 	}
 }
 
@@ -392,5 +418,22 @@ func TestDashboardPaneCommitDeleteWithoutResolvableTabID(t *testing.T) {
 	if len(f.remover.deletedTabs) != 1 || len(f.registry.removed) != 1 {
 		t.Errorf("掃除が行われていない: pending=%v registry=%v",
 			f.remover.deletedTabs, f.registry.removed)
+	}
+}
+
+// TestDashboardPaneStartupReturnsWarnings は復元の警告を戻り値で返すことを
+// 固定する。
+//
+// 標準エラーへ書かないのは、このペインが動作中の Bubble Tea プログラムであり、
+// 同じ端末へ直接書くとインラインレンダラの描画が崩れるためである。
+func TestDashboardPaneStartupReturnsWarnings(t *testing.T) {
+	t.Parallel()
+
+	f := newDashboardFixture(nil, "")
+	f.restorer.warnings = []string{"タスク alpha を復元できませんでした"}
+
+	got := f.pane.Startup(dashboardEnv)
+	if want := []string{"タスク alpha を復元できませんでした"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Startup() = %v, want %v", got, want)
 	}
 }

@@ -1,0 +1,38 @@
+new-tab -n cx-task --cwd {SANDBOX}/proj -- env TASK_TAB_NAME=cx-task TASK_TYPE=dev TASK_AGENT=codex codex resume thread-cx1
+query-tab-names
+go-to-tab-name cx-task
+new-pane --direction down --cwd {SANDBOX}/proj -- {TASK_CONTROL} cx-task
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+focus-previous-pane
+new-pane --direction right --cwd {SANDBOX}/proj -- nvim
+new-pane --direction down --cwd {SANDBOX}/proj -- lazygit
+move-focus left

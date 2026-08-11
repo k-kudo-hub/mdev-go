@@ -1,0 +1,5 @@
+  diff --git a/scripts/screen-detect-lib.sh b/scripts/screen-detect-lib.sh
+
+  + Would you like to run the following command?
+
+  ↑↓ scroll · esc to close

@@ -1,0 +1,6 @@
+• The config lists "Would you like to run the following command?" as a pattern
+  and the spinner text mentions esc to interrupt somewhere in prose.
+
+› Summarize recent commits
+
+  gpt-5.6-sol default · ~/projects/claude-conductor

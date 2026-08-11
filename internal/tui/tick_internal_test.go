@@ -28,11 +28,16 @@ type tickDashboard struct {
 	refreshes int
 	// calls は Startup と Refresh の呼び出し順。
 	calls []string
+	// warnings は Startup が返す起動時復元の説明。
+	warnings []string
 }
 
 var _ DashboardService = (*tickDashboard)(nil)
 
-func (s *tickDashboard) Startup() { s.calls = append(s.calls, "startup") }
+func (s *tickDashboard) Startup(app.PaneEnv) []string {
+	s.calls = append(s.calls, "startup")
+	return s.warnings
+}
 
 func (s *tickDashboard) Refresh(app.PaneEnv) (app.DashboardSnapshot, error) {
 	s.refreshes++
@@ -60,7 +65,7 @@ func (s *tickDone) Refresh() app.DoneSnapshot {
 	return s.snapshot
 }
 
-func (s *tickDone) Restore(app.DoneSnapshot, int) {}
+func (s *tickDone) Restore(app.PaneEnv, app.DoneSnapshot, int) (string, error) { return "", nil }
 
 type tickWaiting struct {
 	text      string
@@ -210,7 +215,7 @@ func chainCases() []chainCase {
 		},
 		{
 			name:      "done",
-			model:     NewDoneModel(done),
+			model:     NewDoneModel(done, app.PaneEnv{}),
 			landed:    func(poll bool) tea.Msg { return doneRefreshedMsg{poll: poll} },
 			refreshes: func() int { return done.refreshes },
 		},
@@ -345,7 +350,7 @@ func forceCases() []forceCase {
 		},
 		{
 			name:      "done",
-			model:     NewDoneModel(done),
+			model:     NewDoneModel(done, app.PaneEnv{}),
 			trigger:   promptExpiredMsg{},
 			landed:    func(poll bool) tea.Msg { return doneRefreshedMsg{poll: poll} },
 			refreshes: func() int { return done.refreshes },
@@ -726,7 +731,7 @@ func TestDashboardRefreshIsDroppedWhileAwaiting(t *testing.T) {
 // settledDone は起動時の集計が着弾済みの Done を返す。
 func settledDone(t *testing.T, service DoneService) DoneModel {
 	t.Helper()
-	next, _ := NewDoneModel(service).Update(doneRefreshedMsg{})
+	next, _ := NewDoneModel(service, app.PaneEnv{}).Update(doneRefreshedMsg{})
 	m, ok := next.(DoneModel)
 	if !ok {
 		t.Fatalf("モデルの型 = %T", next)
@@ -871,7 +876,7 @@ func TestDoneRefreshIsDroppedWhileAwaiting(t *testing.T) {
 	t.Parallel()
 
 	service := &tickDone{}
-	m := NewDoneModel(service)
+	m := NewDoneModel(service, app.PaneEnv{})
 	m.snapshot = app.DoneSnapshot{Text: "元の完了画面", Count: 3}
 	m.awaiting = true
 

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -536,5 +537,162 @@ func TestDailyStoreAppendSkipsReplacementWhenLockUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(warn.String(), "ロック") {
 		t.Errorf("警告 = %q, want ロックに触れた警告", warn.String())
+	}
+}
+
+// TestDailyStoreFindRestorable は Done から復元する 1 件の引き方を固定する。
+func TestDailyStoreFindRestorable(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := store.NewDailyStore(root, io.Discard)
+
+	const at = "2026-08-11T10:00:00+0900"
+	dir := filepath.Join(root, "s1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("ディレクトリの作成に失敗: %v", err)
+	}
+	content := `{"tab":"t","completed_at":"` + at + `","dir":"/w","task_type":"dev",` +
+		`"claude_session_id":"sid","transcript_path":"/w/t.jsonl","agent":"codex"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "2026-08-11.jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatalf("daily の作成に失敗: %v", err)
+	}
+
+	got, ok := s.FindRestorable("s1", "2026-08-11", "t", at)
+	if !ok {
+		t.Fatal("見つからなかった")
+	}
+	want := domain.DailyRestoreTarget{
+		Dir: "/w", TaskType: "dev", ClaudeSessionID: "sid",
+		TranscriptPath: "/w/t.jsonl", Agent: "codex",
+	}
+	if got != want {
+		t.Errorf("FindRestorable() = %+v, want %+v", got, want)
+	}
+
+	// ファイルが無い日付・セッションは「見つからない」に落ちる。
+	if _, ok := s.FindRestorable("s1", "2026-08-10", "t", at); ok {
+		t.Error("存在しない日付で見つかったと返した")
+	}
+	if _, ok := s.FindRestorable("missing", "2026-08-11", "t", at); ok {
+		t.Error("存在しないセッションで見つかったと返した")
+	}
+}
+
+// TestDailyStoreMarkRestored は restored: true の書き戻しを固定する。
+func TestDailyStoreMarkRestored(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := store.NewDailyStore(root, io.Discard)
+
+	const at = "2026-08-11T12:00:00+0900"
+	dir := filepath.Join(root, "s1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("ディレクトリの作成に失敗: %v", err)
+	}
+	path := filepath.Join(dir, "2026-08-11.jsonl")
+	line := `{"tab":"t","completed_at":"` + at + `","dir":"/w"}`
+	if err := os.WriteFile(path, []byte(line+"\n"+line+"\n"), 0o600); err != nil {
+		t.Fatalf("daily の作成に失敗: %v", err)
+	}
+
+	if err := s.MarkRestored("s1", "2026-08-11", "t", at); err != nil {
+		t.Fatalf("MarkRestored() = %v", err)
+	}
+
+	b, err := os.ReadFile(path) //nolint:gosec // テストの一時ディレクトリ
+	if err != nil {
+		t.Fatalf("読み直しに失敗: %v", err)
+	}
+	// 同じ (tab, completed_at) が 2 件あっても片方だけ反転する。
+	if got := strings.Count(string(b), `"restored":true`); got != 1 {
+		t.Errorf("反転した件数 = %d, want 1\n%s", got, b)
+	}
+}
+
+// TestDailyStoreMarkRestoredFailsOnBrokenFile は 1 行でも壊れていれば
+// 書き戻さずエラーにすることを固定する(現行版の exit 5)。
+func TestDailyStoreMarkRestoredFailsOnBrokenFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := store.NewDailyStore(root, io.Discard)
+
+	const at = "2026-08-11T12:00:00+0900"
+	dir := filepath.Join(root, "s1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("ディレクトリの作成に失敗: %v", err)
+	}
+	path := filepath.Join(dir, "2026-08-11.jsonl")
+	content := `{"tab":"t","completed_at":"` + at + `","dir":"/w"}` + "\n{broken\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("daily の作成に失敗: %v", err)
+	}
+
+	if err := s.MarkRestored("s1", "2026-08-11", "t", at); err == nil {
+		t.Error("MarkRestored() = nil, want エラー")
+	}
+	b, err := os.ReadFile(path) //nolint:gosec // テストの一時ディレクトリ
+	if err != nil {
+		t.Fatalf("読み直しに失敗: %v", err)
+	}
+	if string(b) != content {
+		t.Errorf("壊れたファイルを書き換えた:\n%s", b)
+	}
+}
+
+// TestDailyStoreMarkRestoredFailsWithoutFile はファイルが無い場合を固定する。
+func TestDailyStoreMarkRestoredFailsWithoutFile(t *testing.T) {
+	t.Parallel()
+
+	s := store.NewDailyStore(t.TempDir(), io.Discard)
+	if err := s.MarkRestored("s1", "2026-08-11", "t", "x"); err == nil {
+		t.Error("MarkRestored() = nil, want エラー")
+	}
+}
+
+// TestDailyStoreMarkRestoredRequiresLock はロックを取れないときに
+// **書き戻さず**エラーを返すことを固定する。
+//
+// MarkRestored はファイル全体の読み書き直しなので、読んでから rename するまでの
+// 窓に並行する Append の追記が挟まるとその行ごと消える。Append は O_APPEND で
+// 行を失わないため、書き直す側だけがロックを必須にする。現行 Shell 版は
+// ロック無しでも書き戻すが、被害の大きさが釣り合わないので揃えない。
+func TestDailyStoreMarkRestoredRequiresLock(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := store.NewDailyStore(root, io.Discard)
+
+	const at = "2026-08-11T12:00:00+0900"
+	dir := filepath.Join(root, "s1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("ディレクトリの作成に失敗: %v", err)
+	}
+	path := filepath.Join(dir, "2026-08-11.jsonl")
+	content := `{"tab":"t","completed_at":"` + at + `","dir":"/w"}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("daily の作成に失敗: %v", err)
+	}
+
+	// 生きているプロセス(このテスト自身)が持っているロックは stale として
+	// 回収されないため、待ち時間ぶん待ってから諦める。
+	held := store.NewLock(path + ".lock")
+	acquired, err := held.Acquire(time.Second)
+	if err != nil || !acquired {
+		t.Fatalf("前提のロックを取得できない: %v", err)
+	}
+	defer func() { _ = held.Release() }()
+
+	if err := s.MarkRestored("s1", "2026-08-11", "t", at); err == nil {
+		t.Error("MarkRestored() = nil, want エラー")
+	}
+	got, err := os.ReadFile(path) //nolint:gosec // テストの一時ディレクトリ
+	if err != nil {
+		t.Fatalf("読み直しに失敗: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("ロック無しで書き戻した:\n%s", got)
 	}
 }

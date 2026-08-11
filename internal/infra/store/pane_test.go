@@ -227,7 +227,7 @@ func TestPaneStoreLoadWithoutConfigFileReportsNotOK(t *testing.T) {
 	t.Parallel()
 
 	// config.json も config.default.json も無い(CONDUCTOR_HOME の指し先が
-	// 違うなど)。設定が空なのか読めないのか区別が付かないので ok=false にする。
+	// 違う)。設定が空なのか読めないのか区別が付かないので ok=false にする。
 	s, _, _ := newPaneStore(t)
 
 	config, ok := s.Load()
@@ -236,5 +236,63 @@ func TestPaneStoreLoadWithoutConfigFileReportsNotOK(t *testing.T) {
 	}
 	if len(config.Agents) != 0 {
 		t.Errorf("agents = %v, want 空", config.Agents)
+	}
+}
+
+func TestPaneStoreScreenStateReadWrite(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := store.NewPaneStore(store.PendingRoot(root), root)
+
+	// 一度も書いていないタブは空文字(現行版の `cat 2>/dev/null || true`)。
+	if got := s.ReadScreenState("s1", "slug"); got != "" {
+		t.Errorf("ReadScreenState() = %q, want 空", got)
+	}
+
+	if err := s.WriteScreenState("s1", "slug", "idle_pending 1754870400"); err != nil {
+		t.Fatalf("WriteScreenState() = %v", err)
+	}
+	// 現行版の `echo` と同じく末尾に改行が付く。
+	path := filepath.Join(store.PendingRoot(root), "s1", ".screen-state", "slug")
+	b, err := os.ReadFile(path) //nolint:gosec // テストの一時ディレクトリ
+	if err != nil {
+		t.Fatalf("状態ファイルが読めない: %v", err)
+	}
+	if string(b) != "idle_pending 1754870400\n" {
+		t.Errorf("ファイルの中身 = %q", string(b))
+	}
+	if got := s.ReadScreenState("s1", "slug"); got != "idle_pending 1754870400\n" {
+		t.Errorf("ReadScreenState() = %q", got)
+	}
+
+	// 書き直しは完全に置き換える。
+	if err := s.WriteScreenState("s1", "slug", "working"); err != nil {
+		t.Fatalf("WriteScreenState() = %v", err)
+	}
+	if got := s.ReadScreenState("s1", "slug"); got != "working\n" {
+		t.Errorf("上書き後の ReadScreenState() = %q", got)
+	}
+}
+
+func TestPaneStoreIsFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := store.NewPaneStore(store.PendingRoot(root), root)
+
+	path := filepath.Join(root, "transcript.jsonl")
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("fixture の作成に失敗: %v", err)
+	}
+
+	if !s.IsFile(path) {
+		t.Error("実在するファイルが偽になった")
+	}
+	if s.IsFile(filepath.Join(root, "missing.jsonl")) {
+		t.Error("存在しないファイルが真になった")
+	}
+	if s.IsFile(root) {
+		t.Error("ディレクトリが真になった")
 	}
 }

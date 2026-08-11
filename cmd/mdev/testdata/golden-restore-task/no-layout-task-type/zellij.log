@@ -1,0 +1,35 @@
+new-tab -n review-task --cwd {SANDBOX}/proj -- env TASK_TAB_NAME=review-task TASK_TYPE=review claude
+query-tab-names
+go-to-tab-name review-task
+new-pane --direction down --cwd {SANDBOX}/proj -- {TASK_CONTROL} review-task
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+resize decrease up
+focus-previous-pane

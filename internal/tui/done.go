@@ -12,6 +12,8 @@ const restorePrompt = "\033[0;33m\033[1mRestore number...\033[0m"
 // doneRefreshedMsg は Done の集計が終わったことを表す。
 type doneRefreshedMsg struct {
 	snapshot app.DoneSnapshot
+	// notice は直前の復元が返した知らせ。空なら出すものが無い。
+	notice string
 	// poll はこの集計がポーリング起源かどうかを表す。真のときだけ着弾で
 	// 次の合図を張る(pane.go の「完了起点」の説明を参照)。
 	poll bool
@@ -19,13 +21,20 @@ type doneRefreshedMsg struct {
 
 // DoneModel は Done ペインの Bubble Tea モデルである。
 //
-// Dashboard / Waiting と違いエラー行を持たない。集計は読めた daily log だけで
-// 組み立て、restore-task.sh の終了コードは現行版と同じく見ないため、画面に
-// 出すべきエラーがそもそも発生しない。
+// 集計そのものは読めた daily log だけで組み立てるため失敗しない。画面に出る
+// のは復元(r + 番号)の結果だけで、これは一時的な通知として 2 秒出す。
 type DoneModel struct {
 	pane DoneService
+	env  app.PaneEnv
 
 	snapshot app.DoneSnapshot
+
+	// notice は復元の結果を一時的に出す 1 行。空なら出さない。
+	//
+	// 復元の失敗を無反応にすると利用者はキーを押し直し、同じ名前のタブが
+	// 増えるだけになる。現行 Shell 版は終了コードを捨てていたので何も出て
+	// いなかった(意図的な改善)。
+	notice string
 
 	// awaiting は r の後の番号入力を待っている状態。
 	awaiting bool
@@ -41,8 +50,11 @@ var (
 )
 
 // NewDoneModel は Done のモデルを作る。
-func NewDoneModel(pane DoneService) DoneModel {
-	return DoneModel{pane: pane, polling: newPoller(DoneInterval)}
+//
+// env を持つのは復元がタスクタブを作り直すためである(作り直すタブの
+// スクリーン検出の状態は今の zellij セッションの下にある)。
+func NewDoneModel(pane DoneService, env app.PaneEnv) DoneModel {
+	return DoneModel{pane: pane, env: env, polling: newPoller(DoneInterval)}
 }
 
 // Init は最初の集計を行い、ポーリングを開始する。
@@ -74,7 +86,22 @@ func (m DoneModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, next
 		}
 		m.snapshot = msg.snapshot
-		return m, next
+		if msg.notice == "" {
+			return m, next
+		}
+		// 復元の結果を 2 秒出す。世代を進めて、前の通知の打ち切りが
+		// この通知を消してしまわないようにする。
+		m.notice = msg.notice
+		m.token++
+		return m, tea.Batch(next, noticeCmd(m.token))
+
+	case noticeExpiredMsg:
+		if msg.token == m.token {
+			m.notice = ""
+			cmd := m.forceRefreshCmd()
+			return m, cmd
+		}
+		return m, nil
 
 	case tickMsg:
 		if m.awaiting {
@@ -122,10 +149,13 @@ func (m DoneModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		// キー操作起源なので poll は立てない(着弾しても合図は張らない)。
 		m.polling.force()
 		return m, func() tea.Msg {
-			// restore-task.sh の終了コードは見ない。失敗した場合は
-			// エントリが Done に残り、次のポーリングで再表示される。
-			m.pane.Restore(snapshot, number)
-			return doneRefreshedMsg{snapshot: m.pane.Refresh()}
+			// 失敗したエントリは Done に残り、次のポーリングで再表示される。
+			// それだけでは押し直しを誘って同名のタブが増えるので、理由も出す。
+			warning, err := m.pane.Restore(m.env, snapshot, number)
+			return doneRefreshedMsg{
+				snapshot: m.pane.Refresh(),
+				notice:   restoreNotice(warning, err),
+			}
 		}
 	}
 
@@ -135,6 +165,18 @@ func (m DoneModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, promptTimeoutCmd(m.token)
 	}
 	return m, nil
+}
+
+// restoreNotice は復元の結果を画面へ出す 1 行にする。
+// 失敗を優先し、どちらも無ければ空を返す。
+func restoreNotice(warning string, err error) string {
+	if err != nil {
+		return errorLine(err)
+	}
+	if warning != "" {
+		return warningLine(warning)
+	}
+	return ""
 }
 
 // forceRefreshCmd は実行中として数えてから集計のコマンドを返す。
@@ -160,7 +202,10 @@ func (m DoneModel) refreshCmd(poll bool) tea.Cmd {
 // View は画面を返す。
 func (m DoneModel) View() tea.View {
 	out := m.snapshot.Text
-	if m.awaiting {
+	switch {
+	case m.notice != "":
+		out += "  " + m.notice + "\n"
+	case m.awaiting:
 		out += "  " + restorePrompt + "\n"
 	}
 	return tea.NewView(out)

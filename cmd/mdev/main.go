@@ -73,12 +73,29 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 
 	// ダッシュボード系 4 ペイン。pending はホーム直下、daily とニュースは
 	// CONDUCTOR_HOME 配下という置き場所の違いを PaneStore がそのまま持つ。
-	// upload-log / restore-task / fetch-news / restore-session / スクリーン検出は
-	// まだ Shell のままで、shell.Runner が env を引き継いで同期で呼ぶ。
+	// upload-log / restore-task / fetch-news はまだ Shell のままで、
+	// shell.Runner が env を引き継いで同期で呼ぶ。
 	paneStore := store.NewPaneStore(store.PendingRoot(home), conductorHome)
 	tabs := zellij.NewTabController()
 	runner := shell.NewRunner(conductorHome)
 	binary := store.NewMdevBinaryStore(conductorHome)
+	registry := store.NewRegistryStore(store.RegistryRoot(conductorHome))
+
+	// スクリーン検出(hook を持たない codex の状態判定)。ダッシュボードの
+	// 読み直しの先頭で毎回走る。書き込み先は pending と状態ファイルの 2 つで、
+	// screen 由来の pending が借りる 3 キーはレジストリから引く。
+	detector := &app.ScreenDetector{
+		Panes:    tabs,
+		Dumper:   tabs,
+		Config:   paneStore,
+		State:    paneStore,
+		Pending:  paneStore,
+		Remover:  paneStore,
+		Writer:   pending,
+		Registry: registry,
+		Focuser:  zellij.NewFocuser(),
+		Clock:    clock,
+	}
 
 	// タスク作成(n フロー)と task-control ペイン。zellij を直接駆動するため、
 	// タブ登録待ち・フォーカス検証・全体予算の防御を持つ TaskCreator を通す。
@@ -93,21 +110,46 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Launcher:    binary,
 	}
 
+	// セッション復元(起動時にレジストリからタスクタブを作り直す)。
+	// 最善努力なので、作り直せなかったタスクの説明は戻り値で受け取り、
+	// ダッシュボードの画面へ出す。ペインは動作中の Bubble Tea プログラム
+	// なので、標準エラーへ直接書くと描画が崩れる。
+	restorer := &app.SessionRestorer{
+		Registry: registry,
+		Tabs:     tabs,
+		Creator:  creator,
+		Paths:    paneStore,
+		Focuser:  zellij.NewFocuser(),
+		Clock:    clock,
+	}
+
+	// Done からの復元。daily ログの読み書きは DailyStore が持ち、タブの
+	// 作り直しはタスク作成をそのまま再利用する。警告の出力先を渡さない
+	// (nil)のは、この経路がロックを取れなければ書き込まずにエラーを返し、
+	// 標準エラーへ書くことが無いためである。
+	taskRestorer := &app.TaskRestorer{
+		Daily:   store.NewDailyStore(store.DailyRoot(conductorHome), nil),
+		Creator: creator,
+		Paths:   paneStore,
+	}
+
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
 			Pending:     paneStore,
 			Remover:     paneStore,
-			Registry:    store.NewRegistryStore(store.RegistryRoot(conductorHome)),
+			Registry:    registry,
 			ScreenState: paneStore,
 			Tabs:        tabs,
 			Closer:      tabs,
 			Focuser:     zellij.NewFocuser(),
 			Config:      paneStore,
 			Recorder:    record,
+			Detector:    detector,
+			Restorer:    restorer,
 			Shell:       runner,
 		},
 		Waiting: &app.WaitingPane{Pending: paneStore},
-		Done:    &app.DonePane{Daily: paneStore, Shell: runner, Clock: clock},
+		Done:    &app.DonePane{Daily: paneStore, Restorer: taskRestorer, Clock: clock},
 		News: &app.NewsPane{
 			News:   paneStore,
 			Shell:  runner,
@@ -126,7 +168,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Clock:   clock,
 			Deleter: &app.TaskDeleter{
 				Remover:     paneStore,
-				Registry:    store.NewRegistryStore(store.RegistryRoot(conductorHome)),
+				Registry:    registry,
 				ScreenState: paneStore,
 				Tabs:        tabs,
 				Closer:      tabs,

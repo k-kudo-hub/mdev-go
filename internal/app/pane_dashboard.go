@@ -62,6 +62,8 @@ type DashboardPane struct {
 	Focuser     Focuser
 	Config      ConfigLoader
 	Recorder    TaskRecorder
+	Detector    ScreenTicker
+	Restorer    SessionStarter
 	Shell       ShellRunner
 }
 
@@ -70,8 +72,16 @@ type DashboardPane struct {
 // このセッションに登録済みのタスクのタブを作り直す(issue #36)。レジストリが
 // 空のときやタブが既にある場合は何も起きない。単発描画(--once)でも走らせる。
 // 現行版も ONCE の判定より前で restore-session.sh を呼んでいる。
-func (p *DashboardPane) Startup() {
-	p.Shell.RestoreSession()
+//
+// 失敗は返らない。復元は最善努力で、作り直せなかったタスクはレジストリに
+// 残って次回の起動で再試行される。ここで止まってダッシュボードが出ないほうが
+// 害が大きい。
+//
+// 戻り値は作り直せなかったタスクの説明である。標準エラーへ書かずに返すのは、
+// このペインが動作中の Bubble Tea プログラムであり、同じ端末へ直接書くと
+// インラインレンダラの描画が崩れるためである。
+func (p *DashboardPane) Startup(env PaneEnv) []string {
+	return p.Restorer.Restore(env)
 }
 
 // Refresh は 1 回ぶんの描画内容を組み立てる。
@@ -95,7 +105,9 @@ func (p *DashboardPane) Refresh(env PaneEnv) (DashboardSnapshot, error) {
 	session := env.Session()
 
 	if config, ok := p.Config.Load(); !ok || config.HasScreenDetectionAgent() {
-		p.Shell.ScreenDetectTick(session)
+		if err := p.Detector.Tick(env); err != nil {
+			return DashboardSnapshot{}, fmt.Errorf("スクリーン検出に失敗しました: %w", err)
+		}
 	}
 
 	views, err := p.Pending.List(session)

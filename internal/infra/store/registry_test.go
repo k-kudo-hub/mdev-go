@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -303,5 +304,51 @@ func TestRegistryStoreUpsertFailsOnUnwritableRoot(t *testing.T) {
 	}
 	if err := store.NewRegistryStore(root).Upsert(newTestEntry()); err == nil {
 		t.Error("Upsert() = nil, want エラー")
+	}
+}
+
+// TestRegistryStoreLatestByTabMtime は screen 由来 pending が 3 キーを借りる
+// ときの選び方を固定する。
+//
+// 現行 screen-detect-lib.sh の `_screen_registry_lookup` は `stat -f %m` の
+// **最大**でエントリを選ぶ。restore-session が `updated_at` で選ぶのとは
+// キーが違い、この非対称は現行仕様としてそのまま維持する(evidence §2-6)。
+func TestRegistryStoreLatestByTabMtime(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s := store.NewRegistryStore(root)
+
+	entries := []domain.RegistryEntry{
+		{Session: "s1", ClaudeSessionID: "old", Tab: "cx", Dir: "/tmp/old", TaskType: "review",
+			UpdatedAt: "2099-01-01T00:00:00+0000"},
+		{Session: "s1", ClaudeSessionID: "new", Tab: "cx", Dir: "/tmp/new", TaskType: "dev",
+			TranscriptPath: "/tmp/rollout.jsonl", UpdatedAt: "2020-01-01T00:00:00+0000"},
+		{Session: "s1", ClaudeSessionID: "other", Tab: "another", Dir: "/tmp/another"},
+	}
+	for _, e := range entries {
+		if err := s.Upsert(e); err != nil {
+			t.Fatalf("Upsert() = %v", err)
+		}
+	}
+	// updated_at では old が最新に見えるが、mtime では new が新しい。
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "s1", "old.json"), old, old); err != nil {
+		t.Fatalf("mtime の変更に失敗: %v", err)
+	}
+
+	got, ok := s.LatestByTabMtime("s1", "cx")
+	if !ok {
+		t.Fatal("LatestByTabMtime() が見つからないと返した")
+	}
+	if got.Dir != "/tmp/new" || got.TaskType != "dev" || got.TranscriptPath != "/tmp/rollout.jsonl" {
+		t.Errorf("LatestByTabMtime() = %+v, want mtime が最新の new", got)
+	}
+
+	if _, ok := s.LatestByTabMtime("s1", "unknown"); ok {
+		t.Error("一致しないタブで見つかったと返した")
+	}
+	if _, ok := s.LatestByTabMtime("missing", "cx"); ok {
+		t.Error("存在しないセッションで見つかったと返した")
 	}
 }

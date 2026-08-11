@@ -94,6 +94,49 @@ func (s *RegistryStore) Remove(session, sessionID string) error {
 	return nil
 }
 
+// LatestByTabMtime はタブ名が一致するエントリのうち、ファイルの更新時刻が
+// 最も新しい 1 件を返す。
+//
+// 現行 screen-detect-lib.sh の `_screen_registry_lookup` に対応する。
+//
+//	t=$(stat -f %m "$f" 2>/dev/null || echo 0)
+//	if [[ "$t" -ge "$best_t" ]]; then best="$f"; best_t="$t"; fi
+//
+// 比較が `-ge`(以上)なので、同じ更新時刻なら**後に見たもの**が勝つ。
+// 現行版の走査順は glob(ファイル名の昇順)なので、ここでも同じ並びで
+// 走査して同着の扱いを揃える。
+//
+// **選択キーが復元処理(updated_at)と違う**点に注意。この非対称は現行仕様を
+// そのまま維持したものである(evidence §2-6)。更新時刻が読めないファイルは
+// 現行版と同じく 0 として扱う。
+func (s *RegistryStore) LatestByTabMtime(session, tab string) (domain.RegistryEntry, bool) {
+	paths, err := s.entryPaths(session)
+	if err != nil {
+		return domain.RegistryEntry{}, false
+	}
+
+	var (
+		best  domain.RegistryEntry
+		found bool
+		bestT int64
+	)
+	for _, path := range paths {
+		entry, ok := readEntry(path)
+		if !ok || entry.Tab != tab {
+			continue
+		}
+		modified := int64(0)
+		if info, statErr := os.Stat(path); statErr == nil {
+			modified = info.ModTime().Unix()
+		}
+		if found && modified < bestT {
+			continue
+		}
+		best, bestT, found = entry, modified, true
+	}
+	return best, found
+}
+
 // RemoveByTab はタブ名が一致するエントリをすべて削除する。
 // pending が無くセッション ID が分からない削除経路で使う。
 // session か tab が空の場合は何もしない(現行版と同じ)。

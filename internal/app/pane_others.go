@@ -19,11 +19,21 @@ type DoneSnapshot struct {
 	rows []domain.DoneRow
 }
 
+// TaskRestoreRunner は Done のタスクをダッシュボードへ戻す。
+// 実体は TaskRestorer である。
+//
+// 第 1 戻り値はタブだけ復元できた場合の説明である。**標準エラーへ書いては
+// ならない。** この処理は動作中の Bubble Tea プログラムの中から呼ばれ、
+// 同じ端末へ直接書くとインラインレンダラの描画が崩れる。
+type TaskRestoreRunner interface {
+	Restore(env PaneEnv, tab, session, completedAt string) (string, error)
+}
+
 // DonePane は Done ペインのユースケースである(現行 done-loop.sh 相当)。
 type DonePane struct {
-	Daily DailyReader
-	Shell ShellRunner
-	Clock Clock
+	Daily    DailyReader
+	Restorer TaskRestoreRunner
+	Clock    Clock
 }
 
 // Refresh は当日の daily log から表示内容を組み立てる。
@@ -37,18 +47,19 @@ func (p *DonePane) Refresh() DoneSnapshot {
 
 // Restore は snapshot の number 番目(1 始まり)のタスクをダッシュボードへ戻す。
 //
-// 終了コードは見ない。現行版も `2>/dev/null` で握り潰しており、失敗した場合は
-// エントリが Done に残ったままになる(次のポーリングで再表示される)ことで
-// 利用者が気づく作りになっている。
+// 戻り値は「画面へ出す説明」と失敗である。現行 Shell 版は終了コードを
+// `2>/dev/null` で握り潰しており、失敗しても画面には何も出ない。復元は
+// キーを押した結果として起きるので、無反応だと利用者は押し直す。同じ名前の
+// タブが増えるだけなので、失敗は必ず出す(意図的な改善)。
 //
 // 渡す 3 つ組は表示に使ったものと同じである。現行版の読み直しで値がずれた
 // 行では、ずれたままの値が渡る(domain.DoneRow のコメントを参照)。
-func (p *DonePane) Restore(snapshot DoneSnapshot, number int) {
+func (p *DonePane) Restore(env PaneEnv, snapshot DoneSnapshot, number int) (string, error) {
 	if number < 1 || number > len(snapshot.rows) {
-		return
+		return "", nil
 	}
 	row := snapshot.rows[number-1]
-	p.Shell.RestoreTask(row.Tab, row.Session, row.CompletedAt)
+	return p.Restorer.Restore(env, row.Tab, row.Session, row.CompletedAt)
 }
 
 // WaitingPane は Waiting ペインのユースケースである(現行 waiting-loop.sh 相当)。

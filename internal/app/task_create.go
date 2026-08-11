@@ -91,10 +91,12 @@ type TaskCreator struct {
 // UniqueName は既存のタブと重ならないタスク名を返す。
 //
 // 現行 task-create-loop.sh の ensure_unique_tab_name に対応する。
-// zellij の外や呼び出しの失敗では QueryTabNames が空を返し、base が
-// そのまま通る(現行版も同じ結果になる)。
+// zellij の外や呼び出しの失敗では一覧が空になり、base がそのまま通る
+// (現行版も `2>/dev/null` で同じ結果になる)。失敗を区別しないのは、
+// ここで止めるより同名のタブを 1 つ作るほうが害が小さいためである。
 func (c *TaskCreator) UniqueName(base string) string {
-	return domain.UniqueTaskName(base, c.Tabs.QueryTabNames(ZellijCallTimeout))
+	names, _ := c.Tabs.QueryTabNames(ZellijCallTimeout)
+	return domain.UniqueTaskName(base, names)
 }
 
 // Execute はタスクタブを作る。
@@ -262,7 +264,10 @@ func (c *TaskCreator) applyStep(limit time.Duration, dir string, step domain.Lay
 // 期限内に現れなければ false を返す。
 func (c *TaskCreator) waitTabRegistered(name string) bool {
 	return c.pollUntil(func() bool {
-		for _, existing := range c.Tabs.QueryTabNames(ZellijCallTimeout) {
+		// 問い合わせの失敗は「まだ見えていない」と同じ扱いでよい。期限まで
+		// 何度も引き直すため、1 回の失敗で諦める必要が無い。
+		names, _ := c.Tabs.QueryTabNames(ZellijCallTimeout)
+		for _, existing := range names {
 			if existing == name {
 				return true
 			}

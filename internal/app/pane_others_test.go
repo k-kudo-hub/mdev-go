@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,11 +21,10 @@ var paneToday = paneClock{now: time.Date(2026, 8, 9, 15, 4, 5, 0, time.UTC)}
 func TestDonePaneRefresh(t *testing.T) {
 	t.Parallel()
 
-	journal := &paneJournal{}
 	daily := &fakeDailyReader{lines: [][]byte{
 		[]byte(`{"tab":"alpha","session":"s1","completed_at":"2026-08-09T10:00:00+0900","summary":{"total_turns":3,"total_tool_calls":5,"total_cost_usd":0.42}}`),
 	}}
-	pane := &app.DonePane{Daily: daily, Shell: &fakeShellRunner{journal: journal}, Clock: paneToday}
+	pane := &app.DonePane{Daily: daily, Clock: paneToday}
 
 	snapshot := pane.Refresh()
 
@@ -43,19 +43,21 @@ func TestDonePaneRefresh(t *testing.T) {
 func TestDonePaneRestore(t *testing.T) {
 	t.Parallel()
 
-	journal := &paneJournal{}
-	shell := &fakeShellRunner{journal: journal}
+	restorer := &fakeTaskRestoreRunner{}
 	daily := &fakeDailyReader{lines: [][]byte{
 		[]byte(`{"tab":"alpha","session":"s1","completed_at":"2026-08-09T10:00:00+0900","summary":{"total_turns":1,"total_tool_calls":1,"total_cost_usd":0.1}}`),
 	}}
-	pane := &app.DonePane{Daily: daily, Shell: shell, Clock: paneToday}
+	pane := &app.DonePane{Daily: daily, Restorer: restorer, Clock: paneToday}
 
-	// restore-task.sh には表示行の 3 つ組をそのまま渡す。終了コードは見ない。
-	pane.Restore(pane.Refresh(), 1)
+	// 復元には表示行の 3 つ組をそのまま渡す。失敗は見ない(エントリが Done に
+	// 残ることで利用者が気づく)。
+	if _, err := pane.Restore(dashboardEnv, pane.Refresh(), 1); err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
 
-	want := []string{"alpha s1 2026-08-09T10:00:00+0900"}
-	if !reflect.DeepEqual(shell.restoredTasks, want) {
-		t.Errorf("restore-task の引数 = %v, want %v", shell.restoredTasks, want)
+	want := []string{"s1 alpha s1 2026-08-09T10:00:00+0900"}
+	if !reflect.DeepEqual(restorer.calls, want) {
+		t.Errorf("復元の引数 = %v, want %v", restorer.calls, want)
 	}
 }
 
@@ -191,5 +193,51 @@ func TestNewsPaneOpen(t *testing.T) {
 				t.Errorf("開いた URL = %v, want %v", opener.opened, tt.want)
 			}
 		})
+	}
+}
+
+// TestDonePaneRestoreReportsFailure は復元の失敗と説明をそのまま返すことを
+// 固定する。
+//
+// 現行 Shell 版は終了コードを握り潰しており、失敗しても画面に何も出ない。
+// 復元はキーを押した結果として起きるので、無反応だと押し直しを誘って
+// 同じ名前のタブが増える(意図的な改善)。
+func TestDonePaneRestoreReportsFailure(t *testing.T) {
+	t.Parallel()
+
+	daily := &fakeDailyReader{lines: [][]byte{
+		[]byte(`{"tab":"alpha","session":"s1","completed_at":"2026-08-09T10:00:00+0900","summary":{"total_turns":1,"total_tool_calls":1,"total_cost_usd":0.1}}`),
+	}}
+	restorer := &fakeTaskRestoreRunner{warning: "タブだけ復元しました", err: app.ErrRestoreDirMissing}
+	pane := &app.DonePane{Daily: daily, Restorer: restorer, Clock: paneToday}
+
+	warning, err := pane.Restore(dashboardEnv, pane.Refresh(), 1)
+	if !errors.Is(err, app.ErrRestoreDirMissing) {
+		t.Errorf("Restore() = %v, want %v", err, app.ErrRestoreDirMissing)
+	}
+	if warning != "タブだけ復元しました" {
+		t.Errorf("警告 = %q", warning)
+	}
+}
+
+// TestDonePaneRestoreIgnoresOutOfRange は範囲外の番号で何も呼ばないことを
+// 固定する。
+func TestDonePaneRestoreIgnoresOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	daily := &fakeDailyReader{lines: [][]byte{
+		[]byte(`{"tab":"alpha","session":"s1","completed_at":"2026-08-09T10:00:00+0900","summary":{"total_turns":1,"total_tool_calls":1,"total_cost_usd":0.1}}`),
+	}}
+	restorer := &fakeTaskRestoreRunner{err: app.ErrRestoreDirMissing}
+	pane := &app.DonePane{Daily: daily, Restorer: restorer, Clock: paneToday}
+
+	for _, number := range []int{0, 2} {
+		warning, err := pane.Restore(dashboardEnv, pane.Refresh(), number)
+		if warning != "" || err != nil {
+			t.Errorf("番号 %d で復元を呼んでいる: (%q, %v)", number, warning, err)
+		}
+	}
+	if len(restorer.calls) != 0 {
+		t.Errorf("復元を呼んだ: %v", restorer.calls)
 	}
 }

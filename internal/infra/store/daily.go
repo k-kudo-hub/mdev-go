@@ -66,7 +66,7 @@ func (s *DailyStore) Append(session, date string, record domain.DailyRecord) err
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return fmt.Errorf("ディレクトリ %s の作成に失敗しました: %w", dir, err)
 	}
-	path := filepath.Join(dir, date+dailySuffix)
+	path := s.path(session, date)
 
 	lock := NewLock(path + ".lock")
 	acquired, err := lock.Acquire(DailyLockTimeout)
@@ -91,6 +91,73 @@ func (s *DailyStore) Append(session, date string, record domain.DailyRecord) err
 	}
 
 	return appendLine(path, append(b, '\n'))
+}
+
+// path は session の date のファイルのパスを返す。
+func (s *DailyStore) path(session, date string) string {
+	return filepath.Join(s.root, session, date+dailySuffix)
+}
+
+// FindRestorable は (tab, completedAt) が一致し、まだ復元されていない
+// 最初の 1 件を返す。
+//
+// ファイルが無い・読めない場合は「見つからない」に落とす(現行版も
+// `[ ! -f "$DAILY_FILE" ]` で exit 1 へ落ちる)。ここではロックを取らない。
+// 現行版も対象を探す段階ではロックを持たず、書き戻すときだけ握る。
+func (s *DailyStore) FindRestorable(session, date, tab, completedAt string) (domain.DailyRestoreTarget, bool) {
+	content, err := os.ReadFile(s.path(session, date)) //nolint:gosec // daily の規約どおりのパス
+	if err != nil {
+		return domain.DailyRestoreTarget{}, false
+	}
+
+	rawLines := strings.Split(string(content), "\n")
+	lines := make([][]byte, 0, len(rawLines))
+	for _, line := range rawLines {
+		lines = append(lines, []byte(line))
+	}
+	return domain.FindRestorableDaily(lines, tab, completedAt)
+}
+
+// MarkRestored は (tab, completedAt) に一致する最初の 1 件へ
+// `restored: true` を付ける。
+//
+// **ロックを取れなければ書き戻さずエラーを返す。** これはファイル全体の
+// 読み書き直しであり、読んでから rename するまでの窓に並行する Append
+// (完了の記録)の追記が挟まると、その行ごと消えてしまう。Append の側は
+// O_APPEND なので競合しても行を失わず、ロックが取れないときは追記だけを
+// 続ける(fail-open)。書き直す側だけがロックを必須にするという分担で、
+// Append の removeSupersededDaily も同じ規則である。
+//
+// 現行 Shell 版はロックを取れなくても書き戻すが、そちらへは揃えない。
+// 取り損ねたときの被害が「復元が 1 回失敗する(Done に残って再試行できる)」と
+// 「完了の記録が消える(取り戻せない)」で釣り合わないためである
+// (意図的な差異。evidence §5-3)。
+//
+// ファイルを読めない場合と、1 行でも JSON として読めない場合もエラーを返し、
+// ファイルには一切触れない(いずれも現行版の exit 5 に対応する)。
+func (s *DailyStore) MarkRestored(session, date, tab, completedAt string) error {
+	path := s.path(session, date)
+
+	lock := NewLock(path + ".lock")
+	acquired, err := lock.Acquire(DailyLockTimeout)
+	if err != nil {
+		return fmt.Errorf("daily ログ %s のロックの取得に失敗しました: %w", path, err)
+	}
+	if !acquired {
+		return fmt.Errorf("daily ログ %s のロックを取得できませんでした(%s)",
+			path, DailyLockTimeout)
+	}
+	defer func() { _ = lock.Release() }()
+
+	content, err := os.ReadFile(path) //nolint:gosec // daily の規約どおりのパス
+	if err != nil {
+		return fmt.Errorf("daily ログ %s を読めませんでした: %w", path, err)
+	}
+	marked, ok := domain.MarkRestoredDaily(content, tab, completedAt)
+	if !ok {
+		return fmt.Errorf("daily ログ %s に解釈できない行があるため書き戻せませんでした", path)
+	}
+	return writeFileAtomic(path, marked)
 }
 
 // removeSupersededDaily は path から、これから書く記録に取って代わられる行を消す。
@@ -166,7 +233,7 @@ func (s *DailyStore) warnLockUnavailable(path string, err error) {
 		reason = err.Error()
 	}
 	// 警告の書き込み失敗を報告する先は無いため無視する。
-	_, _ = fmt.Fprintf(s.warn, "mdev: %s のロックを取得できないまま追記します(%s)\n", path, reason)
+	_, _ = fmt.Fprintf(s.warn, "mdev: %s のロックを取得できないまま書き込みます(%s)\n", path, reason)
 }
 
 // appendLine は path の末尾に line を書き足す。

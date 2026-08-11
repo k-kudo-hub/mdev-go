@@ -38,11 +38,16 @@ type stubDashboard struct {
 	prepErr    error
 
 	calls []string
+	// warnings は Startup が返す起動時復元の説明。
+	warnings []string
 }
 
 var _ tui.DashboardService = (*stubDashboard)(nil)
 
-func (s *stubDashboard) Startup() { s.calls = append(s.calls, "startup") }
+func (s *stubDashboard) Startup(app.PaneEnv) []string {
+	s.calls = append(s.calls, "startup")
+	return s.warnings
+}
 
 func (s *stubDashboard) Refresh(app.PaneEnv) (app.DashboardSnapshot, error) {
 	s.calls = append(s.calls, "refresh")
@@ -96,6 +101,9 @@ type stubDone struct {
 	// restoredFrom は restore に渡されたスナップショットの表示内容。
 	// どの世代の一覧を使ったかを見るために記録する。
 	restoredFrom []string
+	// restoreWarning / restoreErr は Restore が返す知らせ。
+	restoreWarning string
+	restoreErr     error
 }
 
 var _ tui.DoneService = (*stubDone)(nil)
@@ -107,9 +115,10 @@ func (s *stubDone) Refresh() app.DoneSnapshot {
 	return s.snapshot
 }
 
-func (s *stubDone) Restore(snapshot app.DoneSnapshot, number int) {
+func (s *stubDone) Restore(_ app.PaneEnv, snapshot app.DoneSnapshot, number int) (string, error) {
 	s.restored = append(s.restored, number)
 	s.restoredFrom = append(s.restoredFrom, snapshot.Text)
+	return s.restoreWarning, s.restoreErr
 }
 
 type stubNews struct {
@@ -184,7 +193,7 @@ func key(r rune) tea.KeyPressMsg {
 // content はモデルの描画結果を文字列で返す。
 func content(m tea.Model) string { return m.View().Content }
 
-// specialKey は名前付きのキー押下メッセージを作る(esc / enter / ↑ など)。
+// specialKey は名前付きのキー押下メッセージを作る(esc / enter / ↑)。
 func specialKey(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
 
 // ctrlKey は Ctrl 修飾つきのキー押下メッセージを作る。
@@ -246,7 +255,7 @@ func paneModels() []paneModel {
 		{"waiting", tui.NewWaitingModel(&stubWaiting{text: "待ち画面"}, testEnv)},
 		{"done", tui.NewDoneModel(&stubDone{
 			snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1},
-		})},
+		}, app.PaneEnv{})},
 		{"news", tui.NewNewsModel(&stubNews{
 			snapshot: app.NewsSnapshot{Text: "ニュース画面", Count: 1},
 		})},
@@ -301,7 +310,7 @@ func keyDrivenRefreshes(t *testing.T) []keyDrivenRefresh {
 	// Done: r + 番号で restore してから集計し直す。
 	done := load(t, tui.NewDoneModel(&stubDone{
 		snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1},
-	}))
+	}, app.PaneEnv{}))
 	donePrompted, _ := done.Update(key('r'))
 	_, restored := run(t, donePrompted, key('1'))
 
@@ -646,7 +655,7 @@ func TestWaitingModelIgnoresKeys(t *testing.T) {
 func TestDoneModelOnce(t *testing.T) {
 	t.Parallel()
 
-	m := tui.NewDoneModel(&stubDone{snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1}})
+	m := tui.NewDoneModel(&stubDone{snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1}}, app.PaneEnv{})
 
 	out, err := m.Once()
 	if err != nil {
@@ -661,7 +670,7 @@ func TestDoneModelRestore(t *testing.T) {
 	t.Parallel()
 
 	service := &stubDone{snapshot: app.DoneSnapshot{Text: "完了画面", Count: 2}}
-	m := tui.NewDoneModel(service)
+	m := tui.NewDoneModel(service, app.PaneEnv{})
 	loaded := load(t, m)
 
 	// r を押すと案内が出る。
@@ -682,11 +691,11 @@ func TestDoneModelFreezesRowsWhileAwaiting(t *testing.T) {
 	// Dashboard と同じく、2 打鍵目を待っている間に一覧が入れ替わると
 	// 押した番号が別の行を指してしまう。待ち受け中は凍結する。
 	service := &stubDone{snapshot: app.DoneSnapshot{Text: "元の完了画面", Count: 3}}
-	m := tui.NewDoneModel(service)
+	m := tui.NewDoneModel(service, app.PaneEnv{})
 	loaded := load(t, m)
 
 	service.next = &app.DoneSnapshot{Text: "入れ替わった完了画面", Count: 1}
-	inflight := exec(t, tui.NewDoneModel(service).Init())
+	inflight := exec(t, tui.NewDoneModel(service, app.PaneEnv{}).Init())
 
 	prompted, _ := loaded.Update(key('r'))
 	stale, _ := prompted.Update(inflight)
@@ -710,7 +719,7 @@ func TestDoneModelIgnoresRestoreWhenEmpty(t *testing.T) {
 
 	// 0 件のときは r を押しても案内を出さない。
 	service := &stubDone{snapshot: app.DoneSnapshot{Text: "完了画面"}}
-	m := tui.NewDoneModel(service)
+	m := tui.NewDoneModel(service, app.PaneEnv{})
 	loaded := load(t, m)
 
 	after, _ := loaded.Update(key('r'))
@@ -799,4 +808,117 @@ func indexOf(list []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// TestDashboardModelShowsStartupWarnings は起動時の復元で作り直せなかった
+// タスクの説明を画面へ出すことを固定する。
+//
+// ユースケースは標準エラーへ書かない(動作中の Bubble Tea プログラムの中で
+// 同じ端末へ直接書くと描画が崩れる)。戻り値で受け取ってここで出す。
+func TestDashboardModelShowsStartupWarnings(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "一覧"},
+		warnings: []string{"タスク alpha を復元できませんでした"},
+	}
+	loaded := load(t, tui.NewDashboardModel(service, testEnv))
+
+	out := content(loaded)
+	if !strings.Contains(out, "タスク alpha を復元できませんでした") {
+		t.Errorf("復元の警告が出ていない: %q", out)
+	}
+	if !strings.Contains(out, "一覧") {
+		t.Errorf("本体が消えている: %q", out)
+	}
+}
+
+// TestDashboardModelKeepsStartupWarnings は復元の警告が読み直しで消えない
+// ことを固定する。
+//
+// 作り直せなかったタスクは画面に出てこないままなので、一時的な通知として
+// 2 秒で消すと「そのタスクが無い」ことに気づく手掛かりが残らない。
+func TestDashboardModelKeepsStartupWarnings(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "一覧"},
+		warnings: []string{"タスク alpha を復元できませんでした"},
+	}
+	loaded := load(t, tui.NewDashboardModel(service, testEnv))
+
+	// ポーリングによる読み直しを 1 回通す(Startup は起動時にしか走らない)。
+	service.warnings = nil
+	refreshed, _ := loaded.Update(exec(t, tui.NewDashboardModel(service, testEnv).Init()))
+
+	if !strings.Contains(content(refreshed), "タスク alpha を復元できませんでした") {
+		t.Errorf("読み直しで警告が消えた: %q", content(refreshed))
+	}
+}
+
+// TestDoneModelShowsRestoreFailure は復元の失敗を画面へ出すことを固定する。
+//
+// 無反応だと利用者はキーを押し直し、同じ名前のタブが増えるだけになる。
+func TestDoneModelShowsRestoreFailure(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDone{
+		snapshot:   app.DoneSnapshot{Text: "完了画面", Count: 1},
+		restoreErr: errors.New("記録された作業ディレクトリがありません"),
+	}
+	loaded := load(t, tui.NewDoneModel(service, app.PaneEnv{}))
+
+	prompted, _ := run(t, loaded, key('r'))
+	restored, msg := run(t, prompted, key('1'))
+	// 復元のコマンドが返した知らせを取り込む。
+	shown, _ := restored.Update(msg)
+
+	out := content(shown)
+	if !strings.Contains(out, "記録された作業ディレクトリがありません") {
+		t.Errorf("復元の失敗が出ていない: %q", out)
+	}
+	if !strings.Contains(out, "Error:") {
+		t.Errorf("エラーとして出ていない: %q", out)
+	}
+}
+
+// TestDoneModelShowsRestoreWarning はタブだけ復元できた場合の説明を
+// 警告として出すことを固定する。
+func TestDoneModelShowsRestoreWarning(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDone{
+		snapshot:       app.DoneSnapshot{Text: "完了画面", Count: 1},
+		restoreWarning: "タスク alpha はタブだけ復元しました",
+	}
+	loaded := load(t, tui.NewDoneModel(service, app.PaneEnv{}))
+
+	prompted, _ := run(t, loaded, key('r'))
+	restored, msg := run(t, prompted, key('1'))
+	shown, _ := restored.Update(msg)
+
+	out := content(shown)
+	if !strings.Contains(out, "タスク alpha はタブだけ復元しました") {
+		t.Errorf("復元の警告が出ていない: %q", out)
+	}
+	if !strings.Contains(out, "Warning:") {
+		t.Errorf("警告として出ていない: %q", out)
+	}
+}
+
+// TestDoneModelShowsNothingOnQuietRestore は知らせが無いときに余計な行を
+// 出さないことを固定する。
+func TestDoneModelShowsNothingOnQuietRestore(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDone{snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1}}
+	loaded := load(t, tui.NewDoneModel(service, app.PaneEnv{}))
+
+	prompted, _ := run(t, loaded, key('r'))
+	restored, msg := run(t, prompted, key('1'))
+	shown, _ := restored.Update(msg)
+
+	if content(shown) != "完了画面" {
+		t.Errorf("余計な行が出ている: %q", content(restored))
+	}
 }
