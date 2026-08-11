@@ -24,9 +24,17 @@ type UploadConfig struct {
 	// Repo はログリポジトリ(URL・ローカルパス・"owner/name")。
 	// 空ならアップロードは行わない。
 	Repo string
-	// BaseDir はリポジトリ内の置き場所。既定は "work-log"。
+	// BaseDir はリポジトリ内の置き場所。キーが無い・null のときだけ
+	// "work-log" になる。
+	//
+	// **明示的な空文字は空文字のまま残す。** 現行版の `// "work-log"` は
+	// jq の `//` で、空文字を真として通す(実測: `"" // "work-log"` は "")。
+	// 設定に `"base_dir": ""` と書くと現行版は空のまま git へ渡して失敗し、
+	// アップロードが中止される = タブが消えない。ここで既定値へ倒すと、
+	// 現行版なら止まっていた設定ミスが黙ってリポジトリ直下へ書き始める。
 	BaseDir string
-	// Branch は push 先ブランチ。既定は "main"。
+	// Branch は push 先ブランチ。BaseDir と同じく、キーが無い・null の
+	// ときだけ "main" になる。
 	Branch string
 }
 
@@ -57,8 +65,8 @@ func (c *Config) unmarshalUploadKeys(data []byte) {
 	c.Upload = UploadConfig{
 		Enabled: jqEqualsTrue(raw.Enabled),
 		Repo:    jqOptionalString(raw.Repo),
-		BaseDir: fallback(jqOptionalString(raw.BaseDir), DefaultUploadBaseDir),
-		Branch:  fallback(jqOptionalString(raw.Branch), DefaultUploadBranch),
+		BaseDir: jqFallbackString(raw.BaseDir, DefaultUploadBaseDir),
+		Branch:  jqFallbackString(raw.Branch, DefaultUploadBranch),
 	}
 }
 
