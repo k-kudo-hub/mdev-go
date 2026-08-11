@@ -19,11 +19,17 @@ type DoneSnapshot struct {
 	rows []domain.DoneRow
 }
 
+// TaskRestoreRunner は Done のタスクをダッシュボードへ戻す。
+// 実体は TaskRestorer である。
+type TaskRestoreRunner interface {
+	Restore(env PaneEnv, tab, session, completedAt string) error
+}
+
 // DonePane は Done ペインのユースケースである(現行 done-loop.sh 相当)。
 type DonePane struct {
-	Daily DailyReader
-	Shell ShellRunner
-	Clock Clock
+	Daily    DailyReader
+	Restorer TaskRestoreRunner
+	Clock    Clock
 }
 
 // Refresh は当日の daily log から表示内容を組み立てる。
@@ -37,18 +43,19 @@ func (p *DonePane) Refresh() DoneSnapshot {
 
 // Restore は snapshot の number 番目(1 始まり)のタスクをダッシュボードへ戻す。
 //
-// 終了コードは見ない。現行版も `2>/dev/null` で握り潰しており、失敗した場合は
-// エントリが Done に残ったままになる(次のポーリングで再表示される)ことで
-// 利用者が気づく作りになっている。
+// 失敗は返さない。現行版も終了コードを `2>/dev/null` で握り潰しており、
+// 失敗した場合はエントリが Done に残ったままになる(次のポーリングで
+// 再表示される)ことで利用者が気づく作りになっている。ここは TUI の中なので、
+// 標準エラーへ書くと画面が崩れる。
 //
 // 渡す 3 つ組は表示に使ったものと同じである。現行版の読み直しで値がずれた
 // 行では、ずれたままの値が渡る(domain.DoneRow のコメントを参照)。
-func (p *DonePane) Restore(snapshot DoneSnapshot, number int) {
+func (p *DonePane) Restore(env PaneEnv, snapshot DoneSnapshot, number int) {
 	if number < 1 || number > len(snapshot.rows) {
 		return
 	}
 	row := snapshot.rows[number-1]
-	p.Shell.RestoreTask(row.Tab, row.Session, row.CompletedAt)
+	_ = p.Restorer.Restore(env, row.Tab, row.Session, row.CompletedAt)
 }
 
 // WaitingPane は Waiting ペインのユースケースである(現行 waiting-loop.sh 相当)。

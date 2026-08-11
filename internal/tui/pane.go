@@ -209,7 +209,7 @@ type (
 	// DoneService は Done ペインのユースケース。
 	DoneService interface {
 		Refresh() app.DoneSnapshot
-		Restore(app.DoneSnapshot, int)
+		Restore(app.PaneEnv, app.DoneSnapshot, int)
 	}
 
 	// NewsService は News ペインのユースケース。
@@ -258,7 +258,7 @@ func (p Panes) model(name, arg string) (tea.Model, error) {
 	case NameWaiting:
 		return NewWaitingModel(p.Waiting, p.Env), nil
 	case NameDone:
-		return NewDoneModel(p.Done), nil
+		return NewDoneModel(p.Done, p.Env), nil
 	case NameNews:
 		return NewNewsModel(p.News), nil
 	case NameTaskCreate:

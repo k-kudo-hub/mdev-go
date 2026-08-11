@@ -398,3 +398,44 @@ func (f *fakeSessionStarter) Restore(env app.PaneEnv) {
 	f.sessions = append(f.sessions, env.Session())
 	f.journal.add("restore-session " + env.Session())
 }
+
+var _ app.DailyRestoreStore = (*fakeDailyRestore)(nil)
+
+// errDailyWrite は daily ログを更新できなかった状況を表す。
+var errDailyWrite = errors.New("daily ログを書けない")
+
+// fakeDailyRestore は daily ログの検索と restored の書き込みを記録する。
+type fakeDailyRestore struct {
+	journal *paneJournal
+	target  domain.DailyRestoreTarget
+	found   bool
+	dates   []string
+	// marked は MarkRestored を試みた回数(失敗した回も数える)。
+	marked  int
+	markErr error
+}
+
+func (f *fakeDailyRestore) FindRestorable(session, date, tab, _ string) (domain.DailyRestoreTarget, bool) {
+	f.dates = append(f.dates, date)
+	f.journal.add("daily-find " + session + " " + date + " " + tab)
+	return f.target, f.found
+}
+
+func (f *fakeDailyRestore) MarkRestored(session, date, tab, _ string) error {
+	f.marked++
+	f.journal.add("daily-mark " + session + " " + date + " " + tab)
+	return f.markErr
+}
+
+var _ app.TaskRestoreRunner = (*fakeTaskRestoreRunner)(nil)
+
+// fakeTaskRestoreRunner は Done ペインから見た復元の呼び出しを記録する。
+type fakeTaskRestoreRunner struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeTaskRestoreRunner) Restore(env app.PaneEnv, tab, session, completedAt string) error {
+	f.calls = append(f.calls, strings.Join([]string{env.Session(), tab, session, completedAt}, " "))
+	return f.err
+}

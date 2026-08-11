@@ -20,11 +20,10 @@ var paneToday = paneClock{now: time.Date(2026, 8, 9, 15, 4, 5, 0, time.UTC)}
 func TestDonePaneRefresh(t *testing.T) {
 	t.Parallel()
 
-	journal := &paneJournal{}
 	daily := &fakeDailyReader{lines: [][]byte{
 		[]byte(`{"tab":"alpha","session":"s1","completed_at":"2026-08-09T10:00:00+0900","summary":{"total_turns":3,"total_tool_calls":5,"total_cost_usd":0.42}}`),
 	}}
-	pane := &app.DonePane{Daily: daily, Shell: &fakeShellRunner{journal: journal}, Clock: paneToday}
+	pane := &app.DonePane{Daily: daily, Clock: paneToday}
 
 	snapshot := pane.Refresh()
 
@@ -43,19 +42,19 @@ func TestDonePaneRefresh(t *testing.T) {
 func TestDonePaneRestore(t *testing.T) {
 	t.Parallel()
 
-	journal := &paneJournal{}
-	shell := &fakeShellRunner{journal: journal}
+	restorer := &fakeTaskRestoreRunner{}
 	daily := &fakeDailyReader{lines: [][]byte{
 		[]byte(`{"tab":"alpha","session":"s1","completed_at":"2026-08-09T10:00:00+0900","summary":{"total_turns":1,"total_tool_calls":1,"total_cost_usd":0.1}}`),
 	}}
-	pane := &app.DonePane{Daily: daily, Shell: shell, Clock: paneToday}
+	pane := &app.DonePane{Daily: daily, Restorer: restorer, Clock: paneToday}
 
-	// restore-task.sh には表示行の 3 つ組をそのまま渡す。終了コードは見ない。
-	pane.Restore(pane.Refresh(), 1)
+	// 復元には表示行の 3 つ組をそのまま渡す。失敗は見ない(エントリが Done に
+	// 残ることで利用者が気づく)。
+	pane.Restore(dashboardEnv, pane.Refresh(), 1)
 
-	want := []string{"alpha s1 2026-08-09T10:00:00+0900"}
-	if !reflect.DeepEqual(shell.restoredTasks, want) {
-		t.Errorf("restore-task の引数 = %v, want %v", shell.restoredTasks, want)
+	want := []string{"s1 alpha s1 2026-08-09T10:00:00+0900"}
+	if !reflect.DeepEqual(restorer.calls, want) {
+		t.Errorf("復元の引数 = %v, want %v", restorer.calls, want)
 	}
 }
 

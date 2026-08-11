@@ -107,7 +107,7 @@ func (s *stubDone) Refresh() app.DoneSnapshot {
 	return s.snapshot
 }
 
-func (s *stubDone) Restore(snapshot app.DoneSnapshot, number int) {
+func (s *stubDone) Restore(_ app.PaneEnv, snapshot app.DoneSnapshot, number int) {
 	s.restored = append(s.restored, number)
 	s.restoredFrom = append(s.restoredFrom, snapshot.Text)
 }
@@ -246,7 +246,7 @@ func paneModels() []paneModel {
 		{"waiting", tui.NewWaitingModel(&stubWaiting{text: "待ち画面"}, testEnv)},
 		{"done", tui.NewDoneModel(&stubDone{
 			snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1},
-		})},
+		}, app.PaneEnv{})},
 		{"news", tui.NewNewsModel(&stubNews{
 			snapshot: app.NewsSnapshot{Text: "ニュース画面", Count: 1},
 		})},
@@ -301,7 +301,7 @@ func keyDrivenRefreshes(t *testing.T) []keyDrivenRefresh {
 	// Done: r + 番号で restore してから集計し直す。
 	done := load(t, tui.NewDoneModel(&stubDone{
 		snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1},
-	}))
+	}, app.PaneEnv{}))
 	donePrompted, _ := done.Update(key('r'))
 	_, restored := run(t, donePrompted, key('1'))
 
@@ -646,7 +646,7 @@ func TestWaitingModelIgnoresKeys(t *testing.T) {
 func TestDoneModelOnce(t *testing.T) {
 	t.Parallel()
 
-	m := tui.NewDoneModel(&stubDone{snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1}})
+	m := tui.NewDoneModel(&stubDone{snapshot: app.DoneSnapshot{Text: "完了画面", Count: 1}}, app.PaneEnv{})
 
 	out, err := m.Once()
 	if err != nil {
@@ -661,7 +661,7 @@ func TestDoneModelRestore(t *testing.T) {
 	t.Parallel()
 
 	service := &stubDone{snapshot: app.DoneSnapshot{Text: "完了画面", Count: 2}}
-	m := tui.NewDoneModel(service)
+	m := tui.NewDoneModel(service, app.PaneEnv{})
 	loaded := load(t, m)
 
 	// r を押すと案内が出る。
@@ -682,11 +682,11 @@ func TestDoneModelFreezesRowsWhileAwaiting(t *testing.T) {
 	// Dashboard と同じく、2 打鍵目を待っている間に一覧が入れ替わると
 	// 押した番号が別の行を指してしまう。待ち受け中は凍結する。
 	service := &stubDone{snapshot: app.DoneSnapshot{Text: "元の完了画面", Count: 3}}
-	m := tui.NewDoneModel(service)
+	m := tui.NewDoneModel(service, app.PaneEnv{})
 	loaded := load(t, m)
 
 	service.next = &app.DoneSnapshot{Text: "入れ替わった完了画面", Count: 1}
-	inflight := exec(t, tui.NewDoneModel(service).Init())
+	inflight := exec(t, tui.NewDoneModel(service, app.PaneEnv{}).Init())
 
 	prompted, _ := loaded.Update(key('r'))
 	stale, _ := prompted.Update(inflight)
@@ -710,7 +710,7 @@ func TestDoneModelIgnoresRestoreWhenEmpty(t *testing.T) {
 
 	// 0 件のときは r を押しても案内を出さない。
 	service := &stubDone{snapshot: app.DoneSnapshot{Text: "完了画面"}}
-	m := tui.NewDoneModel(service)
+	m := tui.NewDoneModel(service, app.PaneEnv{})
 	loaded := load(t, m)
 
 	after, _ := loaded.Update(key('r'))

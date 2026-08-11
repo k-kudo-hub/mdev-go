@@ -122,6 +122,15 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Warn:     os.Stderr,
 	}
 
+	// Done からの復元。daily ログの読み書きは DailyStore が持ち、タブの
+	// 作り直しはタスク作成をそのまま再利用する。
+	taskRestorer := &app.TaskRestorer{
+		Daily:   store.NewDailyStore(store.DailyRoot(conductorHome), os.Stderr),
+		Creator: creator,
+		Paths:   paneStore,
+		Warn:    os.Stderr,
+	}
+
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
 			Pending:     paneStore,
@@ -138,7 +147,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Shell:       runner,
 		},
 		Waiting: &app.WaitingPane{Pending: paneStore},
-		Done:    &app.DonePane{Daily: paneStore, Shell: runner, Clock: clock},
+		Done:    &app.DonePane{Daily: paneStore, Restorer: taskRestorer, Clock: clock},
 		News: &app.NewsPane{
 			News:   paneStore,
 			Shell:  runner,

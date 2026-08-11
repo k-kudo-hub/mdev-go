@@ -31,7 +31,7 @@ codex の状態検出(`screen_detect_tick`)と復元(`restore-session.sh` / `res
 ### app / infra(復元の内製化)
 
 - [x] `SessionRestorer` のテスト → 実装(既存 CreateTask を再利用。ErrTabNotRegistered / ErrFocusNotConfirmed = rc=3 相当は成功カウント + 警告。QueryTabNames・Main 帰還はガード付き = Shell 版の未ガードからの自動改善として記録)。`DashboardPane.Startup` を差し替え
-- [ ] `TaskRestorer` のテスト → 実装(exit 0-5 相当の sentinel エラー、daily の `MarkRestored`(lock 2 秒 fail-open + 同一ディレクトリ temp)、resume 3 条件 + **screen- 前置 sid の除外**)。`DonePane.Restore` を差し替え(戻り値は現行同様无視から開始)
+- [x] `TaskRestorer` のテスト → 実装(exit 0-5 相当の sentinel エラー、daily の `MarkRestored`(lock 2 秒 fail-open + 同一ディレクトリ temp)、resume 3 条件 + **screen- 前置 sid の除外**)。`DonePane.Restore` を差し替え(戻り値は現行同様无視から開始)
 - [ ] ShellRunner から ScreenDetectTick / RestoreSession / RestoreTask を削除(runner・port・fake の掃除)
 
 ### 互換検証

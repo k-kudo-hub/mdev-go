@@ -24,6 +24,7 @@ type doneRefreshedMsg struct {
 // 出すべきエラーがそもそも発生しない。
 type DoneModel struct {
 	pane DoneService
+	env  app.PaneEnv
 
 	snapshot app.DoneSnapshot
 
@@ -41,8 +42,11 @@ var (
 )
 
 // NewDoneModel は Done のモデルを作る。
-func NewDoneModel(pane DoneService) DoneModel {
-	return DoneModel{pane: pane, polling: newPoller(DoneInterval)}
+//
+// env を持つのは復元がタスクタブを作り直すためである(作り直すタブの
+// スクリーン検出の状態は今の zellij セッションの下にある)。
+func NewDoneModel(pane DoneService, env app.PaneEnv) DoneModel {
+	return DoneModel{pane: pane, env: env, polling: newPoller(DoneInterval)}
 }
 
 // Init は最初の集計を行い、ポーリングを開始する。
@@ -124,7 +128,7 @@ func (m DoneModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			// restore-task.sh の終了コードは見ない。失敗した場合は
 			// エントリが Done に残り、次のポーリングで再表示される。
-			m.pane.Restore(snapshot, number)
+			m.pane.Restore(m.env, snapshot, number)
 			return doneRefreshedMsg{snapshot: m.pane.Refresh()}
 		}
 	}
