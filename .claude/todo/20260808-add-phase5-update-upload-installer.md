@@ -37,7 +37,7 @@ Shell 版に残る upload-log / fetch-news / update 系を Go 化し、ShellRunn
 
 ### D. 検証・仕上げ
 
-- [ ] golden テスト: gen-golden-upload.sh(Shell filter_secrets / build_markdown と Go 出力の差分テスト)
+- [x] golden テスト: gen-golden-upload.sh(Shell filter_secrets / build_markdown と Go 出力の差分テスト)
 - [ ] 型チェック・Lint・カバレッジ確認(domain/app 90%)
 
 ### E. conductor 側 PR(別リポジトリ・小変更)
