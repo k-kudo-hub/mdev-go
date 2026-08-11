@@ -20,7 +20,7 @@ codex の状態検出(`screen_detect_tick`)と復元(`restore-session.sh` / `res
 
 - [x] `ScreenTailWindow`(空行除去 → tail N)と `ClassifyScreen`(優先順位・パターン主導 blocked 行抽出・不正 regex 無視。regexp.CompilePOSIX)のテスト → 実装(test.sh の分類 13 ケースをテーブル移植)
 - [x] `.screen-state` の 1 行形式(`state [epoch]`)のパース/フォーマットのテスト → 実装(非数値 epoch は即確定側に倒す)
-- [ ] `DecideScreen`(観測 + 前回 + pending スナップショット + epoch 秒 → 副作用リスト)のテスト → 実装。遷移表(調査 §2.5)全行 + ライフサイクルケース(test.sh 1240-1466)をテーブル移植。**neutral = 空リスト / 状態書き込みが常に先頭 / Waiting 時は状態書き込みのみ** を固定
+- [x] `DecideScreen`(観測 + 前回 + pending スナップショット + epoch 秒 → 副作用リスト)のテスト → 実装。遷移表(調査 §2.5)全行 + ライフサイクルケース(test.sh 1240-1466)をテーブル移植。**neutral = 空リスト / 状態書き込みが常に先頭 / Waiting 時は状態書き込みのみ** を固定
 - [ ] `domain.AgentConfig` に `Patterns`(neutral/blocked/working)を追加(Config の unmarshalTaskKeys へ配線、per-entry 許容の流儀維持)
 
 ### app / infra(検出の内製化)

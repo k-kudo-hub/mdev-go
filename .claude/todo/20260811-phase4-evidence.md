@@ -147,6 +147,26 @@ fi
 restore-session が `updated_at` で最新を選ぶ(`LatestPerTab`)のとは選択キーが違う。
 現行仕様どおり各経路で非対称のまま維持する。
 
+実測(隔離実行)で確認: 同じタブに 2 件のエントリを置き、**古いほうの
+`updated_at` を 2099 年に書き換えたうえで mtime を 2020 年に落とす**と、
+screen pending が借りるのは新しいほう(mtime 最大)の dir / task_type /
+transcript_path だった。選択キーが mtime であることの直接の裏付けである。
+
+### 2-7. 状態機械の差分検証(隔離実行)
+
+Shell 版 `screen_update_pending` を隔離環境で観測列ごと動かし、Go の
+`DecideScreen` を同じ列で回した結果と突き合わせた。一致を確認した列:
+
+| 観測列 | Shell の最終状態 |
+| --- | --- |
+| Waiting あり: blocked → working → idle → (1 秒後)idle | state が blocked→working→idle_pending→idle と進み、pending は park.json のみ |
+| working → (外から Notification 追加)→ neutral | state=working のまま、Notification も残る |
+| working → idle → (1 秒後)idle → notify Stop 追加 → idle | screen Stop を書いたあと、notify Stop 着弾後の idle で自ら消える |
+| 別タブの Waiting がある状態で working → idle → (1 秒後)idle | 影響を受けず screen Stop を書く |
+| blocked → idle → idle → (1 秒後)idle | 一度も Stop を書かない |
+| blocked(message 空) | `Approval required` |
+| working →(notify Stop 追加)→ idle → (1 秒後)idle | 重複 Stop を書かない |
+
 `claude_session_id` は `screen-<slug>`、ファイル名は `screen-<slug>.json`
 (`_screen_tab_slug` は移植済みの `domain.ScreenTabSlug`)。
 
