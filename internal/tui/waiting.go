@@ -80,6 +80,12 @@ func (m WaitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.text, m.err = msg.text, nil
 		return m, next
 
+	case attachCheckedMsg:
+		// 減速の判断だけを更新する。次の合図は張らない(pane.go の
+		// チェーン 1 本の不変条件)。
+		m.polling.observeAttach(msg.attached)
+		return m, nil
+
 	case tickMsg:
 		cmd := m.polling.tick(m.refreshCmd)
 		return m, cmd

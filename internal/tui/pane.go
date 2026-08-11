@@ -67,6 +67,32 @@ func tickCmd(d time.Duration) tea.Cmd {
 // キー操作で出した読み直し(force 起源)はこのチェーンの一部ではなく、着弾しても
 // 何も予約しない。予約するとチェーンが 1 本ずつ恒久的に増えていく。
 
+// attachCheckedMsg は「誰か開いているか」の確認が返ったことを表す。
+//
+// この合図はポーリングのチェーンの一部では **ない**。受け取っても次の合図を
+// 張らず、実行中の数も変えない。張ってしまうとチェーンが 2 本になる。
+type attachCheckedMsg struct{ attached bool }
+
+// AttachWatch はセッションを誰か開いているかを見張る。
+//
+// 実体は zellij の list-clients を叩く adapter である。ゼロ値(checker が
+// nil)は「見張らない」を意味し、減速は一切かからない。zellij の外で
+// 動かしたときや単発描画(--once)がこれに当たる。
+type AttachWatch struct {
+	Checker app.SessionAttachChecker
+	Session string
+}
+
+// cmd は確認を 1 回行う tea.Cmd を返す。見張らない設定なら nil を返す。
+func (w AttachWatch) cmd() tea.Cmd {
+	if w.Checker == nil || w.Session == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		return attachCheckedMsg{attached: w.Checker.IsAttached(w.Session)}
+	}
+}
+
 // poller は 4 ペイン共通のポーリングの回し方である。
 //
 // 状態を変える入口を tick / arrive / force の 3 つに絞ってある。とくに arrive は
@@ -91,6 +117,13 @@ type poller struct {
 	// 読み直しが同時に走りうるためである。真偽値だと、先に着弾したほうが印を
 	// 下ろしてしまい、まだ走っているほうへ次のポーリングが重なる。
 	inFlight int
+
+	// pace は「誰も開いていないなら遅く回す」ための状態である。
+	pace app.IdlePace
+	// watch は attach の確認手段。ゼロ値なら減速しない。
+	watch AttachWatch
+	// now は「今」を供給する。テストで差し替える。
+	now func() time.Time
 }
 
 // newPoller は間隔 d のポーリングを返す。
@@ -99,7 +132,48 @@ type poller struct {
 // 発行するためである。Init は値レシーバでモデルを書き換えられないため、そこで
 // 数えられない。
 func newPoller(d time.Duration) poller {
-	return poller{interval: d, inFlight: 1}
+	return poller{interval: d, inFlight: 1, now: time.Now}
+}
+
+// withAttachWatch は attach の見張りを付けた poller を返す。
+func (p poller) withAttachWatch(watch AttachWatch) poller {
+	p.watch = watch
+	return p
+}
+
+// pollInterval は次に張る合図までの間隔を返す。
+// 誰も開いていないと分かっているときだけ落ちる。
+func (p poller) pollInterval() time.Duration {
+	return p.pace.Interval(p.interval)
+}
+
+// observeAttach は確認の結果を取り込む。
+//
+// **次の合図は張らない。** これはポーリングのチェーンの外側の出来事であり、
+// ここで張るとチェーンが 2 本になる。効くのは次に張られる合図からである。
+func (p *poller) observeAttach(attached bool) {
+	p.pace = p.pace.Observe(attached)
+}
+
+// armWithAttachCheck は次の合図を張り、頃合いなら attach の確認も足す。
+//
+// 確認をポーリングの着弾に相乗りさせているのは、独立したタイマーを持つと
+// チェーンが 2 本になり、この設計が防いでいる「重なり」を自分で作って
+// しまうためである。確認の合図(attachCheckedMsg)は何も予約しないので、
+// チェーンは 1 本のままである。
+func (p *poller) armWithAttachCheck() tea.Cmd {
+	next := tickCmd(p.pollInterval())
+	now := p.now()
+	if !p.pace.ShouldCheck(now) {
+		return next
+	}
+	check := p.watch.cmd()
+	if check == nil {
+		return next
+	}
+	// 結果を待たずに「確認を始めた」ことを記録する(重ねて出さないため)。
+	p.pace = p.pace.MarkChecked(now)
+	return tea.Batch(next, check)
 }
 
 // tick はポーリングの合図に対する応答を返す。
@@ -111,7 +185,7 @@ func newPoller(d time.Duration) poller {
 // refresh は読み直しのコマンドを組み立てるだけで、ポーリングの状態は見ない。
 func (p *poller) tick(refresh func(poll bool) tea.Cmd) tea.Cmd {
 	if p.inFlight > 0 {
-		return tickCmd(p.interval)
+		return tickCmd(p.pollInterval())
 	}
 	p.inFlight++
 	return refresh(true)
@@ -121,7 +195,7 @@ func (p *poller) tick(refresh func(poll bool) tea.Cmd) tea.Cmd {
 // 凍結中(削除の途中・2 打鍵目の待ち受け中・取得中)の tick が使う。
 //
 // 実行中の数を変えないので、凍結が解けた後の tick は通常どおり発行できる。
-func (p poller) rearm() tea.Cmd { return tickCmd(p.interval) }
+func (p poller) rearm() tea.Cmd { return tickCmd(p.pollInterval()) }
 
 // arrive は読み直しの着弾に対する応答を返す。
 //
@@ -134,7 +208,7 @@ func (p *poller) arrive(poll bool) tea.Cmd {
 	if !poll {
 		return nil
 	}
-	return tickCmd(p.interval)
+	return p.armWithAttachCheck()
 }
 
 // force はキー操作起源の読み直しを実行中として数える。
@@ -255,6 +329,8 @@ type Panes struct {
 	TaskCreate  TaskCreateService
 	TaskControl TaskControlService
 	Env         app.PaneEnv
+	// Attach は「誰か開いているか」の見張りである。ゼロ値なら減速しない。
+	Attach AttachWatch
 }
 
 // model は名前に対応するモデルを返す。
@@ -262,15 +338,26 @@ type Panes struct {
 // arg はペインが取る引数である。task-control だけがタブ名を必要とし、
 // 他のペインは無視する。
 func (p Panes) model(name, arg string) (tea.Model, error) {
+	// 減速の対象はポーリングで回り続ける 4 ペインだけである。
+	// task-create と task-control は利用者のキー入力で動くので、誰も
+	// 開いていなければそもそも何も起きない。
 	switch name {
 	case NameDashboard:
-		return NewDashboardModel(p.Dashboard, p.Env), nil
+		m := NewDashboardModel(p.Dashboard, p.Env)
+		m.polling = m.polling.withAttachWatch(p.Attach)
+		return m, nil
 	case NameWaiting:
-		return NewWaitingModel(p.Waiting, p.Env), nil
+		m := NewWaitingModel(p.Waiting, p.Env)
+		m.polling = m.polling.withAttachWatch(p.Attach)
+		return m, nil
 	case NameDone:
-		return NewDoneModel(p.Done, p.Env), nil
+		m := NewDoneModel(p.Done, p.Env)
+		m.polling = m.polling.withAttachWatch(p.Attach)
+		return m, nil
 	case NameNews:
-		return NewNewsModel(p.News), nil
+		m := NewNewsModel(p.News)
+		m.polling = m.polling.withAttachWatch(p.Attach)
+		return m, nil
 	case NameTaskCreate:
 		return NewTaskCreateModel(p.TaskCreate, p.Env), nil
 	case NameTaskControl:

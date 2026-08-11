@@ -23,7 +23,7 @@ detached セッションの無限ポーリング蓄積(zellij サーバ劣化 �
 ### B. 未アタッチ時のポーリング減速(mdev-go)
 
 - [x] domain: 減速判定の純粋関数のテスト+実装(attach 確認は 30 秒間隔、未アタッチが確認できたら poll 間隔を通常 → 60 秒へ、attach 復帰で即通常へ)
-- [ ] infra+tui: poller への組み込み(`zellij action list-clients` の呼び出しは既存 zellij adapter 経由・10 秒上限。list-clients 自体の失敗は「attach あり」扱い = 安全側)
+- [x] infra+tui: poller への組み込み(`zellij action list-clients` の呼び出しは既存 zellij adapter 経由・10 秒上限。list-clients 自体の失敗は「attach あり」扱い = 安全側)
 
 ### C. conductor 側: init.zsh から自動掃除を呼ぶ(小 PR)
 

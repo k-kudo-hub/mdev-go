@@ -148,6 +148,11 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Clock:      clock,
 	}
 
+	// zellij のセッション操作。掃除(sessions clean)と、ペインの
+	// 「誰か開いているか」の確認の両方が使う。
+	zellijSessions := zellij.NewSessionController()
+	processes := procscan.NewScanner()
+
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
 			Pending:     paneStore,
@@ -195,17 +200,18 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			},
 		},
 		Env: app.PaneEnv{ZellijSession: getenv("ZELLIJ_SESSION_NAME")},
+		// 誰も開いていないセッションではポーリングを落とす。閉じたまま
+		// 残ったセッションが zellij サーバを劣化させ続けないようにする。
+		Attach: tui.AttachWatch{
+			Checker: zellijSessions,
+			Session: getenv("ZELLIJ_SESSION_NAME"),
+		},
 	}
 
 	// 更新まわり。状態(REPO_URL / VERSION / .update-check)は CONDUCTOR_HOME
 	// 直下にあり、リモートのタグ引きは git バイナリで行う。
 	updateState := store.NewUpdateStateStore(conductorHome)
 	remoteTags := git.NewRemoteTags()
-
-	// セッションの掃除(起動前の自動掃除と手動の一括回収)。zellij の CLI と
-	// ps を叩くので、どちらも上限つきの adapter を通す。
-	zellijSessions := zellij.NewSessionController()
-	processes := procscan.NewScanner()
 
 	return cli.Deps{
 		Hooks:        hooks,

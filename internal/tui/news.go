@@ -87,6 +87,12 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return newsRefreshedMsg{snapshot: m.pane.Refresh()}
 		}
 
+	case attachCheckedMsg:
+		// 減速の判断だけを更新する。次の合図は張らない(pane.go の
+		// チェーン 1 本の不変条件)。
+		m.polling.observeAttach(msg.attached)
+		return m, nil
+
 	case tickMsg:
 		if m.fetching {
 			// 取得中は読み直さない(取得中の画面を出したままにする)。

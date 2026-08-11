@@ -142,6 +142,12 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.snapshot, m.err = msg.snapshot, nil
 		return m, next
 
+	case attachCheckedMsg:
+		// 減速の判断だけを更新する。次の合図は張らない(pane.go の
+		// チェーン 1 本の不変条件)。
+		m.polling.observeAttach(msg.attached)
+		return m, nil
+
 	case tickMsg:
 		if m.busy || m.awaiting {
 			// 削除の途中と 2 打鍵目の待ち受け中は読み直さない。現行版は

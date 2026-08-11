@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
+	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
 // SessionController は zellij のセッション操作を担当する。
@@ -18,9 +19,10 @@ type SessionController struct {
 }
 
 var (
-	_ app.SessionLister       = (*SessionController)(nil)
-	_ app.SessionClientLister = (*SessionController)(nil)
-	_ app.SessionRemover      = (*SessionController)(nil)
+	_ app.SessionLister        = (*SessionController)(nil)
+	_ app.SessionClientLister  = (*SessionController)(nil)
+	_ app.SessionRemover       = (*SessionController)(nil)
+	_ app.SessionAttachChecker = (*SessionController)(nil)
 )
 
 // NewSessionController は zellij コマンドを実行する SessionController を返す。
@@ -68,4 +70,17 @@ func (c *SessionController) KillSession(name string) error {
 // ためである。kill の直後は zellij から見てまだ動いていることがある。
 func (c *SessionController) DeleteSession(name string) error {
 	return c.run(commandTimeout, binaryName, "delete-session", name, "--force")
+}
+
+// IsAttached はセッションを誰か開いているかを返す。
+//
+// **判断できない場合は true を返す。** 誰も居ないと誤って判断すると、
+// 実際には見ている画面のポーリングが落ちて固まって見える。list-clients は
+// セッションが応答しないときに失敗するので、その場合も開いている扱いにする。
+func (c *SessionController) IsAttached(session string) bool {
+	out, err := c.ListClients(session)
+	if err != nil {
+		return true
+	}
+	return domain.AttachedClientCount(out) > 0
 }

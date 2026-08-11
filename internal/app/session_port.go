@@ -46,3 +46,13 @@ type ProcessSignaler interface {
 	// IsAlive は pid のプロセスがまだ居るかを返す。
 	IsAlive(pid int) bool
 }
+
+// SessionAttachChecker はセッションを誰か開いているかを返す。
+//
+// ペインのポーリングが「誰も見ていないなら遅く回す」ために使う。
+// **判断できない場合は true(開いている)を返すこと。** 誰も居ないと
+// 誤って判断すると、実際には見ている画面が 60 秒間隔になって固まって
+// 見える。
+type SessionAttachChecker interface {
+	IsAttached(session string) bool
+}
