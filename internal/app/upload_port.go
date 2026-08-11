@@ -14,3 +14,12 @@ package app
 type LogPusher interface {
 	Push(repo, branch, relPath, content string) (reference string, err error)
 }
+
+// SummaryGenerator は会話テキストから作業要約を作る。
+//
+// 失敗(コマンドが無い・異常終了・出力が空)は必ず error になる。中身の無い
+// 要約でログを残すと、失敗したことに気づけないまま会話が失われるためで、
+// 呼び出し側はこの error でタブの削除を中止する。
+type SummaryGenerator interface {
+	Summarize(conversation string) (summary string, err error)
+}
