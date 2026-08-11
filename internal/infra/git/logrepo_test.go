@@ -10,15 +10,31 @@ import (
 	infragit "github.com/k-kudo-hub/mdev-go/internal/infra/git"
 )
 
-// gitEnv は実環境の git 設定に左右されないようにする。
+// defaultTestBranch はテストで使うリポジトリの既定ブランチ名である。
+//
+// 名前を固定するのは、`git init` の既定が環境で変わるためである。
+// init.defaultBranch を設定していない場合の既定は git のバージョンや
+// ディストリビューションによって main だったり master だったりする。
+const defaultTestBranch = "main"
+
+// gitEnv は実環境の git 設定と git のバージョン差に左右されないようにする。
 //
 // 利用者の ~/.gitconfig に commit.gpgsign や core.hooksPath が入っていると
 // テストの commit が失敗しうるため、グローバルとシステムの設定を無効化する。
+//
+// そのうえで init.defaultBranch を **明示的に** 与える。無効化しただけでは
+// git の組み込みの既定に落ち、それが環境ごとに違う。既定が defaultTestBranch と
+// 食い違うと、ベアリポジトリの HEAD が push 先ブランチと別を指したままになり、
+// 検証用の clone が「remote HEAD refers to nonexistent ref」で何も取り出さない
+// (CI だけで落ちるのはこの経路である)。
 func gitEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "init.defaultBranch")
+	t.Setenv("GIT_CONFIG_VALUE_0", defaultTestBranch)
 }
 
 // runGit はテストの準備で git を実行する。
@@ -37,26 +53,47 @@ func runGit(t *testing.T, dir string, args ...string) string {
 }
 
 // newBareRepo は空のベアリポジトリを作ってそのパスを返す。
+//
+// HEAD は symbolic-ref で明示的に defaultTestBranch へ向ける。gitEnv が
+// init.defaultBranch を与えているので init だけでも同じ結果になるが、
+// 「この remote の既定ブランチが何か」はテストの前提そのものなので、
+// 設定に頼らず 1 行で読めるようにしておく。
 func newBareRepo(t *testing.T, dir string) string {
 	t.Helper()
 	runGit(t, "", "init", "--bare", "--quiet", dir)
+	runGit(t, dir, "symbolic-ref", "HEAD", "refs/heads/"+defaultTestBranch)
 	return dir
 }
 
-// seedRepo は main ブランチに 1 コミットあるベアリポジトリを作る。
+// seedRepo は defaultTestBranch に 1 コミットあるベアリポジトリを作る。
+//
+// 空の remote を clone してから育てるのではなく、独立したリポジトリを作って
+// push する。空リポジトリの clone は remote の HEAD をそのまま引き継ぐため、
+// 手順が「remote の既定ブランチが何か」に依存してしまう。
 func seedRepo(t *testing.T, root, name string) string {
 	t.Helper()
 	remote := newBareRepo(t, filepath.Join(root, name+".git"))
 	seed := filepath.Join(root, name+"-seed")
-	runGit(t, "", "clone", "--quiet", remote, seed)
-	runGit(t, seed, "checkout", "--quiet", "-b", "main")
+	runGit(t, "", "init", "--quiet", seed)
+	runGit(t, seed, "symbolic-ref", "HEAD", "refs/heads/"+defaultTestBranch)
 	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("# logs\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, seed, "add", ".")
 	runGit(t, seed, "-c", "user.email=s@s", "-c", "user.name=s", "commit", "--quiet", "-m", "init")
-	runGit(t, seed, "push", "--quiet", "origin", "main")
+	runGit(t, seed, "remote", "add", "origin", remote)
+	runGit(t, seed, "push", "--quiet", "origin", defaultTestBranch)
 	return remote
+}
+
+// cloneBranch は remote の branch を dir へ取り出す。
+//
+// clone するブランチを必ず明示する。省略すると remote の HEAD が使われ、
+// 検証したいブランチと違うものを見てしまう(空リポジトリへ push した直後は
+// HEAD が push 先を指しているとは限らない)。
+func cloneBranch(t *testing.T, remote, branch, dir string) {
+	t.Helper()
+	runGit(t, "", "clone", "--quiet", "--branch", branch, remote, dir)
 }
 
 // TestLogRepositoryPushBootstrapsEmptyRepo は test.sh「46. A」に対応する。
@@ -77,7 +114,7 @@ func TestLogRepositoryPushBootstrapsEmptyRepo(t *testing.T) {
 	}
 
 	verify := filepath.Join(root, "verify")
-	runGit(t, "", "clone", "--quiet", remote, verify)
+	cloneBranch(t, remote, defaultTestBranch, verify)
 	got, err := os.ReadFile(filepath.Join(verify, "work-log/2026/07/04/120000_boot.md"))
 	if err != nil {
 		t.Fatalf("push したログが remote にありません: %v", err)
@@ -123,7 +160,7 @@ func TestLogRepositoryPushCreatesBranch(t *testing.T) {
 	}
 
 	verify := filepath.Join(root, "verify")
-	runGit(t, "", "clone", "--quiet", "--branch", "logs-2027", remote, verify)
+	cloneBranch(t, remote, "logs-2027", verify)
 	if _, err := os.Stat(filepath.Join(verify, "work-log/y.md")); err != nil {
 		t.Errorf("切り替え後のブランチにログがありません: %v", err)
 	}
@@ -144,7 +181,7 @@ func TestLogRepositoryPushUsesExistingBranch(t *testing.T) {
 		t.Fatalf("Push が失敗しました: %v", err)
 	}
 	verify := filepath.Join(root, "verify")
-	runGit(t, "", "clone", "--quiet", remote, verify)
+	cloneBranch(t, remote, defaultTestBranch, verify)
 	for _, name := range []string{"README.md", "work-log/a.md"} {
 		if _, err := os.Stat(filepath.Join(verify, name)); err != nil {
 			t.Errorf("%s がありません: %v", name, err)

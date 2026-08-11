@@ -15,6 +15,11 @@ import (
 func TestLatestTagAgainstRealRepo(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	// `git init` の既定ブランチ名は git のバージョンや配布物で変わる。
+	// 手順を環境に依存させないよう明示する(logrepo_test.go の gitEnv と同じ理由)。
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "init.defaultBranch")
+	t.Setenv("GIT_CONFIG_VALUE_0", "main")
 
 	root := t.TempDir()
 	remote := filepath.Join(root, "upd.git")
@@ -29,9 +34,12 @@ func TestLatestTagAgainstRealRepo(t *testing.T) {
 		}
 	}
 	run("", "init", "--bare", "--quiet", remote)
+	run(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+	// 空の remote を clone してから育てるのではなく、独立したリポジトリを
+	// 作って push する(手順が remote の HEAD に依存しないようにするため)。
 	seed := filepath.Join(root, "seed")
-	run("", "clone", "--quiet", remote, seed)
-	run(seed, "checkout", "--quiet", "-b", "main")
+	run("", "init", "--quiet", seed)
+	run(seed, "symbolic-ref", "HEAD", "refs/heads/main")
 	if err := os.WriteFile(filepath.Join(seed, "f"), []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -40,6 +48,7 @@ func TestLatestTagAgainstRealRepo(t *testing.T) {
 	run(seed, "tag", "v0.1.0")
 	run(seed, "tag", "v0.2.0")
 	run(seed, "tag", "not-semver")
+	run(seed, "remote", "add", "origin", remote)
 	run(seed, "push", "--quiet", "origin", "main", "--tags")
 
 	got, ok := NewRemoteTags().LatestTag(remote)
