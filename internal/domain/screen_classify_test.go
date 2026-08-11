@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -146,6 +147,28 @@ func TestClassifyScreen(t *testing.T) {
 			want:     domain.ScreenObservation{State: domain.ScreenIdle},
 		},
 		{
+			// 一致行の先頭の空白除去も `[[:space:]]` と同じ集合で行う。
+			name:     "blocked のメッセージは全角空白も落とす",
+			patterns: domain.ScreenPatterns{Blocked: []string{`Would you like`}},
+			text:     "\u3000\u00a0Would you like to run the following command?",
+			want: domain.ScreenObservation{
+				State:   domain.ScreenBlocked,
+				Message: "Would you like to run the following command?",
+			},
+		},
+		{
+			// 全角空白のパディングで窓が埋まると承認プロンプトが押し出される。
+			// 空白のみの行として落ちれば、20 行の窓に残る。
+			name:     "全角空白のパディングは窓を埋めない",
+			patterns: codexPatterns(),
+			text: "  Press enter to confirm or esc to cancel\n" +
+				strings.Repeat("\u3000\n", 30),
+			want: domain.ScreenObservation{
+				State:   domain.ScreenBlocked,
+				Message: "Press enter to confirm or esc to cancel",
+			},
+		},
+		{
 			name:     "不正な正規表現は不一致として飛ばす",
 			patterns: domain.ScreenPatterns{Blocked: []string{`[`, `^ *Press enter`}},
 			fixture:  "long-dialog",
@@ -227,6 +250,23 @@ func TestScreenTailWindow(t *testing.T) {
 			text: "\n  \n\t\n",
 			n:    20,
 			want: []string{},
+		},
+		{
+			// BSD の grep は LC_CTYPE が UTF-8 のとき全角空白(U+3000)や
+			// NBSP(U+00A0)も `[[:space:]]` として扱う(実機で確認)。
+			// ASCII だけで判定すると、これらで作られたパディング行が窓を
+			// 埋めて承認プロンプトを押し出す。
+			name: "全角空白・NBSP だけの行も落とす",
+			text: "a\n\u3000\n\u00a0\n\u2003\nb",
+			n:    20,
+			want: []string{"a", "b"},
+		},
+		{
+			// ゼロ幅スペース(U+200B)は grep でも空白ではない。
+			name: "ゼロ幅スペースの行は落とさない",
+			text: "a\n\u200b\nb",
+			n:    20,
+			want: []string{"a", "\u200b", "b"},
 		},
 	}
 

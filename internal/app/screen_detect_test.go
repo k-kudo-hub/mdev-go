@@ -99,10 +99,12 @@ func TestScreenDetectorTickSurfacesApproval(t *testing.T) {
 	}
 
 	slug := domain.ScreenTabSlug("cx-task")
+	// 状態ファイルの書き込みは必ず末尾である。pending の書き込みが失敗した回に
+	// 状態を進めないことで、次の観測でやり直せる(evidence §2-8)。
 	wantJournal := []string{
 		"dump-screen 5",
-		"screen-state-write " + slug + " blocked",
 		"pending-save " + domain.ScreenPendingSessionID("cx-task"),
+		"screen-state-write " + slug + " blocked",
 	}
 	if !reflect.DeepEqual(f.journal.entries, wantJournal) {
 		t.Errorf("副作用の並び = %v, want %v", f.journal.entries, wantJournal)
@@ -275,10 +277,10 @@ func TestScreenDetectorTickAppliesEffectsInOrder(t *testing.T) {
 
 	want := []string{
 		"dump-screen 5",
-		"screen-state-write " + slug + " working",
 		"pending-delete-by-name " + domain.ScreenPendingName("cx-task"),
 		"pending-delete-by-name thread-1.json",
 		"go-to-tab-name Main",
+		"screen-state-write " + slug + " working",
 	}
 	if !reflect.DeepEqual(f.journal.entries, want) {
 		t.Errorf("副作用の並び = %v, want %v", f.journal.entries, want)

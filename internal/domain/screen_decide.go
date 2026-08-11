@@ -95,13 +95,20 @@ type ScreenDecisionInput struct {
 //  1. neutral は完全な no-op。状態ファイルすら書かない。全画面ビューアや
 //     ピッカーの上ではスピナーもプロンプトも見えず、そこから何も結論できない
 //     ためである。空の並びを返す。
-//  2. 状態ファイルの書き込みは常に先頭に来る。Waiting ガードより**前**に
-//     あるため、Waiting で退避中のタブでも内部状態だけは進む。復帰したときに
-//     整合が取れているようにするためである。
+//  2. 状態ファイルの書き込みは Waiting ガードより**前**に決まる。Waiting で
+//     退避中のタブでも内部状態だけは進み、復帰したときに整合が取れる。
 //  3. Waiting の pending があるタブでは、状態の書き込み以外は何もしない。
 //     外部の返答待ちとして利用者が退避したものを、検出が勝手に戻したり
 //     消したりしてはならない。
 //  4. そのあとで観測した状態ごとの副作用を積む。
+//
+// **状態ファイルの書き込みは並びの末尾に置く。** 値は上の 2 で決まるが、
+// 実行はいちばん最後である。呼び出し側は最初の失敗で残りを打ち切るので、
+// pending の書き込みや削除が失敗したときに状態が進まず、次の観測で同じ判断が
+// もう一度出て自然に再試行される。先頭に置くと「状態だけ進んで pending は
+// 書けていない」状態で固定され、確定した Stop が二度と書かれない
+// (evidence §2-8)。pending を消したり書いたりする副作用どうしの順序は
+// 変わらないため、すべて成功する経路のファイルの最終状態は同じである。
 //
 // Pendings は変更しない。idle の判断は「1 段目で消した pending は 2 段目以降
 // からは見えない」という現行版の挙動を持つため、内部でスナップショットを
@@ -112,21 +119,27 @@ func DecideScreen(in ScreenDecisionInput) []ScreenEffect {
 	}
 
 	next, confirmIdle := nextScreenState(in)
-	effects := []ScreenEffect{{Kind: ScreenEffectWriteState, Line: next.Format()}}
+	writeState := ScreenEffect{Kind: ScreenEffectWriteState, Line: next.Format()}
 
 	// 判断に関わるのは同じタブの pending だけである(現行版もすべての
 	// ループが `.tab == $tab` を条件にしている)。
 	tabPendings := make([]ScreenPendingEntry, 0, len(in.Pendings))
+	waiting := false
 	for _, p := range in.Pendings {
 		if p.Tab != in.Tab {
 			continue
 		}
 		if p.Event == EventWaiting {
-			return effects
+			waiting = true
+			break
 		}
 		tabPendings = append(tabPendings, p)
 	}
+	if waiting {
+		return []ScreenEffect{writeState}
+	}
 
+	var effects []ScreenEffect
 	screenName := ScreenPendingName(in.Tab)
 	switch in.Observed.State {
 	case ScreenBlocked:
@@ -136,7 +149,7 @@ func DecideScreen(in ScreenDecisionInput) []ScreenEffect {
 	case ScreenIdle:
 		effects = appendScreenIdle(effects, tabPendings, screenName, confirmIdle)
 	}
-	return effects
+	return append(effects, writeState)
 }
 
 // appendScreenBlocked は承認待ちの副作用を積む。
@@ -238,7 +251,13 @@ func nextScreenState(in ScreenDecisionInput) (ScreenState, bool) {
 	case ScreenIdlePending:
 		// 時刻が読めない場合は待たずに確定させる(現行版も正規表現の判定が
 		// 外れた時点で else 側へ落ちる)。
-		if since, ok := in.Prev.PendingSince(); ok && in.Now-since < 1 {
+		//
+		// 記録された時刻が「今」より後のときも確定側へ倒す。時計が巻き戻ると
+		// 差が負になり、そのままでは時計が追いつくまで永久に保留が続いて
+		// 完了が出てこなくなる。読めない時刻を確定側へ倒すのと同じ考え方で、
+		// 信用できない時刻で待ち続けるより 1 回ぶん早く確定するほうがよい。
+		since, ok := in.Prev.PendingSince()
+		if ok && since <= in.Now && in.Now-since < 1 {
 			return ScreenState{State: ScreenIdlePending, At: in.Prev.At}, false
 		}
 		return ScreenState{State: ScreenIdle}, true

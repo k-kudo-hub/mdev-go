@@ -106,6 +106,9 @@ func (d *ScreenDetector) apply(session string, pane AgentPane, observed domain.S
 		})
 	}
 
+	// 副作用は返った順に実行し、**最初の失敗でその回を打ち切る**。状態ファイルの
+	// 書き込みは並びの末尾にあるので、途中で失敗した回は前回状態が残り、次の
+	// 観測で同じ判断がもう一度出て自然に再試行される(evidence §2-8)。
 	effects := domain.DecideScreen(domain.ScreenDecisionInput{
 		Tab:      pane.Tab,
 		Observed: observed,

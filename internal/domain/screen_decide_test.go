@@ -209,8 +209,9 @@ func TestDecideScreenTransitions(t *testing.T) {
 				Tab: screenTab, Observed: tt.observed, Prev: tt.prev, Now: now,
 			})
 			rendered := renderScreenEffects(effects)
-			if len(rendered) == 0 || rendered[0] != "write-state "+tt.wantState {
-				t.Fatalf("先頭の副作用 = %q, want %q", rendered, "write-state "+tt.wantState)
+			// 状態ファイルの書き込みは必ず**末尾**に来る(evidence §2-8)。
+			if len(rendered) == 0 || rendered[len(rendered)-1] != "write-state "+tt.wantState {
+				t.Fatalf("末尾の副作用 = %q, want %q", rendered, "write-state "+tt.wantState)
 			}
 			gotFocus := false
 			for _, e := range rendered {
@@ -293,9 +294,9 @@ func TestDecideScreenLifecycle(t *testing.T) {
 				{
 					what: "承認ダイアログを検出",
 					obs:  blockedObs("Would you like to run the following command?"), now: 1000,
-					want: []string{
+					want: []string{"write-pending " + screenName + " Notification Would you like to run the following command?",
+
 						"write-state blocked",
-						"write-pending " + screenName + " Notification Would you like to run the following command?",
 					},
 				},
 				{
@@ -310,9 +311,9 @@ func TestDecideScreenLifecycle(t *testing.T) {
 			steps: []step{
 				{
 					obs: blockedObs(""), now: 1000,
-					want: []string{
+					want: []string{"write-pending " + screenName + " Notification Approval required",
+
 						"write-state blocked",
-						"write-pending " + screenName + " Notification Approval required",
 					},
 				},
 			},
@@ -320,9 +321,9 @@ func TestDecideScreenLifecycle(t *testing.T) {
 		{
 			name: "working はタブの pending を notify 由来ごと消す",
 			steps: []step{
-				{obs: blockedObs("approval"), now: 1000, want: []string{
+				{obs: blockedObs("approval"), now: 1000, want: []string{"write-pending " + screenName + " Notification approval",
+
 					"write-state blocked",
-					"write-pending " + screenName + " Notification approval",
 				}},
 				{
 					what: "notify 由来の Stop が届いたあとにターンが再開する",
@@ -330,11 +331,11 @@ func TestDecideScreenLifecycle(t *testing.T) {
 						s.putPending("thread-1.json", screenTab, domain.EventStop)
 					},
 					obs: workingObs, now: 1001,
-					want: []string{
-						"write-state working",
-						"delete-pending " + screenName,
+					want: []string{"delete-pending " + screenName,
 						"delete-pending thread-1.json",
 						"focus-main",
+
+						"write-state working",
 					},
 				},
 			},
@@ -356,9 +357,9 @@ func TestDecideScreenLifecycle(t *testing.T) {
 				{
 					what: "実時間が経ってからの idle で確定",
 					obs:  idleObs, now: 1005,
-					want: []string{
+					want: []string{"write-pending " + screenName + " Stop Task complete",
+
 						"write-state idle",
-						"write-pending " + screenName + " Stop Task complete",
 					},
 				},
 				{
@@ -378,7 +379,7 @@ func TestDecideScreenLifecycle(t *testing.T) {
 						s.putPending("thread-p.json", screenTab, domain.EventNotification)
 					},
 					obs: workingObs, now: 1001,
-					want: []string{"write-state working", "delete-pending thread-p.json"},
+					want: []string{"delete-pending thread-p.json", "write-state working"},
 				},
 			},
 		},
@@ -387,9 +388,9 @@ func TestDecideScreenLifecycle(t *testing.T) {
 			steps: []step{
 				{obs: workingObs, now: 1000, want: []string{"write-state working"}},
 				{obs: idleObs, now: 1000, want: []string{"write-state idle_pending 1000"}},
-				{obs: blockedObs("approval"), now: 1000, want: []string{
+				{obs: blockedObs("approval"), now: 1000, want: []string{"write-pending " + screenName + " Notification approval",
+
 					"write-state blocked",
-					"write-pending " + screenName + " Notification approval",
 				}},
 			},
 		},
@@ -417,16 +418,16 @@ func TestDecideScreenLifecycle(t *testing.T) {
 		{
 			name: "blocked 解消後の idle は Notification を消す",
 			steps: []step{
-				{obs: blockedObs("approval"), now: 1000, want: []string{
+				{obs: blockedObs("approval"), now: 1000, want: []string{"write-pending " + screenName + " Notification approval",
+
 					"write-state blocked",
-					"write-pending " + screenName + " Notification approval",
 				}},
 				{
 					setup: func(s *screenSim) {
 						s.putPending("thread-3.json", screenTab, domain.EventStop)
 					},
 					obs: idleObs, now: 1001,
-					want: []string{"write-state idle", "delete-pending " + screenName},
+					want: []string{"delete-pending " + screenName, "write-state idle"},
 				},
 			},
 		},
@@ -435,9 +436,9 @@ func TestDecideScreenLifecycle(t *testing.T) {
 			steps: []step{
 				{obs: workingObs, now: 1000, want: []string{"write-state working"}},
 				{obs: idleObs, now: 1000, want: []string{"write-state idle_pending 1000"}},
-				{obs: idleObs, now: 1005, want: []string{
+				{obs: idleObs, now: 1005, want: []string{"write-pending " + screenName + " Stop Task complete",
+
 					"write-state idle",
-					"write-pending " + screenName + " Stop Task complete",
 				}},
 				{
 					what: "notify の Stop が後から着弾する",
@@ -445,18 +446,18 @@ func TestDecideScreenLifecycle(t *testing.T) {
 						s.putPending("thread-4.json", screenTab, domain.EventStop)
 					},
 					obs: idleObs, now: 1006,
-					want: []string{"write-state idle", "delete-pending " + screenName},
+					want: []string{"delete-pending " + screenName, "write-state idle"},
 				},
 			},
 		},
 		{
 			name: "blocked から降りた idle は何度観測しても done にならない",
 			steps: []step{
-				{obs: blockedObs("approval"), now: 1000, want: []string{
+				{obs: blockedObs("approval"), now: 1000, want: []string{"write-pending " + screenName + " Notification approval",
+
 					"write-state blocked",
-					"write-pending " + screenName + " Notification approval",
 				}},
-				{obs: idleObs, now: 1001, want: []string{"write-state idle", "delete-pending " + screenName}},
+				{obs: idleObs, now: 1001, want: []string{"delete-pending " + screenName, "write-state idle"}},
 				{obs: idleObs, now: 1010, want: []string{"write-state idle"}},
 				{obs: idleObs, now: 1020, want: []string{"write-state idle"}},
 			},
@@ -488,9 +489,9 @@ func TestDecideScreenLifecycle(t *testing.T) {
 					obs: idleObs, now: 1000,
 					want: []string{"write-state idle_pending 1000"},
 				},
-				{obs: idleObs, now: 1005, want: []string{
+				{obs: idleObs, now: 1005, want: []string{"write-pending " + screenName + " Stop Task complete",
+
 					"write-state idle",
-					"write-pending " + screenName + " Stop Task complete",
 				}},
 			},
 		},
@@ -526,5 +527,141 @@ func TestScreenPendingName(t *testing.T) {
 	}
 	if got, want := domain.ScreenPendingName(screenTab), "screen-"+slug+".json"; got != want {
 		t.Errorf("ScreenPendingName() = %q, want %q", got, want)
+	}
+}
+
+// TestDecideScreenWritesStateLast は状態ファイルの書き込みが必ず並びの末尾に
+// 来ることを固定する。
+//
+// 呼び出し側は最初の失敗で残りを打ち切る。状態を先に進めると「状態だけ進んで
+// pending は書けていない」状態で固定され、確定した Stop が二度と書かれない。
+// 末尾に置けば、失敗した回は状態が進まず次の観測でやり直せる(evidence §2-8)。
+func TestDecideScreenWritesStateLast(t *testing.T) {
+	t.Parallel()
+
+	screenName := domain.ScreenPendingName(screenTab)
+
+	tests := []struct {
+		name  string
+		in    domain.ScreenDecisionInput
+		count int
+	}{
+		{
+			name: "blocked(pending の書き込みを伴う)",
+			in: domain.ScreenDecisionInput{
+				Tab: screenTab, Observed: blockedObs("approval"), Now: 1000,
+			},
+			count: 2,
+		},
+		{
+			name: "working(削除と Main 帰還を伴う)",
+			in: domain.ScreenDecisionInput{
+				Tab: screenTab, Observed: workingObs, Now: 1000,
+				Prev:     domain.ScreenState{State: domain.ScreenBlocked},
+				Pendings: []domain.ScreenPendingEntry{{Name: screenName, Tab: screenTab, Event: domain.EventNotification}},
+			},
+			count: 3,
+		},
+		{
+			name: "確定した idle(Stop の書き込みを伴う)",
+			in: domain.ScreenDecisionInput{
+				Tab: screenTab, Observed: idleObs, Now: 1000,
+				Prev: domain.ScreenState{State: domain.ScreenIdlePending, At: "990"},
+			},
+			count: 2,
+		},
+		{
+			name: "Waiting(状態の書き込みだけ)",
+			in: domain.ScreenDecisionInput{
+				Tab: screenTab, Observed: blockedObs("approval"), Now: 1000,
+				Pendings: []domain.ScreenPendingEntry{{Name: "park.json", Tab: screenTab, Event: domain.EventWaiting}},
+			},
+			count: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			effects := domain.DecideScreen(tt.in)
+			if len(effects) != tt.count {
+				t.Fatalf("副作用の数 = %d, want %d(%q)", len(effects), tt.count,
+					renderScreenEffects(effects))
+			}
+			if got := effects[len(effects)-1].Kind; got != domain.ScreenEffectWriteState {
+				t.Errorf("末尾の副作用 = %q, want %q", got, domain.ScreenEffectWriteState)
+			}
+			for _, e := range effects[:len(effects)-1] {
+				if e.Kind == domain.ScreenEffectWriteState {
+					t.Errorf("状態の書き込みが末尾以外にある: %q", renderScreenEffects(effects))
+				}
+			}
+		})
+	}
+}
+
+// TestDecideScreenRetriesConfirmedStop は Stop の書き込みが失敗した回を
+// 次の観測でやり直せること、そして書けた後は二重に書かないことを固定する。
+//
+// 状態ファイルが末尾になったことで、pending の書き込みが失敗した回は状態が
+// idle_pending のまま残る。次の観測は同じ入力になるので同じ判断が出る。
+func TestDecideScreenRetriesConfirmedStop(t *testing.T) {
+	t.Parallel()
+
+	screenName := domain.ScreenPendingName(screenTab)
+	parked := domain.ScreenState{State: domain.ScreenIdlePending, At: "1000"}
+
+	// 1 回目。Stop を書こうとする。
+	first := domain.DecideScreen(domain.ScreenDecisionInput{
+		Tab: screenTab, Observed: idleObs, Prev: parked, Now: 1005,
+	})
+	want := []string{
+		"write-pending " + screenName + " Stop Task complete",
+		"write-state idle",
+	}
+	if got := renderScreenEffects(first); !reflect.DeepEqual(got, want) {
+		t.Fatalf("1 回目の副作用 = %q, want %q", got, want)
+	}
+
+	// pending の書き込みが失敗したとして、状態は進まなかったものとする
+	// (呼び出し側は最初の失敗で打ち切るので write-state は実行されない)。
+	retry := domain.DecideScreen(domain.ScreenDecisionInput{
+		Tab: screenTab, Observed: idleObs, Prev: parked, Now: 1006,
+	})
+	if got := renderScreenEffects(retry); !reflect.DeepEqual(got, want) {
+		t.Errorf("再試行の副作用 = %q, want %q", got, want)
+	}
+
+	// 書けた後は、同じ入力でも二重に書かない(タブに pending があるため)。
+	done := domain.DecideScreen(domain.ScreenDecisionInput{
+		Tab: screenTab, Observed: idleObs, Prev: parked, Now: 1007,
+		Pendings: []domain.ScreenPendingEntry{
+			{Name: screenName, Tab: screenTab, Event: domain.EventStop},
+		},
+	})
+	if got := renderScreenEffects(done); !reflect.DeepEqual(got, []string{"write-state idle"}) {
+		t.Errorf("Stop を二重に書いた: %q", renderScreenEffects(done))
+	}
+}
+
+// TestDecideScreenConfirmsIdleWhenClockGoesBackwards は保留を始めた時刻が
+// 「今」より後になっている場合に確定側へ倒すことを固定する。
+//
+// 時計が巻き戻ると差が負になり、そのまま待つと時計が追いつくまで保留が続いて
+// 完了が出てこなくなる。読めない時刻を確定側へ倒すのと同じ考え方である。
+func TestDecideScreenConfirmsIdleWhenClockGoesBackwards(t *testing.T) {
+	t.Parallel()
+
+	effects := domain.DecideScreen(domain.ScreenDecisionInput{
+		Tab: screenTab, Observed: idleObs, Now: 1000,
+		Prev: domain.ScreenState{State: domain.ScreenIdlePending, At: "2000"},
+	})
+	want := []string{
+		"write-pending " + domain.ScreenPendingName(screenTab) + " Stop Task complete",
+		"write-state idle",
+	}
+	if got := renderScreenEffects(effects); !reflect.DeepEqual(got, want) {
+		t.Errorf("副作用 = %q, want %q", got, want)
 	}
 }

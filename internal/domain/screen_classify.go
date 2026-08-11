@@ -3,6 +3,7 @@ package domain
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // スクリーン検出が観測しうる状態。
@@ -30,9 +31,18 @@ const (
 // 背の高いペインでパディングしか見えない。空行を落としてから数える。
 const ScreenTailLines = 20
 
-// screenBlankCutset は「空白のみの行」の判定に使う文字集合である。
-// POSIX の `[[:space:]]` から、行の区切りである改行を除いたもの。
-const screenBlankCutset = " \t\v\f\r"
+// isScreenBlank は空白として扱う文字かどうかを返す。
+//
+// 現行版の `grep -v '^[[:space:]]*$'` と `sed 's/^[[:space:]]*//'` に対応する。
+// **ASCII の空白だけでは足りない。** BSD の grep / sed は LC_CTYPE が UTF-8 の
+// とき `[[:space:]]` をロケールに従って判定し、全角空白(U+3000)や NBSP
+// (U+00A0)も空白として扱う。実行環境は UTF-8 なので、ASCII だけで判定すると
+// 全角空白で作られたパディング行が「中身のある行」として末尾 20 行の窓を
+// 埋め、承認プロンプトが窓の外へ押し出される。
+//
+// unicode.IsSpace が grep と同じ集合を指すことは実機で確認済み
+// (U+00A0 / U+2003 / U+3000 は空白、U+200B は非空白で一致。evidence §1-1)。
+func isScreenBlank(r rune) bool { return unicode.IsSpace(r) }
 
 // ScreenPatterns は 1 エージェントぶんのスクリーン検出パターンである
 // (設定の `.agents.<name>.patterns`)。
@@ -67,7 +77,7 @@ func ScreenTailWindow(text string, n int) []string {
 	lines := strings.Split(text, "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if strings.TrimLeft(line, screenBlankCutset) == "" {
+		if strings.TrimLeftFunc(line, isScreenBlank) == "" {
 			continue
 		}
 		kept = append(kept, line)
@@ -151,7 +161,7 @@ func firstScreenMatch(patterns []string, window []string) (string, bool) {
 			if line == "" {
 				break
 			}
-			return strings.TrimLeft(line, screenBlankCutset), true
+			return strings.TrimLeftFunc(line, isScreenBlank), true
 		}
 	}
 	return "", false
