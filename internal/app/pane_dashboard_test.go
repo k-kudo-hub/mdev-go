@@ -41,6 +41,7 @@ type dashboardFixture struct {
 	focuser  *fakePaneFocuser
 	config   *fakeConfigLoader
 	recorder *fakeRecorder
+	detector *fakeScreenTicker
 	shell    *fakeShellRunner
 }
 
@@ -57,6 +58,7 @@ func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboar
 		focuser:  &fakePaneFocuser{journal: journal},
 		config:   &fakeConfigLoader{},
 		recorder: &fakeRecorder{journal: journal},
+		detector: &fakeScreenTicker{journal: journal},
 		shell:    &fakeShellRunner{journal: journal},
 	}
 	f.pane = &app.DashboardPane{
@@ -69,6 +71,7 @@ func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboar
 		Focuser:     f.focuser,
 		Config:      f.config,
 		Recorder:    f.recorder,
+		Detector:    f.detector,
 		Shell:       f.shell,
 	}
 	return f
@@ -114,8 +117,8 @@ func TestDashboardPaneRefreshRunsScreenDetectionFirst(t *testing.T) {
 		t.Fatalf("Refresh() = %v", err)
 	}
 
-	if want := []string{"s1"}; !reflect.DeepEqual(f.shell.detectSessions, want) {
-		t.Errorf("screen_detect_tick の呼び出し = %v, want %v", f.shell.detectSessions, want)
+	if want := []string{"s1"}; !reflect.DeepEqual(f.detector.sessions, want) {
+		t.Errorf("スクリーン検出の呼び出し = %v, want %v", f.detector.sessions, want)
 	}
 	if len(f.journal.entries) == 0 || f.journal.entries[0] != "screen-detect-tick s1" {
 		t.Errorf("先頭が screen 検出ではない: %v", f.journal.entries)
@@ -154,8 +157,8 @@ func TestDashboardPaneRefreshSkipsScreenDetectionWithoutScreenAgent(t *testing.T
 			if _, err := f.pane.Refresh(dashboardEnv); err != nil {
 				t.Fatalf("Refresh() = %v", err)
 			}
-			if len(f.shell.detectSessions) != 0 {
-				t.Errorf("screen 検出を呼んでいる: %v", f.shell.detectSessions)
+			if len(f.detector.sessions) != 0 {
+				t.Errorf("screen 検出を呼んでいる: %v", f.detector.sessions)
 			}
 		})
 	}
@@ -174,8 +177,28 @@ func TestDashboardPaneRefreshRunsScreenDetectionWhenConfigIsUnreadable(t *testin
 	if _, err := f.pane.Refresh(dashboardEnv); err != nil {
 		t.Fatalf("Refresh() = %v", err)
 	}
-	if want := []string{"s1"}; !reflect.DeepEqual(f.shell.detectSessions, want) {
-		t.Errorf("screen_detect_tick の呼び出し = %v, want %v", f.shell.detectSessions, want)
+	if want := []string{"s1"}; !reflect.DeepEqual(f.detector.sessions, want) {
+		t.Errorf("スクリーン検出の呼び出し = %v, want %v", f.detector.sessions, want)
+	}
+}
+
+// TestDashboardPaneRefreshReportsScreenDetectionFailure はスクリーン検出の
+// 失敗をそのまま返すことを固定する。
+//
+// 観測を記録できないまま一覧を出すと、古い状態がいつまでも正しく見えて
+// しまう。現行 Shell 版は失敗を握り潰していたが、pending を読めなかった
+// ときと同じ扱いに揃える(意図的な差異)。
+func TestDashboardPaneRefreshReportsScreenDetectionFailure(t *testing.T) {
+	t.Parallel()
+
+	f := newDashboardFixture(nil, "ID POS NAME\n")
+	f.config.config = domain.Config{Agents: map[string]domain.AgentConfig{
+		"codex": {Detection: domain.DetectionScreen},
+	}}
+	f.detector.err = errScreenDetect
+
+	if _, err := f.pane.Refresh(dashboardEnv); !errors.Is(err, errScreenDetect) {
+		t.Errorf("Refresh() = %v, want %v を含むエラー", err, errScreenDetect)
 	}
 }
 

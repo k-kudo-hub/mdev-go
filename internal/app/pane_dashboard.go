@@ -62,6 +62,7 @@ type DashboardPane struct {
 	Focuser     Focuser
 	Config      ConfigLoader
 	Recorder    TaskRecorder
+	Detector    ScreenTicker
 	Shell       ShellRunner
 }
 
@@ -95,7 +96,9 @@ func (p *DashboardPane) Refresh(env PaneEnv) (DashboardSnapshot, error) {
 	session := env.Session()
 
 	if config, ok := p.Config.Load(); !ok || config.HasScreenDetectionAgent() {
-		p.Shell.ScreenDetectTick(session)
+		if err := p.Detector.Tick(env); err != nil {
+			return DashboardSnapshot{}, fmt.Errorf("スクリーン検出に失敗しました: %w", err)
+		}
 	}
 
 	views, err := p.Pending.List(session)

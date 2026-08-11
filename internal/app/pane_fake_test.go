@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
@@ -215,4 +216,101 @@ func (f *fakeShellRunner) RestoreSession() {
 func (f *fakeShellRunner) ScreenDetectTick(session string) {
 	f.detectSessions = append(f.detectSessions, session)
 	f.journal.add("screen-detect-tick " + session)
+}
+
+// --- スクリーン検出用の fake ---
+
+var (
+	_ app.PaneLister        = (*fakePaneLister)(nil)
+	_ app.ScreenDumper      = (*fakeScreenDumper)(nil)
+	_ app.ScreenStateStore  = (*fakeScreenStateStore)(nil)
+	_ app.PendingSaver      = (*fakePendingSaver)(nil)
+	_ app.RegistryTabLookup = (*fakeRegistryLookup)(nil)
+)
+
+type fakePaneLister struct {
+	panes []app.AgentPane
+	calls int
+}
+
+func (f *fakePaneLister) ListAgentPanes() []app.AgentPane {
+	f.calls++
+	return f.panes
+}
+
+type fakeScreenDumper struct {
+	journal *paneJournal
+	dumps   map[string]string
+	ids     []string
+}
+
+func (f *fakeScreenDumper) DumpScreen(paneID string) string {
+	f.ids = append(f.ids, paneID)
+	f.journal.add("dump-screen " + paneID)
+	return f.dumps[paneID]
+}
+
+// fakeScreenStateStore は状態ファイルの中身を "<session>/<slug>" 鍵で持つ。
+type fakeScreenStateStore struct {
+	journal *paneJournal
+	lines   map[string]string
+	err     error
+}
+
+func (f *fakeScreenStateStore) ReadScreenState(session, slug string) string {
+	return f.lines[session+"/"+slug]
+}
+
+func (f *fakeScreenStateStore) WriteScreenState(session, slug, line string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.lines[session+"/"+slug] = line
+	f.journal.add("screen-state-write " + slug + " " + line)
+	return nil
+}
+
+type fakePendingSaver struct {
+	journal  *paneJournal
+	saved    []domain.Pending
+	sessions []string
+	err      error
+}
+
+func (f *fakePendingSaver) Save(session, sessionID string, pending domain.Pending) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.saved = append(f.saved, pending)
+	f.sessions = append(f.sessions, session)
+	f.journal.add("pending-save " + sessionID)
+	return nil
+}
+
+// fakeRegistryLookup は "<session>/<tab>" 鍵でエントリを返す。
+type fakeRegistryLookup struct {
+	entries map[string]domain.RegistryEntry
+}
+
+func (f *fakeRegistryLookup) LatestByTabMtime(session, tab string) (domain.RegistryEntry, bool) {
+	entry, ok := f.entries[session+"/"+tab]
+	return entry, ok
+}
+
+// errScreenDetect はスクリーン検出が失敗した状況を表す。
+var errScreenDetect = errors.New("スクリーン検出が失敗した")
+
+var _ app.ScreenTicker = (*fakeScreenTicker)(nil)
+
+// fakeScreenTicker は Dashboard から見たスクリーン検出の呼び出しを記録する。
+type fakeScreenTicker struct {
+	journal  *paneJournal
+	sessions []string
+	err      error
+}
+
+func (f *fakeScreenTicker) Tick(env app.PaneEnv) error {
+	f.sessions = append(f.sessions, env.Session())
+	f.journal.add("screen-detect-tick " + env.Session())
+	return f.err
 }

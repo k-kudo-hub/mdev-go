@@ -26,7 +26,7 @@ codex の状態検出(`screen_detect_tick`)と復元(`restore-session.sh` / `res
 ### app / infra(検出の内製化)
 
 - [x] port 追加のテスト → 実装: `PaneLister`(list-panes -t -c -j の JSON 解析: is_plugin=false・terminal_command の `TASK_AGENT=([^ ]+)` 抽出)/ `ScreenDumper`(dump-screen -p terminal_<id>、失敗は空)/ ScreenState の Read/Write 拡張 / registry の **mtime 最新** lookup(`_screen_registry_lookup` 互換。updated_at ではない — restore との非対称は現行仕様として維持・記録)
-- [ ] `ScreenDetector` ユースケースのテスト → 実装(ペイン列挙 → detection==screen のみ → dump → classify → DecideScreen → 副作用実行。pending 借用 3 キー(dir/task_type/transcript)含む)。`DashboardPane` の Shell ラッパ呼び出しを差し替え(HasScreenDetectionAgent ゲートと fail-open は維持)
+- [x] `ScreenDetector` ユースケースのテスト → 実装(ペイン列挙 → detection==screen のみ → dump → classify → DecideScreen → 副作用実行。pending 借用 3 キー(dir/task_type/transcript)含む)。`DashboardPane` の Shell ラッパ呼び出しを差し替え(HasScreenDetectionAgent ゲートと fail-open は維持)
 
 ### app / infra(復元の内製化)
 
