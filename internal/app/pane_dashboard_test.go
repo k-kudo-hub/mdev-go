@@ -43,7 +43,7 @@ type dashboardFixture struct {
 	recorder *fakeRecorder
 	detector *fakeScreenTicker
 	restorer *fakeSessionStarter
-	shell    *fakeShellRunner
+	uploader *fakeLogUploader
 }
 
 func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboardFixture {
@@ -61,7 +61,7 @@ func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboar
 		recorder: &fakeRecorder{journal: journal},
 		detector: &fakeScreenTicker{journal: journal},
 		restorer: &fakeSessionStarter{journal: journal},
-		shell:    &fakeShellRunner{journal: journal},
+		uploader: &fakeLogUploader{journal: journal},
 	}
 	f.pane = &app.DashboardPane{
 		Pending:     f.pending,
@@ -75,7 +75,7 @@ func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboar
 		Recorder:    f.recorder,
 		Detector:    f.detector,
 		Restorer:    f.restorer,
-		Shell:       f.shell,
+		Uploader:    f.uploader,
 	}
 	return f
 }
@@ -314,7 +314,7 @@ func TestDashboardPanePrepareDeleteRecordsThenUploads(t *testing.T) {
 	t.Parallel()
 
 	f := newDashboardFixture(nil, "")
-	f.shell.uploadOutput = "https://example.com/log/1"
+	f.uploader.output = "https://example.com/log/1"
 
 	prep, err := f.pane.PrepareDelete(dashboardEnv, "alpha")
 	if err != nil {
@@ -340,7 +340,7 @@ func TestDashboardPanePrepareDeleteCancelsOnUploadFailure(t *testing.T) {
 	// これが削除フローのいちばん重要な契約である。upload-log.sh が非 0 で
 	// 終わったら、作業ログを失わないために何一つ消してはならない。
 	f := newDashboardFixture(nil, "ID POS NAME\n1 x alpha\n")
-	f.shell.uploadErr = errUploadFailed
+	f.uploader.err = errUploadFailed
 
 	prep, err := f.pane.PrepareDelete(dashboardEnv, "alpha")
 	if err != nil {

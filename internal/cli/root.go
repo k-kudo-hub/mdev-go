@@ -40,6 +40,10 @@ type Deps struct {
 	HookSettings HookSettingsService
 	// Panes はダッシュボード系ペインを動かすユースケース。
 	Panes PaneService
+	// Update は conductor を最新のリリースへ入れ直すユースケース。
+	Update UpdateService
+	// UpdateCheck は起動時の更新確認のユースケース。
+	UpdateCheck UpdateCheckService
 	// Getenv は環境変数を読む。テストで差し替える。
 	Getenv func(string) string
 }
@@ -58,6 +62,8 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newRecordCommand(deps))
 	cmd.AddCommand(newHooksCommand(deps))
 	cmd.AddCommand(newPaneCommand(deps))
+	cmd.AddCommand(newUpdateCommand(deps))
+	cmd.AddCommand(newCheckUpdateCommand(deps))
 	return cmd
 }
 

@@ -23,7 +23,7 @@ type TaskDeleter struct {
 	Tabs        TabLister
 	Closer      TabCloser
 	Recorder    TaskRecorder
-	Shell       ShellRunner
+	Uploader    LogUploadRunner
 
 	// CloseActiveOnMissingID はタブの id を引けなかったときに
 	// `close-tab`(今のタブを閉じる)へ落ちるかどうかである。
@@ -50,7 +50,7 @@ func (d *TaskDeleter) Prepare(env PaneEnv, tab string) (DeletePreparation, error
 		return DeletePreparation{}, fmt.Errorf("作業サマリの記録に失敗しました: %w", err)
 	}
 
-	output, err := d.Shell.UploadLog(tab)
+	output, err := d.Uploader.UploadLog(env, tab)
 	if err != nil {
 		return DeletePreparation{Cancelled: true}, nil
 	}

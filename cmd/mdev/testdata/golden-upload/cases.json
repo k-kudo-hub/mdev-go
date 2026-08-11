@@ -1,0 +1,59 @@
+[
+  {
+    "name": "filter-anthropic-key",
+    "description": "anthropic の API キーを伏せる",
+    "kind": "filter_secrets",
+    "input": "auth key=sk-ant-api03-abcDEF123456789ghijklmnop_qrstuvwxyz\n"
+  },
+  {
+    "name": "filter-token-mix",
+    "description": "1 行に並ぶ複数のトークンをすべて伏せる",
+    "kind": "filter_secrets",
+    "input": "a ghp_abcdefghijklmnopqrstuvwxyz0123456789 b AKIAIOSFODNN7EXAMPLE c\nslack xoxb-EXAMPLESLACKtokenplaceholder\ntoken github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz\nopenai sk-abcdefghijklmnopqrstuvwxyz0123\n"
+  },
+  {
+    "name": "filter-bearer",
+    "description": "Bearer は前置きを残して伏せる",
+    "kind": "filter_secrets",
+    "input": "Authorization: Bearer aBcDeF1234567890xyzTOKEN\nauthorization: bearer aBcDeF1234567890xyzTOKEN\n"
+  },
+  {
+    "name": "filter-pem",
+    "description": "PEM ブロックを 1 行の印に潰す(短い折り返し行も落とす)",
+    "kind": "filter_secrets",
+    "input": "before\n-----BEGIN PRIVATE KEY-----\nMIIBVAIBADANBgkqhkiG9w0BAQEFAASCAT4wggE6\nAgEAAoGBAKsecretkeymaterialxyz0123456789\nk7QmShortTailLine24charsZ=\n-----END PRIVATE KEY-----\nafter\n"
+  },
+  {
+    "name": "filter-pem-unterminated",
+    "description": "閉じない PEM は末尾まで落とす(over-mask)",
+    "kind": "filter_secrets",
+    "input": "head line\n-----BEGIN PRIVATE KEY-----\nMIIBstraykeymaterialthatmustnotleak12345\ntail secret line\n"
+  },
+  {
+    "name": "filter-plain",
+    "description": "秘密でない文章と base64 行の境界",
+    "kind": "filter_secrets",
+    "input": "just a normal log line about task completion\nMIIBVAIBADANBgkqhkiG9w0BAQEFAASCAT4wggE6AAAA\nMIIBVAIBADANBgkqhkiG9w0BAQEFAASCAT4wggE\n\nthis line is definitely longer than forty characters\n"
+  },
+  {
+    "name": "markdown-full",
+    "description": "test.sh 43 のレコード(全フィールドあり)",
+    "kind": "build_markdown",
+    "record": "{\"tab\":\"demo-task\",\"session\":\"s1\",\"completed_at\":\"2026-07-04T15:30:12+0900\",\"message\":\"RAWMESSAGEMARKER should not appear\",\"summary\":{\"model\":\"claude-opus-4-6\",\"total_turns\":3,\"total_tool_calls\":5,\"total_cost_usd\":0.42,\"tools_used\":[\"Edit\",\"Bash\"]},\"markers\":{\"merged\":true,\"slack\":false,\"doc\":true}}",
+    "summary": "- 要約テスト行 leaked ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+  },
+  {
+    "name": "markdown-multiline-summary",
+    "description": "複数行の要約と markers がすべて偽の場合",
+    "kind": "build_markdown",
+    "record": "{\"tab\":\"my task/name\",\"session\":\"golden\",\"completed_at\":\"2020-01-01T09:00:00+0900\",\"summary\":{\"model\":\"gpt-5.6-sol\",\"total_turns\":7,\"total_tool_calls\":9,\"total_cost_usd\":1.23,\"tools_used\":[\"Bash\"]},\"markers\":{\"merged\":false,\"slack\":false,\"doc\":false}}",
+    "summary": "- 1 行目\n- 2 行目\n- 3 行目"
+  },
+  {
+    "name": "markdown-number-literals",
+    "description": "数値は入力の字面のまま出す(1.0 は 1 にならない)",
+    "kind": "build_markdown",
+    "record": "{\"tab\":\"t\",\"session\":\"s\",\"completed_at\":\"2026-12-31T23:59:59Z\",\"summary\":{\"model\":\"m\",\"total_turns\":10,\"total_tool_calls\":0,\"total_cost_usd\":1.0,\"tools_used\":[\"A\",\"B\",\"C\"]},\"markers\":{\"merged\":true,\"slack\":true,\"doc\":true}}",
+    "summary": "S"
+  }
+]

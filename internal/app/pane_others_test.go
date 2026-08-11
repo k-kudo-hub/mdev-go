@@ -3,6 +3,7 @@ package app_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -111,7 +112,7 @@ func TestNewsPaneRefresh(t *testing.T) {
 
 	news := &fakeNewsReader{data: []byte(
 		`{"items":[{"title":"A","url":"https://a","description":"d"}]}`)}
-	pane := &app.NewsPane{News: news, Shell: &fakeShellRunner{}, Opener: &fakeURLOpener{}, Clock: paneToday}
+	pane := &app.NewsPane{News: news, Fetcher: &fakeNewsFetcher{}, Opener: &fakeURLOpener{}, Clock: paneToday}
 
 	snapshot := pane.Refresh()
 
@@ -132,13 +133,18 @@ func TestNewsPaneRefresh(t *testing.T) {
 func TestNewsPaneReload(t *testing.T) {
 	t.Parallel()
 
-	shell := &fakeShellRunner{journal: &paneJournal{}}
-	pane := &app.NewsPane{News: &fakeNewsReader{}, Shell: shell, Opener: &fakeURLOpener{}, Clock: paneToday}
+	fetcher := &fakeNewsFetcher{journal: &paneJournal{}}
+	pane := &app.NewsPane{News: &fakeNewsReader{}, Fetcher: fetcher, Opener: &fakeURLOpener{}, Clock: paneToday}
 
 	pane.Reload()
 
-	if shell.fetchNewsCalls != 1 {
-		t.Errorf("fetch-news の呼び出し = %d, want 1", shell.fetchNewsCalls)
+	if fetcher.fetchNewsCalls != 1 {
+		t.Errorf("fetch-news の呼び出し = %d, want 1", fetcher.fetchNewsCalls)
+	}
+	// 取り直す先は「今日」で、表示に使う日付と同じでなければならない。
+	// ずれると取得したのに画面が変わらない。
+	if want := []string{"2026-08-09"}; !slices.Equal(fetcher.dates, want) {
+		t.Errorf("渡された日付 = %v, want %v", fetcher.dates, want)
 	}
 }
 
@@ -184,7 +190,7 @@ func TestNewsPaneOpen(t *testing.T) {
 
 			opener := &fakeURLOpener{}
 			pane := &app.NewsPane{
-				News: &fakeNewsReader{data: []byte(tt.data)}, Shell: &fakeShellRunner{},
+				News: &fakeNewsReader{data: []byte(tt.data)}, Fetcher: &fakeNewsFetcher{},
 				Opener: opener, Clock: paneToday,
 			}
 			pane.Open(pane.Refresh(), tt.number)

@@ -64,7 +64,7 @@ type DashboardPane struct {
 	Recorder    TaskRecorder
 	Detector    ScreenTicker
 	Restorer    SessionStarter
-	Shell       ShellRunner
+	Uploader    LogUploadRunner
 }
 
 // Startup は最初の描画の前に一度だけ行う処理である。
@@ -191,6 +191,6 @@ func (p *DashboardPane) deleter() *TaskDeleter {
 		Tabs:        p.Tabs,
 		Closer:      p.Closer,
 		Recorder:    p.Recorder,
-		Shell:       p.Shell,
+		Uploader:    p.Uploader,
 	}
 }

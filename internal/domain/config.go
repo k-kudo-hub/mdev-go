@@ -21,6 +21,10 @@ type Config struct {
 	SkipTaskNameInput bool
 	// TaskTypes は選択肢に並ぶタスク種別を**記述順**で保持する。
 	TaskTypes []TaskType
+	// Upload は作業ログのアップロード設定(`.upload`)である。
+	Upload UploadConfig
+	// UpdateCheck は起動時の更新確認の設定(`.update_check`)である。
+	UpdateCheck UpdateCheckConfig
 
 	// searchDepth は設定に書かれていた探索の深さ。0 は未設定を表し、
 	// 参照は SearchDepth() を通す(既定 1 の適用があるため)。
@@ -48,6 +52,8 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	*c = Config{Pricing: base.Pricing}
 	c.unmarshalTaskKeys(data)
+	c.unmarshalUploadKeys(data)
+	c.unmarshalUpdateCheckKeys(data)
 	return nil
 }
 

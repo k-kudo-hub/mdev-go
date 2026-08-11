@@ -21,7 +21,8 @@ var (
 	_ app.NewsReader         = (*fakeNewsReader)(nil)
 	_ app.ConfigLoader       = (*fakeConfigLoader)(nil)
 	_ app.URLOpener          = (*fakeURLOpener)(nil)
-	_ app.ShellRunner        = (*fakeShellRunner)(nil)
+	_ app.NewsFetcher        = (*fakeNewsFetcher)(nil)
+	_ app.LogUploadRunner    = (*fakeLogUploader)(nil)
 	_ app.Focuser            = (*fakePaneFocuser)(nil)
 )
 
@@ -179,26 +180,40 @@ func (f *fakePaneFocuser) FocusTab(name string) error {
 	return nil
 }
 
-type fakeShellRunner struct {
+type fakeNewsFetcher struct {
 	journal *paneJournal
 
-	// uploadOutput / uploadErr は UploadLog の戻り値。
-	uploadOutput string
-	uploadErr    error
-
-	uploadedTabs   []string
 	fetchNewsCalls int
+	// dates は FetchNews に渡された日付。
+	dates []string
 }
 
-func (f *fakeShellRunner) UploadLog(tab string) (string, error) {
+func (f *fakeNewsFetcher) FetchNews(date string) {
+	f.fetchNewsCalls++
+	f.dates = append(f.dates, date)
+	if f.journal != nil {
+		f.journal.add("fetch-news")
+	}
+}
+
+// fakeLogUploader は作業ログのアップロードの代役である。
+//
+// 削除フローが見ているのは戻り値の 3 通り(飛ばした・アップロードした・
+// 失敗した)だけなので、それを直接指定できるようにしている。
+type fakeLogUploader struct {
+	journal *paneJournal
+
+	// output / err は UploadLog の戻り値。
+	output string
+	err    error
+
+	uploadedTabs []string
+}
+
+func (f *fakeLogUploader) UploadLog(_ app.PaneEnv, tab string) (string, error) {
 	f.uploadedTabs = append(f.uploadedTabs, tab)
 	f.journal.add("upload-log " + tab)
-	return f.uploadOutput, f.uploadErr
-}
-
-func (f *fakeShellRunner) FetchNews() {
-	f.fetchNewsCalls++
-	f.journal.add("fetch-news")
+	return f.output, f.err
 }
 
 // --- スクリーン検出用の fake ---

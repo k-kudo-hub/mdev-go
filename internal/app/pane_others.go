@@ -93,10 +93,10 @@ type NewsSnapshot struct {
 
 // NewsPane は News ペインのユースケースである(現行 news-loop.sh 相当)。
 type NewsPane struct {
-	News   NewsReader
-	Shell  ShellRunner
-	Opener URLOpener
-	Clock  Clock
+	News    NewsReader
+	Fetcher NewsFetcher
+	Opener  URLOpener
+	Clock   Clock
 }
 
 // Refresh は当日のニュースを読んで画面を組み立てる。
@@ -111,10 +111,10 @@ func (p *NewsPane) Refresh() NewsSnapshot {
 	}
 }
 
-// Reload は当日のニュースを取り直す(fetch-news.sh --force)。
+// Reload は当日のニュースを取り直す。
 // 同期で走らせ、終わってから次の描画で新しい内容が出る。
 func (p *NewsPane) Reload() {
-	p.Shell.FetchNews()
+	p.Fetcher.FetchNews(p.Clock.Now().Format(domain.DailyFileDateLayout))
 }
 
 // Open は snapshot の number 番目(1 始まり)の URL をブラウザで開く。
