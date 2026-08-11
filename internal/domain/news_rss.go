@@ -32,10 +32,15 @@ var htmlTagPattern = regexp.MustCompile(`<[^>]*>`)
 //
 //   - "<item>" で区切り、2 つ目以降の断片を 1 項目として読む
 //   - 各断片の最初の <title> / <link> / <description> の中身を取る
-//   - CDATA の囲みを外し、HTML タグを落とし、改行を空白にする
-//   - タイトルか URL が空の項目は捨てる
+//   - タイトルと説明は CDATA の囲みを外す(URL は外さない)
+//   - **この時点で**タイトルか URL が空なら項目ごと捨てる
+//   - 残った項目のタイトルと説明から HTML タグを落とし、改行を空白にする
 //   - 説明は NewsDescriptionLimit 文字までにして "..." を付ける
 //   - 先頭 NewsItemLimit 件で打ち切る
+//
+// 空判定と整形の順番、および URL に何もしないことは現行版のままである
+// (実測で確認済み)。順番を入れ替えると、タグだけのタイトル(整形すると
+// 空になる)を持つ項目が現行版では出るのにこちらでは消える、という差が出る。
 func ParseRSSItems(data []byte) []NewsItem {
 	chunks := strings.Split(string(data), newsItemSeparator)
 	items := make([]NewsItem, 0, NewsItemLimit)
@@ -43,15 +48,17 @@ func ParseRSSItems(data []byte) []NewsItem {
 		if len(items) >= NewsItemLimit {
 			break
 		}
-		title := cleanNewsText(extractTag(chunk, "title"))
-		link := cleanNewsText(extractTag(chunk, "link"))
+		title := stripCDATA(extractTag(chunk, "title"))
+		// URL は CDATA の囲みも HTML タグも外さず、改行も潰さない。
+		// 現行版が title / description にしか手を入れていないためである。
+		link := extractTag(chunk, "link")
 		if title == "" || link == "" {
 			continue
 		}
 		items = append(items, NewsItem{
-			Title:       title,
+			Title:       cleanNewsText(title),
 			URL:         link,
-			Description: truncateRunes(cleanNewsText(extractTag(chunk, "description"))),
+			Description: truncateRunes(cleanNewsText(stripCDATA(extractTag(chunk, "description")))),
 		})
 	}
 	return items
@@ -74,10 +81,20 @@ func extractTag(chunk, name string) string {
 	return rest[:end]
 }
 
-// cleanNewsText は CDATA の囲みと HTML タグを外し、改行を空白に潰す。
-func cleanNewsText(s string) string {
+// stripCDATA は CDATA の囲みだけを外す。
+//
+// 空判定より前に行う整形はこれだけである。囲みを外して空になるもの
+// (<![CDATA[]]> だけのタイトル)は項目ごと捨てられる。
+func stripCDATA(s string) string {
 	s = strings.ReplaceAll(s, "<![CDATA[", "")
-	s = strings.ReplaceAll(s, "]]>", "")
+	return strings.ReplaceAll(s, "]]>", "")
+}
+
+// cleanNewsText は HTML タグを落とし、改行を空白に潰す。
+//
+// 空判定の **後** に行う。引用符を含むタグ(<a href="...">)をそのまま
+// 出すと表示が崩れるので落とすが、それで空になっても項目は残す。
+func cleanNewsText(s string) string {
 	s = htmlTagPattern.ReplaceAllString(s, "")
 	s = strings.ReplaceAll(s, "\r", "")
 	return strings.ReplaceAll(s, "\n", " ")

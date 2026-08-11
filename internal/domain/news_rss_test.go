@@ -96,6 +96,31 @@ func TestParseRSSItemsEdgeCases(t *testing.T) {
 			want: []domain.NewsItem{},
 		},
 		{
+			// 空判定は HTML タグを落とす **前** に行う。現行版はこの項目を
+			// タイトル空のまま出力する(実測で確認済み)。
+			name: "タグだけのタイトルは空になっても項目として残る",
+			rss:  "<channel>" + item("<b></b>", "https://e/1", "d") + "</channel>",
+			want: []domain.NewsItem{{Title: "", URL: "https://e/1", Description: "d"}},
+		},
+		{
+			// CDATA の囲みは空判定より前に外すので、これは空になって捨てられる。
+			name: "CDATA が空のタイトルは項目ごと捨てる",
+			rss:  "<channel>" + item("<![CDATA[]]>", "https://e/1", "d") + "</channel>",
+			want: []domain.NewsItem{},
+		},
+		{
+			// URL には手を入れない。現行版が title / description にしか
+			// 整形をかけていないためである。
+			name: "URL の CDATA の囲みは外さない",
+			rss:  "<channel>" + item("t", "<![CDATA[https://e/2]]>", "d") + "</channel>",
+			want: []domain.NewsItem{{Title: "t", URL: "<![CDATA[https://e/2]]>", Description: "d"}},
+		},
+		{
+			name: "URL の改行は潰さない",
+			rss:  "<channel>" + item("t", "\nhttps://e/3\n", "d") + "</channel>",
+			want: []domain.NewsItem{{Title: "t", URL: "\nhttps://e/3\n", Description: "d"}},
+		},
+		{
 			name: "説明が無くても項目は残る",
 			rss:  "<channel><item><title>t</title><link>https://e/1</link></item></channel>",
 			want: []domain.NewsItem{{Title: "t", URL: "https://e/1"}},
