@@ -32,7 +32,7 @@ type tickDashboard struct {
 
 var _ DashboardService = (*tickDashboard)(nil)
 
-func (s *tickDashboard) Startup() { s.calls = append(s.calls, "startup") }
+func (s *tickDashboard) Startup(app.PaneEnv) { s.calls = append(s.calls, "startup") }
 
 func (s *tickDashboard) Refresh(app.PaneEnv) (app.DashboardSnapshot, error) {
 	s.refreshes++

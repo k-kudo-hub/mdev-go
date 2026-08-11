@@ -3,6 +3,7 @@ package app_test
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -313,4 +314,87 @@ func (f *fakeScreenTicker) Tick(env app.PaneEnv) error {
 	f.sessions = append(f.sessions, env.Session())
 	f.journal.add("screen-detect-tick " + env.Session())
 	return f.err
+}
+
+// --- 復元用の fake ---
+
+var (
+	_ app.RegistryLister = (*fakeRegistryReader)(nil)
+	_ app.TabNameQuerier = (*fakeTabNames)(nil)
+	_ app.PathChecker    = (*fakePathChecker)(nil)
+	_ app.TaskMaker      = (*fakeTaskMaker)(nil)
+)
+
+// errCreateFailed はタブそのものが作られなかった状況を表す
+// (現行 create_task が new-tab の rc をそのまま返す枝)。
+var errCreateFailed = errors.New("タブを作れなかった")
+
+// errRegistryRead はレジストリを読めなかった状況を表す。
+var errRegistryRead = errors.New("レジストリを読めない")
+
+// fakeRegistryReader はレジストリの読み取りと削除を記録する。
+type fakeRegistryReader struct {
+	journal *paneJournal
+	entries map[string][]domain.RegistryEntry
+	removed []string
+	err     error
+}
+
+func (f *fakeRegistryReader) List(session string) ([]domain.RegistryEntry, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.entries[session], nil
+}
+
+func (f *fakeRegistryReader) RemoveByTab(session, tab string) error {
+	f.removed = append(f.removed, session+"/"+tab)
+	return nil
+}
+
+// fakeTabNames は既存タブ名の問い合わせを記録する。
+type fakeTabNames struct {
+	names []string
+	calls int
+}
+
+func (f *fakeTabNames) QueryTabNames(time.Duration) []string {
+	f.calls++
+	return f.names
+}
+
+// fakePathChecker は dir と transcript の実在を差し替える。
+type fakePathChecker struct {
+	dirs  map[string]bool
+	files map[string]bool
+}
+
+func (f *fakePathChecker) IsDir(path string) bool  { return f.dirs[path] }
+func (f *fakePathChecker) IsFile(path string) bool { return f.files[path] }
+
+// fakeTaskMaker は TaskCreator の代わりに呼び出しだけを記録する。
+type fakeTaskMaker struct {
+	journal *paneJournal
+	specs   []app.TaskSpec
+	result  app.TaskCreateResult
+	err     error
+}
+
+func (f *fakeTaskMaker) Execute(_ app.PaneEnv, spec app.TaskSpec) (app.TaskCreateResult, error) {
+	f.specs = append(f.specs, spec)
+	f.journal.add("create-task " + spec.Name)
+	return f.result, f.err
+}
+
+var _ app.SessionStarter = (*fakeSessionStarter)(nil)
+
+// fakeSessionStarter は Dashboard から見たセッション復元の呼び出しを記録する。
+type fakeSessionStarter struct {
+	journal  *paneJournal
+	sessions []string
+}
+
+func (f *fakeSessionStarter) Restore(env app.PaneEnv) {
+	f.sessions = append(f.sessions, env.Session())
+	f.journal.add("restore-session " + env.Session())
 }

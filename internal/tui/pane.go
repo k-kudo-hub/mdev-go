@@ -194,7 +194,7 @@ type Once interface {
 type (
 	// DashboardService は Dashboard ペインのユースケース。
 	DashboardService interface {
-		Startup()
+		Startup(app.PaneEnv)
 		Refresh(app.PaneEnv) (app.DashboardSnapshot, error)
 		Jump(app.PaneEnv, app.DashboardSnapshot, int) error
 		PrepareDelete(app.PaneEnv, string) (app.DeletePreparation, error)

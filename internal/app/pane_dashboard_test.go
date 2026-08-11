@@ -42,6 +42,7 @@ type dashboardFixture struct {
 	config   *fakeConfigLoader
 	recorder *fakeRecorder
 	detector *fakeScreenTicker
+	restorer *fakeSessionStarter
 	shell    *fakeShellRunner
 }
 
@@ -59,6 +60,7 @@ func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboar
 		config:   &fakeConfigLoader{},
 		recorder: &fakeRecorder{journal: journal},
 		detector: &fakeScreenTicker{journal: journal},
+		restorer: &fakeSessionStarter{journal: journal},
 		shell:    &fakeShellRunner{journal: journal},
 	}
 	f.pane = &app.DashboardPane{
@@ -72,6 +74,7 @@ func newDashboardFixture(views []domain.PendingView, tabOutput string) *dashboar
 		Config:      f.config,
 		Recorder:    f.recorder,
 		Detector:    f.detector,
+		Restorer:    f.restorer,
 		Shell:       f.shell,
 	}
 	return f
@@ -219,12 +222,12 @@ func TestDashboardPaneRefreshUsesUnknownSessionWhenOutsideZellij(t *testing.T) {
 func TestDashboardPaneStartupRestoresSession(t *testing.T) {
 	t.Parallel()
 
-	// 起動時に restore-session.sh を呼ぶ(issue #36)。ONCE 経路でも走る。
+	// 起動時に登録済みタスクのタブを作り直す(issue #36)。ONCE 経路でも走る。
 	f := newDashboardFixture(nil, "")
-	f.pane.Startup()
+	f.pane.Startup(dashboardEnv)
 
-	if f.shell.restoreCalls != 1 {
-		t.Errorf("restore-session の呼び出し = %d, want 1", f.shell.restoreCalls)
+	if want := []string{"s1"}; !reflect.DeepEqual(f.restorer.sessions, want) {
+		t.Errorf("セッション復元の呼び出し = %v, want %v", f.restorer.sessions, want)
 	}
 }
 

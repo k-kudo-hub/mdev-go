@@ -85,7 +85,7 @@ func (m DashboardModel) Init() tea.Cmd {
 // チェーンの起点なのでポーリング起源として返す。
 func (m DashboardModel) startupCmd() tea.Cmd {
 	return func() tea.Msg {
-		m.pane.Startup()
+		m.pane.Startup(m.env)
 		snapshot, err := m.pane.Refresh(m.env)
 		return dashboardRefreshedMsg{snapshot: snapshot, err: err, poll: true}
 	}
@@ -95,7 +95,7 @@ func (m DashboardModel) startupCmd() tea.Cmd {
 //
 // 起動時の復元とスクリーン検出は現行の ONCE 経路と同じく走らせる。
 func (m DashboardModel) Once() (string, error) {
-	m.pane.Startup()
+	m.pane.Startup(m.env)
 	snapshot, err := m.pane.Refresh(m.env)
 	if err != nil {
 		return "", err

@@ -42,7 +42,7 @@ type stubDashboard struct {
 
 var _ tui.DashboardService = (*stubDashboard)(nil)
 
-func (s *stubDashboard) Startup() { s.calls = append(s.calls, "startup") }
+func (s *stubDashboard) Startup(app.PaneEnv) { s.calls = append(s.calls, "startup") }
 
 func (s *stubDashboard) Refresh(app.PaneEnv) (app.DashboardSnapshot, error) {
 	s.calls = append(s.calls, "refresh")

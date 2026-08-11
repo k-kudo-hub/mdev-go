@@ -73,8 +73,8 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 
 	// ダッシュボード系 4 ペイン。pending はホーム直下、daily とニュースは
 	// CONDUCTOR_HOME 配下という置き場所の違いを PaneStore がそのまま持つ。
-	// upload-log / restore-task / fetch-news / restore-session は
-	// まだ Shell のままで、shell.Runner が env を引き継いで同期で呼ぶ。
+	// upload-log / restore-task / fetch-news はまだ Shell のままで、
+	// shell.Runner が env を引き継いで同期で呼ぶ。
 	paneStore := store.NewPaneStore(store.PendingRoot(home), conductorHome)
 	tabs := zellij.NewTabController()
 	runner := shell.NewRunner(conductorHome)
@@ -110,6 +110,18 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Launcher:    binary,
 	}
 
+	// セッション復元(起動時にレジストリからタスクタブを作り直す)。
+	// 最善努力なので、作り直せなかったタスクの説明は stderr に出すだけで
+	// ダッシュボードの起動は止めない。
+	restorer := &app.SessionRestorer{
+		Registry: registry,
+		Tabs:     tabs,
+		Creator:  creator,
+		Paths:    paneStore,
+		Focuser:  zellij.NewFocuser(),
+		Warn:     os.Stderr,
+	}
+
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
 			Pending:     paneStore,
@@ -122,6 +134,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Config:      paneStore,
 			Recorder:    record,
 			Detector:    detector,
+			Restorer:    restorer,
 			Shell:       runner,
 		},
 		Waiting: &app.WaitingPane{Pending: paneStore},

@@ -156,6 +156,48 @@ type PendingSaver interface {
 	Save(session, sessionID string, pending domain.Pending) error
 }
 
+// RegistryLister はセッションのレジストリエントリを読む。
+//
+// 復元は「登録済みのタスクを全部見る」ので、1 件引きの
+// RegistryTabLookup とは別の操作になる。
+type RegistryLister interface {
+	// List は session のエントリをファイル名の昇順で返す。
+	// 壊れているエントリは読み飛ばす(1 件の破損で復元全体を止めない)。
+	List(session string) ([]domain.RegistryEntry, error)
+	// RemoveByTab はタブ名が一致するエントリをすべて削除する。
+	RemoveByTab(session, tab string) error
+}
+
+// TabNameQuerier は今あるタブの名前を返す。
+//
+// TabActor も同じシグネチャを持つ(タスク作成が登録待ちのポーリングに使う)。
+// 復元は「既に在るタブを飛ばす」ためだけに要るので、必要な操作 1 つに絞った
+// port を別に置いている(ADR-0002)。
+type TabNameQuerier interface {
+	// QueryTabNames は今あるタブの名前を返す。失敗時は空を返す。
+	QueryTabNames(timeout time.Duration) []string
+}
+
+// PathChecker はパスの実在を確かめる。
+//
+// 復元は「作業ディレクトリがまだあるか」と「transcript がまだあるか」を見て、
+// 作り直せるか・会話を再開できるかを決める。
+type PathChecker interface {
+	// IsDir は path が実在するディレクトリかを返す。
+	IsDir(path string) bool
+	// IsFile は path が実在する通常ファイルかを返す。
+	IsFile(path string) bool
+}
+
+// TaskMaker はタスクタブを作る。実体は TaskCreator である。
+//
+// 復元の 2 経路(起動時のセッション復元と Done からの復元)はどちらも
+// タスク作成をそのまま再利用する。作成の失敗の種類(ErrTabNotRegistered /
+// ErrFocusNotConfirmed)で数え方が変わるため、error はそのまま渡ってくる。
+type TaskMaker interface {
+	Execute(env PaneEnv, spec TaskSpec) (TaskCreateResult, error)
+}
+
 // DailyReader は当日の daily log を全セッション横断で読む。
 type DailyReader interface {
 	// ReadToday は date(YYYY-MM-DD)の daily ファイルを全セッションぶん探し、
