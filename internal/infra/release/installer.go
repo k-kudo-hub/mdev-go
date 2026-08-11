@@ -23,11 +23,15 @@ import (
 // (現行 update.sh の `curl --max-time 60`)。
 const downloadTimeout = 60 * time.Second
 
-// maxDownloadBytes は受け取る tarball の上限である。
+// maxDownloadBytes は受け取る tarball と展開する 1 ファイルの上限である。
 //
 // 現行版には無い防御だが、展開先はディスクなので、応答が壊れて延々と
 // 流れてきたときにディスクを埋めないための歯止めを置く。conductor の
 // ソース tarball は数百 KB で、100 MB は十分に余裕がある。
+//
+// 上限に達したら **必ず error にする**。黙って切り詰めると、壊れた tarball や
+// 途中までのファイルで install.sh を走らせてしまい、更新に失敗したことに
+// 気づけないまま conductor が半端な状態になる。
 const maxDownloadBytes = 100 << 20
 
 // installScriptName は tarball の中から探すインストーラ。
@@ -53,6 +57,8 @@ const dirPerm = 0o755
 // Installer はリリース tarball を取得して install.sh を実行する。
 type Installer struct {
 	client *http.Client
+	// maxBytes は受け取る / 展開する 1 ファイルの上限。テストで小さくする。
+	maxBytes int64
 	// run は install.sh を実行する。テストで差し替える。
 	run func(env []string, script string) error
 }
@@ -68,8 +74,9 @@ func NewInstaller() *Installer {
 	transport := &http.Transport{}
 	transport.RegisterProtocol("file", http.NewFileTransport(http.Dir("/")))
 	return &Installer{
-		client: &http.Client{Timeout: downloadTimeout, Transport: transport},
-		run:    runInstallScript,
+		client:   &http.Client{Timeout: downloadTimeout, Transport: transport},
+		maxBytes: maxDownloadBytes,
+		run:      runInstallScript,
 	}
 }
 
@@ -85,7 +92,7 @@ func (i *Installer) Install(tarballURL, version, repoURL string) error {
 	if err := i.download(tarballURL, archive); err != nil {
 		return fmt.Errorf("ダウンロードに失敗しました: %s: %w", tarballURL, err)
 	}
-	if err := extractTarGz(archive, work); err != nil {
+	if err := extractTarGz(archive, work, i.maxBytes); err != nil {
 		return fmt.Errorf("展開に失敗しました: %w", err)
 	}
 
@@ -117,8 +124,15 @@ func (i *Installer) download(url, dest string) error {
 		return err
 	}
 	defer func() { _ = file.Close() }()
-	if _, err := io.Copy(file, io.LimitReader(resp.Body, maxDownloadBytes)); err != nil {
+	// 上限より 1 バイト多く読み、超えたかどうかを書き込み量で判定する。
+	// ちょうど上限で切ると、切り詰めた内容を正常な tarball として
+	// 展開しにかかってしまう。
+	written, err := io.Copy(file, io.LimitReader(resp.Body, i.maxBytes+1))
+	if err != nil {
 		return err
+	}
+	if written > i.maxBytes {
+		return fmt.Errorf("受け取った内容が上限 %d バイトを超えました", i.maxBytes)
 	}
 	return file.Close()
 }
@@ -128,7 +142,7 @@ func (i *Installer) download(url, dest string) error {
 // 展開先の外を指す名前(絶対パス・.. を含むもの)は無視する。リリース
 // tarball は自分のリポジトリのものだが、取得経路が壊れたときに
 // ホームディレクトリを書き換えられる形にはしない。
-func extractTarGz(archive, dest string) error {
+func extractTarGz(archive, dest string, maxBytes int64) error {
 	file, err := os.Open(archive) //nolint:gosec // 自分で作った一時ディレクトリ配下
 	if err != nil {
 		return err
@@ -154,7 +168,7 @@ func extractTarGz(archive, dest string) error {
 		if !ok {
 			continue
 		}
-		if err := extractEntry(reader, header, target); err != nil {
+		if err := extractEntry(reader, header, target, maxBytes); err != nil {
 			return err
 		}
 	}
@@ -162,7 +176,7 @@ func extractTarGz(archive, dest string) error {
 
 // extractEntry は 1 エントリを書き出す。ディレクトリと通常ファイルだけを扱い、
 // シンボリックリンクなどは無視する(リリース tarball には含まれない)。
-func extractEntry(reader io.Reader, header *tar.Header, target string) error {
+func extractEntry(reader io.Reader, header *tar.Header, target string, maxBytes int64) error {
 	switch header.Typeflag {
 	case tar.TypeDir:
 		return os.MkdirAll(target, dirPerm)
@@ -175,8 +189,14 @@ func extractEntry(reader io.Reader, header *tar.Header, target string) error {
 			return err
 		}
 		defer func() { _ = file.Close() }()
-		if _, err := io.Copy(file, io.LimitReader(reader, maxDownloadBytes)); err != nil {
+		// download と同じく上限 +1 で読み、超えたら error にする。
+		// 切り詰めた中身のまま install.sh を置くと、壊れたスクリプトを実行する。
+		written, err := io.Copy(file, io.LimitReader(reader, maxBytes+1))
+		if err != nil {
 			return err
+		}
+		if written > maxBytes {
+			return fmt.Errorf("%s が上限 %d バイトを超えました", header.Name, maxBytes)
 		}
 		return file.Close()
 	default:

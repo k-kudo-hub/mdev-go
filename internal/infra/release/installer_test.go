@@ -205,3 +205,75 @@ func TestRunInstallScript(t *testing.T) {
 		t.Errorf("環境変数が渡っていません: %q (%v)", got, err)
 	}
 }
+
+// TestInstallRejectsOversizedDownload は取得量が上限を超えたときに、
+// 切り詰めた内容で先へ進まず「上限を超えた」と分かる error になることを
+// 確かめる。
+//
+// 黙って切り詰めると、途中までの tarball を正常なものとして展開しにかかり、
+// 「展開に失敗しました: unexpected EOF」という原因の分からない失敗になる。
+func TestInstallRejectsOversizedDownload(t *testing.T) {
+	archive := writeTarGz(t, t.TempDir(), releaseEntries())
+	installer, scripts, _ := newTestInstaller()
+	// tarball の実サイズより小さい上限にする。
+	installer.maxBytes = 8
+
+	err := installer.Install("file://"+archive, "v0.2.0", "u")
+	if err == nil {
+		t.Fatal("上限を超えたのに error になりませんでした")
+	}
+	if !strings.Contains(err.Error(), "ダウンロードに失敗しました") ||
+		!strings.Contains(err.Error(), "上限") {
+		t.Errorf("error = %v, want ダウンロード段階の上限超過と分かる文言", err)
+	}
+	if len(*scripts) != 0 {
+		t.Errorf("失敗しているのに install.sh を実行しました: %v", *scripts)
+	}
+}
+
+// TestInstallRejectsOversizedEntry は展開する 1 ファイルが上限を超えたときに
+// error になることを確かめる。
+//
+// 切り詰めた中身のまま install.sh を置いて実行すると、途中で切れた
+// スクリプトが走ってしまう。
+func TestInstallRejectsOversizedEntry(t *testing.T) {
+	// 圧縮すると小さくなる大きなファイルを入れる。tarball 自体は上限に
+	// 収まるので、download は通り抜けて展開段階で引っかかる。
+	archive := writeTarGz(t, t.TempDir(), []tarEntry{
+		{name: "conductor-0.2.0/", dir: true},
+		{name: "conductor-0.2.0/install.sh", body: strings.Repeat("a", 5000)},
+	})
+	installer, scripts, _ := newTestInstaller()
+	installer.maxBytes = 2000
+
+	err := installer.Install("file://"+archive, "v0.2.0", "u")
+	if err == nil {
+		t.Fatal("上限を超えたのに error になりませんでした")
+	}
+	if !strings.Contains(err.Error(), "上限") {
+		t.Errorf("error = %v, want 上限超過と分かる文言", err)
+	}
+	if len(*scripts) != 0 {
+		t.Errorf("失敗しているのに install.sh を実行しました: %v", *scripts)
+	}
+}
+
+// TestInstallAcceptsSizeAtLimit はちょうど上限のときは通ることを確かめる
+// (上限 +1 で読む実装が、境界で誤検知しないこと)。
+func TestInstallAcceptsSizeAtLimit(t *testing.T) {
+	dir := t.TempDir()
+	archive := writeTarGz(t, dir, releaseEntries())
+	info, err := os.Stat(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer, scripts, _ := newTestInstaller()
+	installer.maxBytes = info.Size()
+
+	if err := installer.Install("file://"+archive, "v0.2.0", "u"); err != nil {
+		t.Fatalf("ちょうど上限なのに失敗しました: %v", err)
+	}
+	if len(*scripts) != 1 {
+		t.Errorf("install.sh の実行 = %d 回, want 1", len(*scripts))
+	}
+}
