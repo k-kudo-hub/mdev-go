@@ -85,6 +85,7 @@ func newHooksRestoreCommand(deps Deps) *cobra.Command {
 			}
 			result, err := deps.HookSettings.Restore(dryRun)
 			if err != nil {
+				printRestoreFailure(cmd.ErrOrStderr(), result)
 				return err
 			}
 			printRestoreResult(cmd.OutOrStdout(), result)
@@ -107,16 +108,33 @@ func printSwitchResult(w io.Writer, result app.SwitchHooksResult) {
 
 	if len(result.Changes) == 0 {
 		_, _ = fmt.Fprintln(w, "hooks は既に mdev を指しています。変更はありません。")
+	} else {
+		printChanges(w, "置き換える hook コマンド", result.Changes)
+		if !result.DryRun {
+			_, _ = fmt.Fprintf(w, "バックアップ: %s\n", result.BackupPath)
+			_, _ = fmt.Fprintln(w, "hooks を mdev へ切り替えました。")
+		}
+	}
+	if printDryRunNotice(w, result.DryRun) {
 		return
 	}
-	printChanges(w, "置き換える hook コマンド", result.Changes)
+	// 印は hooks の変更の有無に依らず書き直すので、どちらの経路でも出す。
+	_, _ = fmt.Fprintf(w, "Go 版を使う印: %s\n", result.FlavorPath)
+}
 
-	if result.DryRun {
-		_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
-		return
+// printDryRunNotice は dry-run のときだけ断りを 1 行出し、出したかを返す。
+//
+// 呼び出し側はこれが true なら「実際に書いた結果」を出さずに終える。
+// 経路ごとに同じ早期 return を書くと、経路が増えたときに 2 度出たり
+// 出なかったりする(実際に settings.json 欠損 + バックアップありの
+// dry-run で 2 度出ていた)。断りを出す場所はここ 1 つに保つ。
+func printDryRunNotice(w io.Writer, dryRun bool) bool {
+	if !dryRun {
+		return false
 	}
-	_, _ = fmt.Fprintf(w, "バックアップ: %s\n", result.BackupPath)
-	_, _ = fmt.Fprintln(w, "hooks を mdev へ切り替えました。")
+	// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
+	_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
+	return true
 }
 
 // printSwitchWarnings は切り替えは成功したが利用者が対処すべき事柄を書き出す。
@@ -144,16 +162,43 @@ func printSwitchWarnings(w io.Writer, result app.SwitchHooksResult) {
 
 // printSwitchFailure は switch が失敗したときの後始末の手掛かりを書き出す。
 //
-// 退避が済んでから書き込みに失敗した場合、エラーメッセージだけでは
-// settings.json が半端な状態かどうか、どこに控えがあるのかが分からない。
-// 書き込みは原子的な置き換えなので、失敗した時点で settings.json は
-// 元のままである。
+// エラーメッセージだけでは settings.json が半端な状態かどうか、どこに控えが
+// あるのかが分からない。失敗した場所で伝えるべきことが変わる。
+//
+//   - settings.json の書き込みまでに失敗した: 書き込みは原子的な置き換えなので
+//     settings.json は元のままである
+//   - 書き込みの後(印の書き込み)で失敗した: settings.json は既に切り替わって
+//     いる。ここで「変更されていません」と伝えると嘘になり、利用者は
+//     切り替わった settings.json を元のままだと思い込む
 func printSwitchFailure(w io.Writer, result app.SwitchHooksResult) {
+	// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
+	if result.SettingsWritten {
+		_, _ = fmt.Fprintf(w, "settings.json は mdev へ切り替え済みです。バックアップ: %s\n", result.BackupPath)
+		_, _ = fmt.Fprintln(w, "  元へ戻すには `mdev hooks restore` を実行してください。")
+		return
+	}
 	if result.BackupPath == "" {
 		return
 	}
-	// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
 	_, _ = fmt.Fprintf(w, "settings.json は変更されていません。バックアップ: %s\n", result.BackupPath)
+}
+
+// printRestoreFailure は restore が失敗したときの後始末の手掛かりを書き出す。
+//
+// printSwitchFailure と対称で、印の削除だけが失敗した場合に
+// 「settings.json はもう戻っている」ことを伝える。これが無いと、利用者は
+// 復元が丸ごと失敗したと思って restore を繰り返すことになる。
+func printRestoreFailure(w io.Writer, result app.RestoreHooksResult) {
+	if !result.SettingsWritten {
+		return
+	}
+	// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
+	if result.RestoredFromBackup {
+		_, _ = fmt.Fprintf(w, "settings.json はバックアップの内容で復元済みです。バックアップ: %s\n",
+			result.BackupPath)
+		return
+	}
+	_, _ = fmt.Fprintln(w, "settings.json は conductor のスクリプトへ復元済みです。")
 }
 
 // printRestoreResult は restore の結果を人が読める形で書き出す。
@@ -161,38 +206,41 @@ func printSwitchFailure(w io.Writer, result app.SwitchHooksResult) {
 func printRestoreResult(w io.Writer, result app.RestoreHooksResult) {
 	_, _ = fmt.Fprintf(w, "settings.json: %s\n", result.SettingsPath)
 
-	if result.SettingsMissing {
-		printBackupFallback(w, result)
-		return
-	}
-
-	if len(result.Changes) == 0 {
+	switch {
+	case result.SettingsMissing:
+		// 復元できない(バックアップが無い)ときは印にも触れていないので、
+		// dry-run の断りも印の行も出さずに終える。
+		if !printBackupFallback(w, result) {
+			return
+		}
+	case len(result.Changes) == 0:
 		_, _ = fmt.Fprintln(w, "hooks は既に conductor のスクリプトを指しています。変更はありません。")
+	default:
+		printChanges(w, "元へ戻す hook コマンド", result.Changes)
+		if !result.DryRun {
+			_, _ = fmt.Fprintln(w, "hooks を conductor のスクリプトへ戻しました。")
+		}
+	}
+	if printDryRunNotice(w, result.DryRun) {
 		return
 	}
-	printChanges(w, "元へ戻す hook コマンド", result.Changes)
-
-	if result.DryRun {
-		_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
-		return
-	}
-	_, _ = fmt.Fprintln(w, "hooks を conductor のスクリプトへ戻しました。")
+	// 印は hooks の変更の有無に依らず消すので、どの経路でも出す。
+	_, _ = fmt.Fprintf(w, "Go 版を使う印を消しました: %s\n", result.FlavorPath)
 }
 
 // printBackupFallback は settings.json が無いときの復元結果を書き出す。
-func printBackupFallback(w io.Writer, result app.RestoreHooksResult) {
+// 戻り値は復元できたか(= この先の行を出してよいか)である。
+func printBackupFallback(w io.Writer, result app.RestoreHooksResult) bool {
 	if !result.RestoredFromBackup {
 		_, _ = fmt.Fprintln(w, "settings.json がありません。"+
 			"mdev が作ったバックアップも見つからないため復元できません。")
-		return
+		return false
 	}
 	_, _ = fmt.Fprintf(w, "settings.json がありません。バックアップ: %s\n", result.BackupPath)
-
-	if result.DryRun {
-		_, _ = fmt.Fprintln(w, "--dry-run のため書き込んでいません。")
-		return
+	if !result.DryRun {
+		_, _ = fmt.Fprintln(w, "バックアップの内容で settings.json を復元しました。")
 	}
-	_, _ = fmt.Fprintln(w, "バックアップの内容で settings.json を復元しました。")
+	return true
 }
 
 // printChanges は置換の一覧を before / after の形で書き出す。

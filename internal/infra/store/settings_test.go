@@ -52,6 +52,7 @@ func newSwitcher(t *testing.T, settings *store.SettingsStore) *app.HookSwitcher 
 		t.Fatalf("WriteFile() = %v", err)
 	}
 	return &app.HookSwitcher{
+		Flavor:   store.NewFlavorStore(conductorHome),
 		Settings: settings,
 		Binary:   store.NewMdevBinaryStore(conductorHome),
 	}

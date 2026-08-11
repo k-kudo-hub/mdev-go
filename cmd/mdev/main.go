@@ -72,6 +72,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			clock,
 		),
 		Binary: store.NewMdevBinaryStore(conductorHome),
+		Flavor: store.NewFlavorStore(conductorHome),
 	}
 
 	// ダッシュボード系 4 ペイン。pending はホーム直下、daily とニュースは
