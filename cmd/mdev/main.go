@@ -13,6 +13,7 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/git"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/news"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/release"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/shell"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/zellij"
@@ -196,11 +197,28 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Env: app.PaneEnv{ZellijSession: getenv("ZELLIJ_SESSION_NAME")},
 	}
 
+	// 更新まわり。状態(REPO_URL / VERSION / .update-check)は CONDUCTOR_HOME
+	// 直下にあり、リモートのタグ引きは git バイナリで行う。
+	updateState := store.NewUpdateStateStore(conductorHome)
+	remoteTags := git.NewRemoteTags()
+
 	return cli.Deps{
 		Hooks:        hooks,
 		Record:       record,
 		HookSettings: hookSettings,
 		Panes:        panes,
-		Getenv:       getenv,
+		Update: &app.Updater{
+			State:     updateState,
+			Remote:    remoteTags,
+			Installer: release.NewInstaller(),
+			Getenv:    getenv,
+		},
+		UpdateCheck: &app.UpdateChecker{
+			Config: paneStore,
+			State:  updateState,
+			Remote: remoteTags,
+			Clock:  clock,
+		},
+		Getenv: getenv,
 	}
 }
