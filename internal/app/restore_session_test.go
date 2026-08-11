@@ -101,6 +101,16 @@ func TestSessionRestorerResumeConditions(t *testing.T) {
 			name:  "transcript が消えている",
 			entry: domain.RegistryEntry{Tab: "t", Dir: "/w", ClaudeSessionID: "sid", TranscriptPath: "/w/gone.jsonl"},
 		},
+		{
+			// レジストリには合成 ID が入らないので現状は未到達だが、
+			// Done 側と同じ関数を通しておくことで、pending からレジストリへ
+			// 書き戻す経路が増えたときにバグが戻るのを塞ぐ(evidence §8-9)。
+			name: "screen 由来の合成セッション ID は再開に使わない",
+			entry: domain.RegistryEntry{Tab: "t", Dir: "/w",
+				ClaudeSessionID: domain.ScreenPendingSessionID("t"),
+				TranscriptPath:  "/w/t.jsonl"},
+			transcript: true,
+		},
 	}
 
 	for _, tt := range tests {
