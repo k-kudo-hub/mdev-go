@@ -12,6 +12,7 @@ import (
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/fsutil"
 )
 
 // newsDirName は CONDUCTOR_HOME 直下のニュース置き場。
@@ -29,15 +30,13 @@ const FeedURL = "https://techcrunch.com/category/artificial-intelligence/feed/"
 // 同期処理なので、短く切る。
 const fetchTimeout = 5 * time.Second
 
-// retentionDays は古いニュースファイルを消すまでの日数
-// (現行版の `find ... -mtime +7 -delete`)。
+// retentionDays は古いニュースファイルを残す日数(現行版の
+// `find ... -mtime +7 -delete`)。
+//
+// find の -mtime は経過時間を 86400 秒で割って **切り捨てた**日数を見るため、
+// `+7` は「その値が 7 より大きい」= 経過 8 日以上を意味する。7 日ちょうどを
+// 過ぎただけのファイルはまだ消えない。expiredBefore がこの丸めを再現する。
 const retentionDays = 7
-
-// dirPerm / filePerm は作るディレクトリとファイルのパーミッション。
-const (
-	dirPerm  = 0o755
-	filePerm = 0o644
-)
 
 // Fetcher はフィードを取得してニュースファイルへ保存する。
 type Fetcher struct {
@@ -99,40 +98,39 @@ func (f *Fetcher) fetch() ([]byte, bool) {
 
 // save はニュースファイルを書く。
 //
-// 同じディレクトリへ一時ファイルを作ってから rename する。News ペインは
-// ポーリングで読んでいるため、書きかけの内容を読ませないためである。
+// 書き込みは fsutil に任せる。News ペインはポーリングで読んでいるため
+// 書きかけの内容を読ませてはならず、その置き換え方は store と同じでよい。
+// 一時ファイル名を固定にしないのもここで効く(同時に走った 2 つの取得が
+// 同じ名前を奪い合うと、壊れた内容が残りうる)。
 func (f *Fetcher) save(date string, data []byte) error {
-	if err := os.MkdirAll(f.root, dirPerm); err != nil {
-		return err
-	}
-	path := filepath.Join(f.root, date+newsSuffix)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, filePerm); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return fsutil.WriteFile(filepath.Join(f.root, date+newsSuffix), data)
 }
 
-// removeExpired は retentionDays より古いニュースファイルを消す。
+// removeExpired は保持期間を過ぎたニュースファイルを消す。
 // 消せなかったものは黙って残す(次回また試す)。
 func (f *Fetcher) removeExpired() {
 	entries, err := os.ReadDir(f.root)
 	if err != nil {
 		return
 	}
-	deadline := f.now().AddDate(0, 0, -retentionDays)
+	deadline := expiredBefore(f.now())
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), newsSuffix) {
 			continue
 		}
 		info, err := entry.Info()
-		if err != nil || !info.ModTime().Before(deadline) {
+		if err != nil || info.ModTime().After(deadline) {
 			continue
 		}
 		_ = os.Remove(filepath.Join(f.root, entry.Name()))
 	}
+}
+
+// expiredBefore は「この時刻以前に更新されたものは消してよい」境界を返す。
+//
+// find -mtime +7 は経過時間を切り捨てた日数が 7 より大きいもの、つまり
+// **経過 8 日以上**を消す。境界を now-7 日にすると現行版より丸 1 日早く
+// 消してしまい、7 日前のニュースが読めなくなる。
+func expiredBefore(now time.Time) time.Time {
+	return now.Add(-time.Duration(retentionDays+1) * 24 * time.Hour)
 }
