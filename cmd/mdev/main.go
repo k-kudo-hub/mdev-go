@@ -231,6 +231,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Processes: processes,
 			Signaler:  processes,
 			Sleeper:   sleeper,
+			Clock:     clock,
 		},
 		UpdateCheck: &app.UpdateChecker{
 			Config: paneStore,

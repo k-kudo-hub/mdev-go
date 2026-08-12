@@ -145,23 +145,44 @@ func ExitedSessionNames(entries []SessionEntry) []string {
 	return names
 }
 
-// AttachedClientCount は `zellij action list-clients` の出力から
+// noSessionsMarker は「セッションが 1 つも無い」ときに zellij が標準エラーへ
+// 出す文言の一部である。
+//
+// 実機(zellij 0.44.1 / macOS)ではこのとき rc=1・標準出力は空になる。
+// 文言で見分けるのは、rc と空出力だけでは「本当に 0 件」と「zellij が
+// 壊れている」を区別できないためである。区別を誤ると、生きている
+// セッションのサーバを **すべてゾンビとみなして kill する** ことになる。
+const noSessionsMarker = "No active zellij sessions"
+
+// IsNoSessionsOutput は list-sessions の失敗が「0 件」を意味するかを返す。
+//
+// 0 件は掃除にとって正常な状態で、そのままプロセス側の掃除(ゾンビ・孤児)へ
+// 進んでよい。それ以外の失敗は判断材料が無いということなので、呼び出し側は
+// 何もしない。
+func IsNoSessionsOutput(stdout, stderr string) bool {
+	return strings.TrimSpace(stdout) == "" && strings.Contains(stderr, noSessionsMarker)
+}
+
+// ParseClientList は `zellij action list-clients` の出力から
 // アタッチ中のクライアント数を返す。
 //
-// 出力は見出し 1 行 + クライアント 1 行ずつである。実出力:
-//
-//	CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND
-//	1         terminal_3     /Users/kazuto/.claude-conductor/bin/mdev pane news
-//
-// 0 は「誰も開いていない(detached)」を意味する。見出しだけの出力が
-// これに当たる。
-func AttachedClientCount(out string) int {
-	count := 0
+// ok=false は「判断できなかった」を意味する。見出し行が無い出力がこれに
+// 当たる(rc=0 で完全に空の応答など)。**呼び出し側はアタッチありへ倒すこと。**
+// 誰も居ないと誤って判断すると、使用中のセッションを kill する。
+func ParseClientList(out string) (count int, ok bool) {
+	header := false
 	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, clientsHeaderPrefix) {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if strings.HasPrefix(line, clientsHeaderPrefix) {
+			header = true
 			continue
 		}
 		count++
 	}
-	return count
+	if !header {
+		return 0, false
+	}
+	return count, true
 }

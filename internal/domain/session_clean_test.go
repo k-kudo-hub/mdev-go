@@ -66,44 +66,56 @@ func TestSessionNamesByState(t *testing.T) {
 	}
 }
 
-// TestAttachedClientCount は attach の有無の判定を固定する。
+// TestParseClientList は attach の有無の判定を固定する。
 //
 // ここを取り違えると、使っているセッションを kill してしまう。
-func TestAttachedClientCount(t *testing.T) {
+func TestParseClientList(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
 		out  string
 		want int
+		ok   bool
 	}{
 		{
 			// 実機の出力(attach 1 つ)。
 			name: "クライアント 1 つ",
 			out: "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n" +
 				"1         terminal_3     /Users/kazuto/.claude-conductor/bin/mdev pane news\n",
-			want: 1,
+			want: 1, ok: true,
 		},
 		{
 			name: "クライアント 2 つ",
 			out: "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n" +
 				"1         terminal_3     a\n2         terminal_4     b\n",
-			want: 2,
+			want: 2, ok: true,
 		},
 		{
 			// 見出しだけ = 誰も開いていない。
-			name: "detached",
+			name: "見出しだけなら detached",
 			out:  "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n",
-			want: 0,
+			want: 0, ok: true,
 		},
-		{name: "空の出力", out: "", want: 0},
+		{
+			// 見出しが無い = 応答の形が想定と違う。誰も居ないとは
+			// 断定できないので判断不能にする(呼び出し側が attach 扱いへ倒す)。
+			name: "空の出力は判断不能",
+			out:  "",
+			ok:   false,
+		},
+		{name: "見出しの無いゴミ出力は判断不能", out: "なにかおかしい\n", ok: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := domain.AttachedClientCount(tt.out); got != tt.want {
-				t.Errorf("AttachedClientCount = %d, want %d", got, tt.want)
+			got, ok := domain.ParseClientList(tt.out)
+			if ok != tt.ok {
+				t.Fatalf("ParseClientList ok = %v, want %v", ok, tt.ok)
+			}
+			if ok && got != tt.want {
+				t.Errorf("ParseClientList = %d, want %d", got, tt.want)
 			}
 		})
 	}
@@ -159,6 +171,50 @@ func TestParseSessionListAge(t *testing.T) {
 			}
 			if got := entries[0].Age; got != tt.want {
 				t.Errorf("Age(%q) = %v, want %v", tt.note, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsNoSessionsOutput は「セッション 0 件」の見分け方を固定する。
+//
+// 実機(zellij 0.44.1)では rc=1・標準出力は空・標準エラーに
+// 「No active zellij sessions found.」が出る。ここを取り違えて
+// 「壊れている」を「0 件」と読むと、生きているセッションのサーバを
+// すべてゾンビとみなして kill することになる。
+func TestIsNoSessionsOutput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		stdout, stderr string
+		want           bool
+	}{
+		{
+			name:   "実機の 0 件",
+			stderr: "No active zellij sessions found.\n",
+			want:   true,
+		},
+		{
+			// 別の失敗を 0 件と読んではならない。
+			name:   "別の失敗",
+			stderr: "error: could not connect to server\n",
+			want:   false,
+		},
+		{name: "何も出ない失敗", want: false},
+		{
+			// 一覧が取れているなら 0 件ではない。
+			name:   "出力がある",
+			stdout: "s [Created 1s ago] \n",
+			stderr: "No active zellij sessions found.\n",
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := domain.IsNoSessionsOutput(tt.stdout, tt.stderr); got != tt.want {
+				t.Errorf("IsNoSessionsOutput = %v, want %v", got, tt.want)
 			}
 		})
 	}

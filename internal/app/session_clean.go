@@ -6,6 +6,13 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
+// planBudget は「誰か開いているか」の確認に使ってよい時間の合計である。
+//
+// この掃除はセッションの起動前に走る。確認は 1 回あたり最大 10 秒かかりうる
+// ので、対象が増えるとそのぶん起動が待たされる。予算を切って、超えた分は
+// 今回見送る(次回の掃除が拾う)。
+const planBudget = 10 * time.Second
+
 // zombieGrace は TERM を送ってから KILL へ進むまでの猶予である。
 //
 // zellij サーバには後始末(ソケットの削除)の機会を与えたい。一方で掃除は
@@ -74,6 +81,7 @@ type SessionCleaner struct {
 	Processes ProcessLister
 	Signaler  ProcessSignaler
 	Sleeper   Sleeper
+	Clock     Clock
 }
 
 // Clean は掃除を行い、何をした(する)かを返す。
@@ -124,44 +132,110 @@ func (c *SessionCleaner) plan() (CleanupPlan, error) {
 // 対象を mdev 管理のものに絞るのは、手で作ったセッション(`dev` など)を
 // 巻き込まないためである。それらは終了済みでない限り触れない。
 //
-// list-clients が失敗したセッションは **アタッチありとして飛ばす**。
-// 誰も居ないと誤って判断すると、使用中のセッションを終了させてしまう。
+// 作られてから CleanupMinAge に満たないセッションも外す。ペインが起動して
+// attach されるまでの間は「誰も開いていない」ように見えるためで、ここで
+// 撃つと今まさに開こうとしているセッションを落とす。
+//
+// 確認できなかったセッションは **アタッチありとして飛ばす**。誰も居ないと
+// 誤って判断すると、使用中のセッションを終了させてしまう。飛ばす条件は
+// 3 つある。list-clients が失敗した、応答の形が想定と違う、そして
+// 確認の予算を使い切った、である。
 func (c *SessionCleaner) detachedSessions(sessions []domain.SessionEntry, managed map[string]bool) []string {
+	deadline := c.Clock.Now().Add(planBudget)
+
 	var detached []string
-	for _, name := range domain.AliveSessionNames(sessions) {
-		if !managed[name] {
+	for _, session := range sessions {
+		if session.Exited || !managed[session.Name] || session.Age < domain.CleanupMinAge {
 			continue
 		}
-		out, err := c.Clients.ListClients(name)
-		if err != nil {
+		// 予算を使い切ったら、残りは次回の掃除に任せる。
+		if !c.Clock.Now().Before(deadline) {
+			break
+		}
+		if c.attached(session.Name) {
 			continue
 		}
-		if domain.AttachedClientCount(out) == 0 {
-			detached = append(detached, name)
-		}
+		detached = append(detached, session.Name)
 	}
 	return detached
 }
 
+// attached は今アタッチしているクライアントが居るかを返す。
+// **判断できない場合は真を返す**(触れない側へ倒す)。
+func (c *SessionCleaner) attached(name string) bool {
+	out, err := c.Clients.ListClients(name)
+	if err != nil {
+		return true
+	}
+	count, ok := domain.ParseClientList(out)
+	if !ok {
+		return true
+	}
+	return count > 0
+}
+
 // apply は掃除を実行する。
+//
+// **消す直前にもう一度確かめる。** 対象を選んでから実行するまでの間に、
+// 利用者がセッションを開くことはありうる(掃除はセッションの起動前に走るので、
+// まさにその瞬間が重なりやすい)。選んだ時点の判断だけで消すと、開いた
+// ばかりのセッションを落とす。
 //
 // **個別の失敗は無視して先へ進む。** 1 件消せないことより、掃除全体が
 // 途中で止まって蓄積が残るほうが害が大きい。消せなかったものは次回また
 // 対象になる。
 func (c *SessionCleaner) apply(plan CleanupPlan) {
 	for _, name := range plan.DetachedSessions {
+		// 選んでから今までの間に誰かが開いていないか、もう一度見る。
+		if c.attached(name) {
+			continue
+		}
 		// 終了させてからメタデータを消す。kill だけではセッションが
 		// EXITED として残り、次の掃除でまた拾うことになる。
+		//
+		// 消すほうは --force を付けない(zellij が動作中の削除を拒む。
+		// SessionController.DeleteSession を参照)。kill の直後でまだ
+		// 動いていると見なされた場合は削除に失敗し、EXITED として残って
+		// 次回の掃除が拾う。
 		_ = c.Remover.KillSession(name)
 		_ = c.Remover.DeleteSession(name)
 	}
-	for _, name := range plan.ExitedSessions {
+	for _, name := range c.stillExited(plan.ExitedSessions) {
 		_ = c.Remover.DeleteSession(name)
 	}
 	c.stopZombies(plan.ZombieServers)
 	for _, pid := range plan.OrphanClients {
 		_ = c.Signaler.Kill(pid)
 	}
+}
+
+// stillExited は今も終了済みであるものだけを返す。
+//
+// 終了済みのセッションは「attach すると復活する」状態でもある。選んでから
+// 実行するまでの間に利用者が復活させていたら、それは使用中のセッションで
+// あって消してはならない。
+//
+// 一覧を引き直せなかったときは 1 件も返さない(確かめられないなら消さない)。
+func (c *SessionCleaner) stillExited(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	out, err := c.Sessions.ListSessions()
+	if err != nil {
+		return nil
+	}
+	exited := map[string]bool{}
+	for _, name := range domain.ExitedSessionNames(domain.ParseSessionList(out)) {
+		exited[name] = true
+	}
+
+	var still []string
+	for _, name := range names {
+		if exited[name] {
+			still = append(still, name)
+		}
+	}
+	return still
 }
 
 // stopZombies はゾンビサーバを止める。

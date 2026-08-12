@@ -228,7 +228,7 @@ func TestZombieServersSparesYoungServers(t *testing.T) {
 	}{
 		{name: "起動直後", elapsed: 0, want: 0},
 		{name: "59 秒", elapsed: 59 * time.Second, want: 0},
-		{name: "60 秒ちょうど", elapsed: domain.ZombieMinAge, want: 1},
+		{name: "60 秒ちょうど", elapsed: domain.CleanupMinAge, want: 1},
 		{name: "十分に古い", elapsed: time.Hour, want: 1},
 	}
 	for _, tt := range tests {

@@ -24,16 +24,19 @@ const (
 // orphanPPID は親を失ったプロセスの親 PID である(init に引き取られた状態)。
 const orphanPPID = 1
 
-// ZombieMinAge はゾンビとみなすまでに必要な経過時間である。
+// CleanupMinAge は掃除の対象とみなすまでに必要な経過時間である。
 //
-// **起動しかけのサーバを掴まないための猶予である。** zellij のサーバは
-// 起動してから list-sessions に載るまでに一瞬の間があり、その隙に見ると
-// 「一覧に出ないのに動いているサーバ」に見える。実機でも、走査した瞬間だけ
-// 見えて次の瞬間には消えている短命なサーバを観測した。ここで撃つと、
-// 利用者が今まさに開こうとしているセッションを落とす。
+// **作られたばかりのものを掴まないための猶予である。** 2 か所で効く。
 //
+//   - zellij のサーバは起動してから list-sessions に載るまでに一瞬の間が
+//     あり、その隙に見ると「一覧に出ないのに動いているサーバ」に見える。
+//     実機でも、走査した瞬間だけ見えて次には消えている短命なサーバを観測した
+//   - セッションも、作られてからペインが起動して attach されるまでの間は
+//     「誰も開いていない mdev セッション」に見える
+//
+// どちらもここで撃つと、利用者が今まさに開こうとしているセッションを落とす。
 // 取りこぼしても次回の掃除で拾えるので、長めに取って構わない。
-const ZombieMinAge = 60 * time.Second
+const CleanupMinAge = 60 * time.Second
 
 // ProcessEntry は `ps -axo pid,ppid,etime,command` の 1 行である。
 type ProcessEntry struct {
@@ -236,7 +239,7 @@ func MdevManagedSessions(entries []ProcessEntry) map[string]bool {
 // **一覧に生きていると出ているセッションのサーバは決して含めない。**
 // 使用中のセッションを落とす唯一の経路になりうるためである。
 //
-// 起動から ZombieMinAge に満たないサーバも外す。起動しかけのサーバは
+// 起動から CleanupMinAge に満たないサーバも外す。起動しかけのサーバは
 // まだ list-sessions に載っておらず、そのままでは「一覧に出ないのに
 // 動いている」に見えるためである。
 func ZombieServers(servers []ZellijServer, sessions []SessionEntry) []ZellijServer {
@@ -247,7 +250,7 @@ func ZombieServers(servers []ZellijServer, sessions []SessionEntry) []ZellijServ
 
 	var zombies []ZellijServer
 	for _, server := range servers {
-		if alive[server.Session] || server.Elapsed < ZombieMinAge {
+		if alive[server.Session] || server.Elapsed < CleanupMinAge {
 			continue
 		}
 		zombies = append(zombies, server)
