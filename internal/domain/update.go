@@ -154,6 +154,18 @@ func RenderUpdateNotice(latest, current string) string {
 		"\n"
 }
 
+// RenderMdevUpdateNotice は mdev 本体の新しい版があるときの案内を返す。
+//
+// conductor の資産とは別の行で出す。両者は別々に版が進むため、どちらが
+// 古いのかが分からないと `mdev update` を実行しても「何が変わるのか」が
+// 読めない。
+func RenderMdevUpdateNotice(latest, current string) string {
+	return "\n" +
+		"  📦 mdev 本体の新しいバージョン " + latest + " があります（現在: " + current + "）。\n" +
+		"     'mdev update' で更新できます。\n" +
+		"\n"
+}
+
 // TarballURL は GitHub のソース tarball の URL を返す。
 // 現行 update.sh の
 // `https://github.com/$SLUG/archive/refs/tags/$LATEST.tar.gz` に対応する。

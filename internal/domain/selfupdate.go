@@ -121,3 +121,33 @@ func FindChecksum(contents, name string) (string, bool) {
 
 // sha256HexLength は SHA-256 を 16 進で書いたときの長さである。
 const sha256HexLength = 64
+
+// 自バイナリの更新で出す文言。
+
+// RenderSelfUpdateSkipped は開発中のビルドで自己更新を飛ばすときの断りを返す。
+//
+// 黙って飛ばさないのは、`mdev update` を叩いた利用者が「更新された」と
+// 思い込まないようにするためである。手元のビルドを使っていること自体は
+// 異常ではないので、警告の色で 1 行だけ出す。
+func RenderSelfUpdateSkipped(current string) string {
+	return ansiYellow + "警告: mdev 自身は更新しません(版が焼き込まれていないビルドです: " +
+		current + ")" + ansiReset + "\n"
+}
+
+// RenderSelfUpdateStarting は自バイナリの更新に取りかかるときの 1 行を返す。
+func RenderSelfUpdateStarting(current, latest string) string {
+	return "mdev 自身を " + current + " -> " + latest + " に更新します...\n"
+}
+
+// RenderSelfUpdateReplaced は自バイナリを置き換えたときの案内を返す。
+//
+// **ここで処理を終える。** 今動いているプロセスは置き換える前の中身のまま
+// なので、続けて conductor の資産を更新すると古い実装で行うことになる。
+// 実行し直してもらえば、すべてを新しい mdev が行う。
+func RenderSelfUpdateReplaced(latest, path string) string {
+	return ansiGreen + ansiBold + "✅ mdev 自身を " + latest + " に更新しました。" + ansiReset + "\n" +
+		"   " + path + "\n" +
+		"\n" +
+		"   続けて conductor の資産を更新します。" +
+		"もう一度 `mdev update` を実行してください。\n"
+}

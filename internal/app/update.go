@@ -18,6 +18,14 @@ type UpdateStateStore interface {
 	ReadUpdateCache() (date, tag string)
 	// WriteUpdateCache は .update-check を書き換える。
 	WriteUpdateCache(date, tag string) error
+	// ReadMdevUpdateCache は mdev 本体ぶんの確認結果を返す。
+	//
+	// conductor 資産とは版が別々に進むのでキャッシュを分ける。同じ
+	// ファイルに 2 つ書くと現行の 1 行 2 列の形が壊れ、古い mdev や
+	// install.sh が読めなくなる。
+	ReadMdevUpdateCache() (date, tag string)
+	// WriteMdevUpdateCache は mdev 本体ぶんの確認結果を書き換える。
+	WriteMdevUpdateCache(date, tag string) error
 }
 
 // RemoteTagLister はリモートの最新 semver タグを引く。
@@ -35,6 +43,9 @@ type UpdateChecker struct {
 	State  UpdateStateStore
 	Remote RemoteTagLister
 	Clock  Clock
+	// MdevVersion は今動いている mdev の版(ビルド時に焼き込んだもの)。
+	// 空や "dev" のときは mdev 本体の案内を出さない。
+	MdevVersion string
 }
 
 // Check は更新の案内を返す。案内するものが無ければ空文字を返す。
@@ -50,12 +61,20 @@ func (c *UpdateChecker) Check(force bool) string {
 	if config.UpdateCheck.Disabled {
 		return ""
 	}
+	today := c.Clock.Now().Format(domain.DailyFileDateLayout)
+
+	// conductor の資産と mdev 本体は別々に版が進む。どちらが古いのかが
+	// 分からないと、`mdev update` で何が変わるのかが読めない。
+	return c.conductorNotice(today, force) + c.mdevNotice(today, force)
+}
+
+// conductorNotice は conductor 資産の新しい版があれば案内を返す。
+func (c *UpdateChecker) conductorNotice(today string, force bool) string {
 	repoURL := c.State.RepoURL()
 	if repoURL == "" {
 		return ""
 	}
 
-	today := c.Clock.Now().Format(domain.DailyFileDateLayout)
 	latest := c.cachedTag(today, force)
 	if latest == "" {
 		tag, ok := c.Remote.LatestTag(repoURL)
@@ -72,6 +91,47 @@ func (c *UpdateChecker) Check(force bool) string {
 		return ""
 	}
 	return domain.RenderUpdateNotice(latest, current)
+}
+
+// mdevNotice は mdev 本体の新しい版があれば案内を返す。
+//
+// 版を焼き込んでいないビルドでは何も出さない。手元で組んだものを
+// 「古い」と言っても意味が無く、自己更新も行わないためである。
+func (c *UpdateChecker) mdevNotice(today string, force bool) string {
+	if domain.DecideSelfUpdate(c.MdevVersion, "v0.0.0") == domain.SelfUpdateSkipDev {
+		return ""
+	}
+	if _, supported := domain.CurrentAssetName(); !supported {
+		// 配布物が無い環境では更新できないので案内もしない。
+		return ""
+	}
+
+	latest := c.cachedMdevTag(today, force)
+	if latest == "" {
+		tag, ok := c.Remote.LatestTag(mdevRepoURL())
+		if !ok {
+			return ""
+		}
+		_ = c.State.WriteMdevUpdateCache(today, tag)
+		latest = tag
+	}
+
+	if domain.DecideSelfUpdate(c.MdevVersion, latest) != domain.SelfUpdateNeeded {
+		return ""
+	}
+	return domain.RenderMdevUpdateNotice(latest, domain.NormalizeVersion(c.MdevVersion))
+}
+
+// cachedMdevTag は今日ぶんの mdev のキャッシュがあればそのタグを返す。
+func (c *UpdateChecker) cachedMdevTag(today string, force bool) string {
+	if force {
+		return ""
+	}
+	date, tag := c.State.ReadMdevUpdateCache()
+	if date != today {
+		return ""
+	}
+	return tag
 }
 
 // cachedTag は今日ぶんのキャッシュがあればそのタグを返す。

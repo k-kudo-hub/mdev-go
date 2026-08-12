@@ -22,8 +22,8 @@ ADR-0004 の実施フェーズ 1。mdev バイナリの版の可視化・GitHub 
 - [x] domain: 自己更新の判定のテスト+実装(埋め込み版数 vs mdev-go リポジトリの最新タグ。"dev" ビルドは自己更新スキップ)
 - [x] infra: バイナリアセットの DL(arch 判定 → `mdev_darwin_<arch>` を取得、checksums.txt で SHA-256 検証、60s/100MB 上限は既存 release パッケージの流儀)
 - [x] infra: 自己置換のテスト+実装(`bin/mdev.new` へ書き込み → chmod +x → rename で原子的置換。実行中バイナリの置換は rename なら安全であることを実機確認)
-- [ ] app+cli: `mdev update` に組み込み(順序: ①自バイナリの更新 → ②conductor 資産の更新(現行フロー維持)。①で置換した場合は新バイナリで②を exec するか、次回に回すかを設計して報告)
-- [ ] `mdev check-update` の案内に mdev-go の新版も含める(conductor と別行で)
+- [x] app+cli: `mdev update` に組み込み(順序: ①自バイナリの更新 → ②conductor 資産の更新(現行フロー維持)。①で置換した場合は新バイナリで②を exec するか、次回に回すかを設計して報告)
+- [x] `mdev check-update` の案内に mdev-go の新版も含める(conductor と別行で)
 
 ### D. 検証・仕上げ
 

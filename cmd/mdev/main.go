@@ -231,7 +231,12 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			State:     updateState,
 			Remote:    remoteTags,
 			Installer: release.NewInstaller(),
-			Getenv:    getenv,
+			Self: &app.SelfUpdater{
+				Version:  version,
+				Remote:   remoteTags,
+				Replacer: release.NewSelfReplacer(),
+			},
+			Getenv: getenv,
 		},
 		SessionClean: &app.SessionCleaner{
 			Sessions:  zellijSessions,
@@ -246,10 +251,11 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Clock:   clock,
 		},
 		UpdateCheck: &app.UpdateChecker{
-			Config: paneStore,
-			State:  updateState,
-			Remote: remoteTags,
-			Clock:  clock,
+			Config:      paneStore,
+			State:       updateState,
+			Remote:      remoteTags,
+			Clock:       clock,
+			MdevVersion: version,
 		},
 		Getenv: getenv,
 	}
