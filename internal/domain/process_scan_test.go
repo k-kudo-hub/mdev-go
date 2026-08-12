@@ -56,7 +56,10 @@ func TestZellijServers(t *testing.T) {
 	t.Parallel()
 
 	got := domain.ZellijServers(domain.ParseProcessList(realProcessList))
-	want := []domain.ZellijServer{{PID: 18001, Elapsed: time.Hour + 59*time.Second, Session: "mdev-go-224042"}}
+	want := []domain.ZellijServer{{
+		PID: 18001, Elapsed: time.Hour + 59*time.Second, Session: "mdev-go-224042",
+		Command: "/opt/homebrew/bin/zellij --server /var/folders/5w/T/zellij-501/contract_version_1/mdev-go-224042",
+	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ZellijServers = %#v, want %#v", got, want)
 	}
@@ -282,7 +285,10 @@ func TestZellijServersWithSpacedSocketPath(t *testing.T) {
 	entries := domain.ParseProcessList(
 		"100 1 10:00 /opt/homebrew/bin/zellij --server /tmp/my tmp/zellij-501/v1/my session\n")
 	got := domain.ZellijServers(entries)
-	want := []domain.ZellijServer{{PID: 100, Elapsed: 10 * time.Minute, Session: "my session"}}
+	want := []domain.ZellijServer{{
+		PID: 100, Elapsed: 10 * time.Minute, Session: "my session",
+		Command: "/opt/homebrew/bin/zellij --server /tmp/my tmp/zellij-501/v1/my session",
+	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ZellijServers = %#v, want %#v", got, want)
 	}

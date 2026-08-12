@@ -75,6 +75,13 @@ func (c *SessionController) ListClients(session string) (string, error) {
 }
 
 // KillSession は動いているセッションを終了させる。
+//
+// delete-session と違い、zellij 側に「誰か開いていたら拒む」防御は無い。
+// つまり呼んだ時点で本当に誰も居ないかは、こちらが確かめるしかない。
+// 掃除は消す直前に list-clients を引き直しているが、そこから実際に
+// kill が届くまでのごく短い間(数百ミリ秒)は残る。zellij の CLI に
+// 「誰も居なければ kill」を原子的に行う手段が無いため、これ以上は
+// 縮められない(SessionCleaner.apply のコメントを参照)。
 func (c *SessionController) KillSession(name string) error {
 	return c.run(commandTimeout, binaryName, "kill-session", name)
 }

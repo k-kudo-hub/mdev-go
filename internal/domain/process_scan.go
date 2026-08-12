@@ -129,6 +129,11 @@ type ZellijServer struct {
 	PID int
 	// Elapsed は起動からの経過時間。ゾンビ判定の猶予に使う。
 	Elapsed time.Duration
+	// Command は ps が出したコマンド行である。
+	//
+	// シグナルを送る直前に引き直して照合するために持つ。PID は使い回される
+	// ので、選んだときと同じ PID が別のプロセスになっていることがある。
+	Command string
 	// Session はサーバが持つセッション名。
 	//
 	// サーバのコマンド行の末尾がソケットのパスで、その最後の要素が
@@ -152,7 +157,9 @@ func ZellijServers(entries []ProcessEntry) []ZellijServer {
 		if name == "" {
 			continue
 		}
-		servers = append(servers, ZellijServer{PID: entry.PID, Elapsed: entry.Elapsed, Session: name})
+		servers = append(servers, ZellijServer{
+			PID: entry.PID, Elapsed: entry.Elapsed, Session: name, Command: entry.Command,
+		})
 	}
 	return servers
 }
@@ -173,6 +180,13 @@ func ZellijServers(entries []ProcessEntry) []ZellijServer {
 // パスは **`--server` の後ろから行末まで** を丸ごと採る。最後の語だけを
 // 見ると、空白を含むパス(macOS の一時ディレクトリは既定では含まないが、
 // TMPDIR は利用者が変えられる)で名前を取り違える。
+//
+// 受容している穴が 1 つある。**zellij の実行ファイル自身のパスに空白が
+// 含まれる環境では、サーバとして検出できない**(1 つ目の語がパスの途中で
+// 切れるため)。これは意図的に検出漏れの側へ倒したものである。ここを緩めて
+// 語の並びを推測で繋ぐと、無関係のプロセスをサーバと誤認して kill しうる。
+// 検出できなければ掃除が 1 回見送られるだけだが、誤認すれば動いている
+// セッションを落とす。害の大きさが釣り合わない。
 func zellijServerSocket(command string) (string, bool) {
 	trimmed := strings.TrimSpace(command)
 	fields := strings.Fields(trimmed)
@@ -278,4 +292,16 @@ func OrphanZellijClients(entries []ProcessEntry) []ProcessEntry {
 		orphans = append(orphans, entry)
 	}
 	return orphans
+}
+
+// ProcessCommands は PID からコマンド行を引ける表を返す。
+//
+// シグナルを送る直前の照合に使う。PID は使い回されるため、選んだときと
+// 同じ PID が別のプロセスになっていることがある。
+func ProcessCommands(entries []ProcessEntry) map[int]string {
+	commands := make(map[int]string, len(entries))
+	for _, entry := range entries {
+		commands[entry.PID] = entry.Command
+	}
+	return commands
 }

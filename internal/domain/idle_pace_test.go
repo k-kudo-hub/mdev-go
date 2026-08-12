@@ -16,12 +16,22 @@ var paceBase = time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
 func TestIdlePaceShouldCheck(t *testing.T) {
 	t.Parallel()
 
+	// **起動直後はいきなり確認しない。** ペインは 5 つ以上同時に立ち上がる
+	// ので、揃って list-clients を撃つと、セッションを開いたその瞬間に
+	// zellij へ最も負荷をかけることになる。開いた直後は誰かが見ているに
+	// 決まっているので、最初の確認は間隔が空いてからでよい。
 	var zero domain.IdlePace
-	if !zero.ShouldCheck(paceBase) {
-		t.Error("まだ一度も確かめていないのに確認しません")
+	if zero.Started() {
+		t.Error("ゼロ値なのに起点が置かれています")
+	}
+	if zero.ShouldCheck(paceBase) {
+		t.Error("起動直後に確認しようとしています")
 	}
 
 	checked := zero.MarkChecked(paceBase)
+	if !checked.Started() {
+		t.Error("起点が置かれていません")
+	}
 	tests := []struct {
 		name  string
 		after time.Duration

@@ -26,7 +26,7 @@ func fullPlan() app.CleanupPlan {
 		ExitedSessions:   []string{"gone-1", "gone-2"},
 		DetachedSessions: []string{"idle"},
 		ZombieServers:    []app.ZombieServer{{PID: 400, Session: "zombie"}},
-		OrphanClients:    []int{500},
+		OrphanClients:    []app.OrphanClient{{PID: 500}},
 	}
 }
 
@@ -119,9 +119,22 @@ func TestSessionsCleanAuto(t *testing.T) {
 		wantNone bool
 	}{
 		{
-			name:    "掃除した",
-			clean:   &fakeSessionCleanService{result: app.CleanupResult{Plan: fullPlan()}},
+			// 数えるのは **実際に片付けた件数** である。
+			name: "掃除した",
+			clean: &fakeSessionCleanService{result: app.CleanupResult{
+				Plan: fullPlan(),
+				Done: app.CleanupCounts{
+					ExitedSessions: 2, DetachedSessions: 1, ZombieServers: 1, OrphanClients: 1,
+				},
+			}},
 			wantOut: "掃除: 終了済み 2 件, 未使用 1 件, ゾンビ 1 件, 残骸 1 件\n",
+		},
+		{
+			// 計画に載っていても、消す直前の再確認で全部飛ばされることが
+			// ある。ここで計画の件数を出すと「掃除した」と嘘になる。
+			name:     "計画はあるが 1 件も片付かなければ無言",
+			clean:    &fakeSessionCleanService{result: app.CleanupResult{Plan: fullPlan()}},
+			wantNone: true,
 		},
 		{
 			// 毎回何か出ると起動時の画面が埋まる。

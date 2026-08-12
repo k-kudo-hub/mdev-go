@@ -57,7 +57,9 @@ type SessionEntry struct {
 func ParseSessionList(out string) []SessionEntry {
 	var entries []SessionEntry
 	for _, line := range strings.Split(out, "\n") {
-		i := strings.Index(line, sessionCreatedMarker)
+		// **最後の** 目印で切る。名前そのものが " [Created " を含んでいても、
+		// 注記は必ず行末側に付くため、後ろから探すほうが取り違えにくい。
+		i := strings.LastIndex(line, sessionCreatedMarker)
 		if i < 0 {
 			continue
 		}
@@ -65,10 +67,13 @@ func ParseSessionList(out string) []SessionEntry {
 		if name == "" {
 			continue
 		}
+		note := line[i:]
 		entries = append(entries, SessionEntry{
-			Name:   name,
-			Age:    parseSessionAge(line[i:]),
-			Exited: strings.Contains(line, sessionExitedMarker),
+			Name: name,
+			Age:  parseSessionAge(note),
+			// 終了済みかどうかも **注記の側だけ** で判断する。名前に
+			// "(EXITED" を含むセッションを終了済みと誤認して消さないため。
+			Exited: strings.Contains(note, sessionExitedMarker),
 		})
 	}
 	return entries
@@ -79,7 +84,7 @@ func ParseSessionList(out string) []SessionEntry {
 // 読めない場合は 0 を返す。0 は作成直後と同じ扱いになり、掃除の対象から
 // 外れるので安全側である。
 func parseSessionAge(note string) time.Duration {
-	start := strings.Index(note, sessionCreatedMarker)
+	start := strings.LastIndex(note, sessionCreatedMarker)
 	if start < 0 {
 		return 0
 	}
@@ -91,18 +96,48 @@ func parseSessionAge(note string) time.Duration {
 	return parseDurationWords(rest[:end])
 }
 
-// parseDurationWords は `16h 20m 11s` のような並びを読む。
+// humantime が使う各単位の長さ。
 //
-// 単位は d / h / m / s を受ける。1 つでも読めない語があれば 0 を返す
-// (中途半端に短い値を返すと、作られたばかりのセッションを古いものと
-// 誤って掃除してしまう)。
+// zellij は経過時間を Rust の humantime crate で整形する。年と月は暦では
+// なく固定長で、year = 365.25 日、month = 30.44 日(365.25/12)である。
+// 掃除の判断に使うのは「60 秒を超えているか」だけなので、この近似で足りる。
+var durationUnits = []struct {
+	name string
+	unit time.Duration
+}{
+	// 長いものから順に見る。"months" を "m" より先に照合しないと、
+	// 単位の取り違えで月が分になる。
+	{"years", 31557600 * time.Second},
+	{"year", 31557600 * time.Second},
+	{"months", 2630016 * time.Second},
+	{"month", 2630016 * time.Second},
+	{"days", 24 * time.Hour},
+	{"day", 24 * time.Hour},
+	{"h", time.Hour},
+	{"ms", time.Millisecond},
+	{"m", time.Minute},
+	{"us", time.Microsecond},
+	{"ns", time.Nanosecond},
+	{"s", time.Second},
+}
+
+// parseDurationWords は `1day 30m 32s` のような並びを読む。
+//
+// zellij(0.44.1)が実際に出す形を実機で確かめて写している。
+//
+//	2s / 12m 50s / 16h 20m 11s
+//	1day 30m 32s / 3days 24s
+//	1month 9days 13h 26m 57s / 2years 2months 8days 14h 53m 21s
+//
+// 年・月・日は値が 1 より大きいと複数形になり、h / m / s は変化しない
+// (humantime の item_plural / item の違い)。**日以上の単位を読めないと、
+// 1 日以上放置されたセッションがすべて「作られたばかり」に見えて永久に
+// 掃除されない。** この機能が本来いちばん片付けたい相手なので、単位は
+// すべて受ける。
+//
+// 1 つでも読めない語があれば 0 を返す(中途半端に短い値を返すと、作られた
+// ばかりのセッションを古いものと誤って掃除してしまう)。
 func parseDurationWords(text string) time.Duration {
-	units := map[byte]time.Duration{
-		'd': 24 * time.Hour,
-		'h': time.Hour,
-		'm': time.Minute,
-		's': time.Second,
-	}
 	words := strings.Fields(text)
 	if len(words) == 0 {
 		return 0
@@ -110,12 +145,8 @@ func parseDurationWords(text string) time.Duration {
 
 	var total time.Duration
 	for _, word := range words {
-		unit, ok := units[word[len(word)-1]]
+		value, unit, ok := splitDurationWord(word)
 		if !ok {
-			return 0
-		}
-		value, err := strconv.Atoi(word[:len(word)-1])
-		if err != nil || value < 0 {
 			return 0
 		}
 		total += time.Duration(value) * unit
@@ -123,26 +154,20 @@ func parseDurationWords(text string) time.Duration {
 	return total
 }
 
-// AliveSessionNames は終了していないセッションの名前を返す。
-func AliveSessionNames(entries []SessionEntry) []string {
-	var names []string
-	for _, entry := range entries {
-		if !entry.Exited {
-			names = append(names, entry.Name)
+// splitDurationWord は `12days` のような 1 語を数と単位に割る。
+func splitDurationWord(word string) (int, time.Duration, bool) {
+	for _, candidate := range durationUnits {
+		digits, ok := strings.CutSuffix(word, candidate.name)
+		if !ok || digits == "" {
+			continue
 		}
-	}
-	return names
-}
-
-// ExitedSessionNames は終了済みセッションの名前を返す。
-func ExitedSessionNames(entries []SessionEntry) []string {
-	var names []string
-	for _, entry := range entries {
-		if entry.Exited {
-			names = append(names, entry.Name)
+		value, err := strconv.Atoi(digits)
+		if err != nil || value < 0 {
+			return 0, 0, false
 		}
+		return value, candidate.unit, true
 	}
-	return names
+	return 0, 0, false
 }
 
 // noSessionsMarker は「セッションが 1 つも無い」ときに zellij が標準エラーへ
@@ -185,4 +210,26 @@ func ParseClientList(out string) (count int, ok bool) {
 		return 0, false
 	}
 	return count, true
+}
+
+// AliveSessionNames は終了していないセッションの名前を返す。
+func AliveSessionNames(entries []SessionEntry) []string {
+	var names []string
+	for _, entry := range entries {
+		if !entry.Exited {
+			names = append(names, entry.Name)
+		}
+	}
+	return names
+}
+
+// ExitedSessionNames は終了済みセッションの名前を返す。
+func ExitedSessionNames(entries []SessionEntry) []string {
+	var names []string
+	for _, entry := range entries {
+		if entry.Exited {
+			names = append(names, entry.Name)
+		}
+	}
+	return names
 }

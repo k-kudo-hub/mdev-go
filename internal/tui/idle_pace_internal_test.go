@@ -50,28 +50,37 @@ func TestPollerChecksAttachOnArrival(t *testing.T) {
 	checker := &fakeAttachChecker{attached: true}
 	p := newPacedPoller(checker, &now)
 
-	// 1 回目の着弾: まだ一度も確かめていないので確認が出る。
+	// 1 回目の着弾では確認を出さない(起点を置くだけ)。ペインは同時に
+	// 5 つ以上立ち上がるので、揃って list-clients を撃つと、開いた瞬間に
+	// zellij へ最も負荷をかけることになる。
 	cmd := p.arrive(true)
 	if cmd == nil {
 		t.Fatal("次の合図が張られていません")
 	}
 	runAttachChecks(t, cmd)
-	if len(checker.calls) != 1 {
-		t.Fatalf("確認 = %d 回, want 1", len(checker.calls))
+	if len(checker.calls) != 0 {
+		t.Fatalf("起動直後に確認しました: %d 回", len(checker.calls))
 	}
 
-	// 30 秒経つ前の着弾では確認を重ねて出さない。
+	// 30 秒経つ前の着弾でも出さない。
 	now = base.Add(29 * time.Second)
 	runAttachChecks(t, p.arrive(true))
-	if len(checker.calls) != 1 {
-		t.Errorf("確認 = %d 回, want 1(30 秒未満は出さない)", len(checker.calls))
+	if len(checker.calls) != 0 {
+		t.Errorf("確認 = %d 回, want 0(30 秒未満は出さない)", len(checker.calls))
 	}
 
-	// 30 秒経てばまた確認する。
+	// 起点から 30 秒経ってはじめて確認する。
 	now = base.Add(30 * time.Second)
 	runAttachChecks(t, p.arrive(true))
-	if len(checker.calls) != 2 {
-		t.Errorf("確認 = %d 回, want 2", len(checker.calls))
+	if len(checker.calls) != 1 {
+		t.Errorf("確認 = %d 回, want 1", len(checker.calls))
+	}
+
+	// その後はまた 30 秒空ける。
+	now = base.Add(59 * time.Second)
+	runAttachChecks(t, p.arrive(true))
+	if len(checker.calls) != 1 {
+		t.Errorf("確認 = %d 回, want 1(前回から 30 秒未満)", len(checker.calls))
 	}
 }
 
@@ -111,9 +120,17 @@ func TestPollerKeepsSingleChain(t *testing.T) {
 	checker := &fakeAttachChecker{attached: false}
 	p := newPacedPoller(checker, &now)
 
-	// 着弾 → 次の合図 1 本 + 確認 1 本。
+	// 起点を置く 1 回目は合図だけ。
 	msgs, timers := collectMsgs(t, p.arrive(true))
 	ticks, checks := countMsgs(msgs, timers)
+	if ticks != 1 || checks != 0 {
+		t.Errorf("1 回目: 合図 = %d 本 / 確認 = %d 本, want 1 / 0", ticks, checks)
+	}
+
+	// 起点から 30 秒後の着弾 → 次の合図 1 本 + 確認 1 本。
+	now = now.Add(app.AttachCheckInterval)
+	msgs, timers = collectMsgs(t, p.arrive(true))
+	ticks, checks = countMsgs(msgs, timers)
 	if ticks != 1 {
 		t.Errorf("合図 = %d 本, want 1 本", ticks)
 	}
@@ -262,6 +279,8 @@ func TestPollerStopsRefreshingWhenDetached(t *testing.T) {
 	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
 	checker := &fakeAttachChecker{attached: false}
 	p := newPacedPoller(checker, &now)
+	// 起点を置いてから減速へ入る(起動直後は確認しない仕様のため)。
+	p.pace = p.pace.MarkChecked(now)
 	observeNow(&p, false, nil)
 
 	// 生成直後の 1 本を着弾させ、「読み直しを出せる状態」にしておく。

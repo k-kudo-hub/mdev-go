@@ -73,11 +73,22 @@ type fakeProcessStore struct {
 	err error
 	// aliveAfterTerm は TERM の後もまだ居る PID。
 	aliveAfterTerm map[int]bool
+	// outOnRecheck は 2 回目以降の ps で返す出力である。
+	// 「選んだ後に PID が別のプロセスへ回った」状況を作るために使う。
+	outOnRecheck string
+	// listCalls は ps の呼び出し回数。
+	listCalls int
 
 	calls []string
 }
 
-func (p *fakeProcessStore) ListProcesses() (string, error) { return p.out, p.err }
+func (p *fakeProcessStore) ListProcesses() (string, error) {
+	p.listCalls++
+	if p.listCalls > 1 && p.outOnRecheck != "" {
+		return p.outOnRecheck, p.err
+	}
+	return p.out, p.err
+}
 
 func (p *fakeProcessStore) Terminate(pid int) error {
 	p.calls = append(p.calls, fmt.Sprintf("term %d", pid))
@@ -159,12 +170,16 @@ func TestCleanPlan(t *testing.T) {
 	if want := []string{"idle"}; !slices.Equal(got.Plan.DetachedSessions, want) {
 		t.Errorf("detached = %v, want %v", got.Plan.DetachedSessions, want)
 	}
-	want := []app.ZombieServer{{PID: 400, Session: "zombie"}}
+	want := []app.ZombieServer{{
+		PID: 400, Session: "zombie",
+		Command: "/opt/homebrew/bin/zellij --server /tmp/z/zombie",
+	}}
 	if !slices.Equal(got.Plan.ZombieServers, want) {
 		t.Errorf("ゾンビ = %v, want %v", got.Plan.ZombieServers, want)
 	}
-	if want := []int{500}; !slices.Equal(got.Plan.OrphanClients, want) {
-		t.Errorf("孤児 = %v, want %v", got.Plan.OrphanClients, want)
+	want500 := []app.OrphanClient{{PID: 500, Command: "zellij action list-tabs"}}
+	if !slices.Equal(got.Plan.OrphanClients, want500) {
+		t.Errorf("孤児 = %v, want %v", got.Plan.OrphanClients, want500)
 	}
 }
 
@@ -351,7 +366,7 @@ func TestCleanupPlanIsEmpty(t *testing.T) {
 		{ExitedSessions: []string{"a"}},
 		{DetachedSessions: []string{"a"}},
 		{ZombieServers: []app.ZombieServer{{PID: 1}}},
-		{OrphanClients: []int{1}},
+		{OrphanClients: []app.OrphanClient{{PID: 1}}},
 	}
 	for _, plan := range filled {
 		if plan.IsEmpty() {
@@ -595,4 +610,129 @@ func (c *steppingClock) Now() time.Time {
 	}
 	c.now = c.now.Add(c.step)
 	return c.now
+}
+
+// TestCleanVerifiesPIDIdentityBeforeSignal は PID の使い回しで無関係の
+// プロセスへシグナルを送らないことを確かめる(指摘 5)。
+//
+// 選んでから送るまでの間にプロセスが終わり、同じ PID が別のプロセス
+// (利用者のエディタや別セッションのペイン)に割り当たることはありうる。
+func TestCleanVerifiesPIDIdentityBeforeSignal(t *testing.T) {
+	t.Parallel()
+
+	cleaner, _, processes, _ := newCleaner()
+	// 送る直前に引き直すと、ゾンビ(400)も孤児(500)も別のプロセスに
+	// 変わっている。
+	processes.outOnRecheck = "  PID  PPID     ELAPSED COMMAND\n" +
+		"100     1 40:00 /opt/homebrew/bin/zellij --server /tmp/z/in-use\n" +
+		"400     1 00:10 nvim /Users/kazuto/memo.md\n" +
+		"500     1 00:10 -zsh\n"
+
+	got, err := cleaner.Clean(false)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	// 計画には載る(選んだ時点では確かにゾンビと孤児だった)。
+	if len(got.Plan.ZombieServers) != 1 || len(got.Plan.OrphanClients) != 1 {
+		t.Fatalf("計画 = %+v", got.Plan)
+	}
+	// しかし送らない。
+	if len(processes.calls) != 0 {
+		t.Errorf("別のプロセスへシグナルを送りました: %v", processes.calls)
+	}
+	if got.Done.ZombieServers != 0 || got.Done.OrphanClients != 0 {
+		t.Errorf("片付けた件数 = %+v, want 0 件", got.Done)
+	}
+}
+
+// TestCleanSignalsWhenIdentityMatches は同じプロセスのままなら送ることを
+// 確かめる(照合が正しいものまで止めていないこと)。
+func TestCleanSignalsWhenIdentityMatches(t *testing.T) {
+	t.Parallel()
+
+	cleaner, _, processes, _ := newCleaner()
+	got, err := cleaner.Clean(false)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	if want := []string{"term 400", "kill 500"}; !slices.Equal(processes.calls, want) {
+		t.Errorf("シグナル = %v, want %v", processes.calls, want)
+	}
+	if got.Done.ZombieServers != 1 || got.Done.OrphanClients != 1 {
+		t.Errorf("片付けた件数 = %+v", got.Done)
+	}
+}
+
+// TestCleanReportsExecutedCounts は「予定」ではなく「実績」を返すことを
+// 確かめる(指摘 7)。
+//
+// 消す直前の再確認で飛ばしたものを数に入れると、--auto が「掃除した」と
+// 嘘をつくことになる。
+func TestCleanReportsExecutedCounts(t *testing.T) {
+	t.Parallel()
+
+	cleaner, sessions, _, _ := newCleaner()
+	// detached は直前に開かれ、終了済みの 1 つは復活した。
+	sessions.clientsOnRecheck["idle"] = attachedClients
+	sessions.sessionsOnRecheck = "in-use [Created 40m 0s ago] \n" +
+		"gone-1 [Created 12m 0s ago] \n" +
+		"gone-2 [Created 12m 0s ago] (EXITED - attach to resurrect)\n"
+
+	got, err := cleaner.Clean(false)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	// 計画は 2 件 + 1 件、実績は 1 件 + 0 件。
+	if len(got.Plan.ExitedSessions) != 2 || len(got.Plan.DetachedSessions) != 1 {
+		t.Fatalf("計画 = %+v", got.Plan)
+	}
+	if got.Done.ExitedSessions != 1 {
+		t.Errorf("終了済みの実績 = %d, want 1", got.Done.ExitedSessions)
+	}
+	if got.Done.DetachedSessions != 0 {
+		t.Errorf("detached の実績 = %d, want 0", got.Done.DetachedSessions)
+	}
+}
+
+// TestCleanChecksOldestSessionsFirst は古いものから確かめることを
+// 確かめる(指摘 6)。
+//
+// 予算が尽きると後ろは見送られるので、順番が固定だと末尾のセッションが
+// 毎回あぶれて永久に残る。放置が長いものほど片付ける価値が高い。
+func TestCleanChecksOldestSessionsFirst(t *testing.T) {
+	t.Parallel()
+
+	sessions := &fakeSessionStore{
+		sessionsOut: "young [Created 2m 0s ago] \n" +
+			"oldest [Created 3days 0s ago] \n" +
+			"middle [Created 5h 0m 0s ago] \n",
+		clients: map[string]string{
+			"young": emptyClients, "oldest": emptyClients, "middle": emptyClients,
+		},
+		clientErrs:       map[string]error{},
+		clientsOnRecheck: map[string]string{},
+	}
+	processes := &fakeProcessStore{
+		out: "1 1 40:00 /opt/homebrew/bin/zellij --server /tmp/z/young\n" +
+			"2 1 40:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n" +
+			"3 1 40:00 /opt/homebrew/bin/zellij --server /tmp/z/oldest\n" +
+			"4 3 40:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n" +
+			"5 1 40:00 /opt/homebrew/bin/zellij --server /tmp/z/middle\n" +
+			"6 5 40:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n",
+		aliveAfterTerm: map[int]bool{},
+	}
+	cleaner := &app.SessionCleaner{
+		Sessions: sessions, Clients: sessions, Remover: sessions,
+		Processes: processes, Signaler: processes, Sleeper: &fakeSleeper{},
+		Clock: testClock,
+	}
+
+	got, err := cleaner.Clean(true)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	want := []string{"oldest", "middle", "young"}
+	if !slices.Equal(got.Plan.DetachedSessions, want) {
+		t.Errorf("確かめる順 = %v, want %v(古い順)", got.Plan.DetachedSessions, want)
+	}
 }

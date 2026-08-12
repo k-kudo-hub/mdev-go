@@ -143,24 +143,63 @@ func TestParseSessionListWithSpacedNames(t *testing.T) {
 
 // TestParseSessionListAge は作成からの経過時間の読み取りを固定する。
 //
+// 期待値は **zellij 0.44.1(macOS)の実出力** である。セッションのソケットの
+// mtime を遡らせて `list-sessions` を実行し、以下の表記を採取した。
+//
+//	1day 30m 32s / 3days 24s
+//	1month 9days 13h 26m 57s
+//	1year 1month 4days 7h 26m 57s
+//	2years 2months 8days 14h 53m 21s
+//
+// 年・月・日は値が 1 より大きいと複数形になり、h / m / s は変化しない
+// (Rust の humantime crate の item_plural / item の違い)。
+//
+// **日以上の単位を読めないと、1 日以上放置されたセッションがすべて
+// 「作られたばかり」に見えて永久に掃除されない。** この機能が本来いちばん
+// 片付けたい相手なので、ここは実測に基づいて固定する。
+//
 // 読めない値は 0 になる。0 は作成直後と同じ扱いで掃除の対象から外れる
 // ため、安全側である。
 func TestParseSessionListAge(t *testing.T) {
 	t.Parallel()
 
+	const (
+		day   = 24 * time.Hour
+		month = 2630016 * time.Second
+		year  = 31557600 * time.Second
+	)
 	tests := []struct {
 		note string
 		want time.Duration
 	}{
+		// --- 実機で採取した表記 ---
 		{note: "2s", want: 2 * time.Second},
 		{note: "12m 50s", want: 12*time.Minute + 50*time.Second},
 		{note: "16h 20m 11s", want: 16*time.Hour + 20*time.Minute + 11*time.Second},
-		{note: "3d 1h", want: 3*24*time.Hour + time.Hour},
-		// 読めない書式は 0(掃除の対象から外れる)。
+		{note: "1day 30m 32s", want: day + 30*time.Minute + 32*time.Second},
+		{note: "3days 24s", want: 3*day + 24*time.Second},
+		{
+			note: "1month 9days 13h 26m 57s",
+			want: month + 9*day + 13*time.Hour + 26*time.Minute + 57*time.Second,
+		},
+		{
+			note: "1year 1month 4days 7h 26m 57s",
+			want: year + month + 4*day + 7*time.Hour + 26*time.Minute + 57*time.Second,
+		},
+		{
+			note: "2years 2months 8days 14h 53m 21s",
+			want: 2*year + 2*month + 8*day + 14*time.Hour + 53*time.Minute + 21*time.Second,
+		},
+		// --- 秒未満(作った直後に見たとき)---
+		{note: "500ms", want: 500 * time.Millisecond},
+		{note: "1s 200ms", want: time.Second + 200*time.Millisecond},
+		// --- 読めない書式は 0(掃除の対象から外れる)---
 		{note: "しばらく前", want: 0},
 		{note: "12x", want: 0},
 		{note: "", want: 0},
 		{note: "10m ほげ", want: 0},
+		{note: "days", want: 0},
+		{note: "-5m", want: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.note, func(t *testing.T) {
@@ -173,6 +212,44 @@ func TestParseSessionListAge(t *testing.T) {
 				t.Errorf("Age(%q) = %v, want %v", tt.note, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestParseSessionListAgeClearsCleanupMinAge は「1 日以上前」が確実に
+// 掃除の猶予を超えることを確かめる。
+//
+// ここが 0 に落ちると、放置されたセッションが永久に片付かない。
+func TestParseSessionListAgeClearsCleanupMinAge(t *testing.T) {
+	t.Parallel()
+
+	for _, note := range []string{
+		"1day 30m 32s", "3days 24s", "1month 9days 13h 26m 57s",
+		"1year 1month 4days 7h 26m 57s", "2years 2months 8days 14h 53m 21s",
+	} {
+		entries := domain.ParseSessionList("s [Created " + note + " ago] \n")
+		if got := entries[0].Age; got < domain.CleanupMinAge {
+			t.Errorf("Age(%q) = %v, 猶予 %v を超えていない(掃除されない)",
+				note, got, domain.CleanupMinAge)
+		}
+	}
+}
+
+// TestParseSessionListWithPathologicalName は名前そのものが注記に似た
+// 文字列を含む場合でも取り違えないことを確かめる。
+func TestParseSessionListWithPathologicalName(t *testing.T) {
+	t.Parallel()
+
+	got := domain.ParseSessionList(
+		"weird [Created yesterday] name [Created 5m 0s ago] \n" +
+			"has (EXITED marker [Created 5m 0s ago] \n")
+	want := []domain.SessionEntry{
+		// 注記は行末側に付くので、最後の目印で切る。
+		{Name: "weird [Created yesterday] name", Age: 5 * time.Minute},
+		// "(EXITED" が名前側にあるだけでは終了済みにしない。
+		{Name: "has (EXITED marker", Age: 5 * time.Minute},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseSessionList = %#v, want %#v", got, want)
 	}
 }
 

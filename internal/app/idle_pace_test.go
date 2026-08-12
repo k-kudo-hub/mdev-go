@@ -17,8 +17,12 @@ func TestIdlePaceBoundary(t *testing.T) {
 	const normal = 2 * time.Second
 	var pace app.IdlePace
 
-	if !pace.ShouldCheck(idleBase) {
-		t.Error("未確認なのに確認しません")
+	// 起動直後はいきなり確認しない(ペインが揃って撃つのを避ける)。
+	if pace.Started() {
+		t.Error("ゼロ値なのに起点が置かれています")
+	}
+	if pace.ShouldCheck(idleBase) {
+		t.Error("起動直後に確認しようとしています")
 	}
 	if pace.Detached() {
 		t.Error("確認前から未アタッチ扱いです")

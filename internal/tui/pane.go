@@ -192,6 +192,14 @@ func (p *poller) observeAttach(msg attachCheckedMsg, refresh func(poll bool) tea
 func (p *poller) armWithAttachCheck() tea.Cmd {
 	next := tickCmd(p.pollInterval())
 	now := p.now()
+	if !p.pace.Started() {
+		// 起動直後は「今 確認した(誰かが開いている)」ものとして起点だけを
+		// 置く。ペインは 5 つ以上同時に立ち上がるので、揃って list-clients を
+		// 撃つと、セッションを開いたその瞬間に zellij へ最も負荷をかける。
+		// 開いた直後は誰かが見ているに決まっているので確認は要らない。
+		p.pace = p.pace.MarkChecked(now)
+		return next
+	}
 	if !p.pace.ShouldCheck(now) {
 		return next
 	}

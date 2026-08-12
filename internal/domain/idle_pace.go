@@ -34,13 +34,22 @@ type IdlePace struct {
 	detached bool
 }
 
+// Started は一度でも確認の起点を置いたかを返す。
+//
+// ゼロ値は「まだ起点が無い」状態で、呼び出し側は最初の機会に MarkChecked で
+// 起点を置く。**起動直後にいきなり確認しない**ためである。ペインは 5 つ以上
+// 同時に立ち上がるので、揃って list-clients を撃つと、セッションを開いた
+// その瞬間に zellij へ最も負荷をかけることになる。開いた直後は誰かが見て
+// いるに決まっているので、最初の確認は AttachCheckInterval の後でよい。
+func (p IdlePace) Started() bool { return p.checked }
+
 // ShouldCheck は今 attach の確認を始めてよいかを返す。
 //
-// まだ一度も確かめていないか、前回の確認から AttachCheckInterval 以上
-// 経っていれば真になる。
+// 起点からの経過が AttachCheckInterval 以上のときだけ真になる。起点が
+// 置かれていない間は偽である(Started を参照)。
 func (p IdlePace) ShouldCheck(now time.Time) bool {
 	if !p.checked {
-		return true
+		return false
 	}
 	return now.Sub(p.checkedAt) >= AttachCheckInterval
 }

@@ -74,18 +74,22 @@ func newSessionsCleanCommand(deps Deps) *cobra.Command {
 
 // printAutoSummary は --auto のときの出力を書き出す。
 //
-// **掃除するものが無ければ 1 文字も出さない。** これはセッションを開くたびに
+// 数えるのは **実際に片付けた件数** であって、片付けようとした件数ではない。
+// 消す直前の再確認で飛ばしたもの、予算切れで見送ったもの、失敗したものが
+// あるため、計画の件数を出すと「掃除した」と嘘をつくことになる。
+//
+// **1 件も片付けなければ 1 文字も出さない。** これはセッションを開くたびに
 // 走るので、毎回何か出ると起動時の画面が埋まってしまう。失敗も黙って
 // 飲み込む。掃除は最善努力で、失敗を理由に起動を止める価値は無い。
 func printAutoSummary(w io.Writer, result app.CleanupResult, err error) {
-	if err != nil || result.Plan.IsEmpty() {
+	if err != nil || result.Done.IsEmpty() {
 		return
 	}
-	plan := result.Plan
+	done := result.Done
 	// 出力先へ書けない状況で追加の報告先は無いため、書き込み失敗は無視する。
 	_, _ = fmt.Fprintf(w, "掃除: 終了済み %d 件, 未使用 %d 件, ゾンビ %d 件, 残骸 %d 件\n",
-		len(plan.ExitedSessions), len(plan.DetachedSessions),
-		len(plan.ZombieServers), len(plan.OrphanClients))
+		done.ExitedSessions, done.DetachedSessions,
+		done.ZombieServers, done.OrphanClients)
 }
 
 // printCleanResult は手で実行したときの結果を書き出す。
@@ -110,8 +114,8 @@ func printCleanResult(w io.Writer, result app.CleanupResult) {
 	}
 	if len(plan.OrphanClients) > 0 {
 		_, _ = fmt.Fprintf(w, "\n親を失った zellij action(%d 件):\n", len(plan.OrphanClients))
-		for _, pid := range plan.OrphanClients {
-			_, _ = fmt.Fprintf(w, "  pid=%d\n", pid)
+		for _, orphan := range plan.OrphanClients {
+			_, _ = fmt.Fprintf(w, "  pid=%d\n", orphan.PID)
 		}
 	}
 

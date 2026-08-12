@@ -24,6 +24,9 @@ type IdlePace struct {
 	inner domain.IdlePace
 }
 
+// Started は一度でも確認の起点を置いたかを返す。
+func (p IdlePace) Started() bool { return p.inner.Started() }
+
 // ShouldCheck は今 attach の確認を始めてよいかを返す。
 func (p IdlePace) ShouldCheck(now time.Time) bool { return p.inner.ShouldCheck(now) }
 

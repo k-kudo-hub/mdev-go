@@ -1,17 +1,20 @@
 package app
 
 import (
+	"sort"
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
-// planBudget は「誰か開いているか」の確認に使ってよい時間の合計である。
+// cleanupBudget は掃除 1 回に使ってよい時間の合計である。
 //
-// この掃除はセッションの起動前に走る。確認は 1 回あたり最大 10 秒かかりうる
-// ので、対象が増えるとそのぶん起動が待たされる。予算を切って、超えた分は
-// 今回見送る(次回の掃除が拾う)。
-const planBudget = 10 * time.Second
+// この掃除はセッションの起動前に走る。zellij の呼び出しは 1 回あたり最大
+// 10 秒かかりうるので、対象が増えるとそのぶん起動が待たされる。**選ぶ側と
+// 実行する側で別々の予算を持たせない。** 別々にすると合計は 2 倍になり、
+// さらにゾンビの猶予(3 秒)が上に乗る。ここで切った 1 本の締切を全体で
+// 共有し、超えた分は今回見送る(次回の掃除が拾う)。
+const cleanupBudget = 10 * time.Second
 
 // zombieGrace は TERM を送ってから KILL へ進むまでの猶予である。
 //
@@ -28,6 +31,8 @@ type ZombieServer struct {
 	PID int
 	// Session はサーバが持つセッション名。
 	Session string
+	// Command は選んだ時点のコマンド行。送る直前の照合に使う。
+	Command string
 }
 
 // CleanupPlan は掃除で何をするかである。
@@ -42,8 +47,34 @@ type CleanupPlan struct {
 	DetachedSessions []string
 	// ZombieServers は止める zellij サーバ。
 	ZombieServers []ZombieServer
-	// OrphanClients は止める孤児 `zellij action` の PID。
-	OrphanClients []int
+	// OrphanClients は止める孤児 `zellij action`。
+	OrphanClients []OrphanClient
+}
+
+// OrphanClient は親を失った `zellij action` 1 つである。
+type OrphanClient struct {
+	// PID はプロセス ID。
+	PID int
+	// Command は選んだ時点のコマンド行。送る直前の照合に使う。
+	Command string
+}
+
+// CleanupCounts は実際に片付けた件数である。
+//
+// 計画の件数とは別に持つ。**予定と実績は食い違う。** 消す直前の再確認で
+// 飛ばしたもの、予算切れで見送ったもの、失敗したものがあるためで、
+// 計画の件数をそのまま報告すると「掃除した」と嘘をつくことになる。
+type CleanupCounts struct {
+	ExitedSessions   int
+	DetachedSessions int
+	ZombieServers    int
+	OrphanClients    int
+}
+
+// IsEmpty は 1 件も片付けなかったかを返す。
+func (c CleanupCounts) IsEmpty() bool {
+	return c.ExitedSessions == 0 && c.DetachedSessions == 0 &&
+		c.ZombieServers == 0 && c.OrphanClients == 0
 }
 
 // IsEmpty は掃除する対象が 1 つも無いかを返す。
@@ -56,6 +87,8 @@ func (p CleanupPlan) IsEmpty() bool {
 type CleanupResult struct {
 	// Plan は掃除の対象。
 	Plan CleanupPlan
+	// Done は実際に片付けた件数である。dry-run では 0 のままになる。
+	Done CleanupCounts
 	// DryRun は実行しなかったことを表す。
 	DryRun bool
 }
@@ -92,7 +125,10 @@ type SessionCleaner struct {
 // 返す。この error で呼び出し側を止めてはならない用途(--auto)があるため、
 // 握り潰すかどうかは呼び出し側が決める。
 func (c *SessionCleaner) Clean(dryRun bool) (CleanupResult, error) {
-	plan, err := c.plan()
+	// 締切は選ぶ前に 1 本だけ決め、実行まで通して使う(cleanupBudget)。
+	deadline := c.Clock.Now().Add(cleanupBudget)
+
+	plan, err := c.plan(deadline)
 	if err != nil {
 		return CleanupResult{}, err
 	}
@@ -100,12 +136,17 @@ func (c *SessionCleaner) Clean(dryRun bool) (CleanupResult, error) {
 	if dryRun {
 		return result, nil
 	}
-	c.apply(plan)
+	result.Done = c.apply(plan, deadline)
 	return result, nil
 }
 
+// expired は締切を過ぎたかを返す。
+func (c *SessionCleaner) expired(deadline time.Time) bool {
+	return !c.Clock.Now().Before(deadline)
+}
+
 // plan は掃除の対象を組み立てる。
-func (c *SessionCleaner) plan() (CleanupPlan, error) {
+func (c *SessionCleaner) plan(deadline time.Time) (CleanupPlan, error) {
 	sessionsOut, err := c.Sessions.ListSessions()
 	if err != nil {
 		return CleanupPlan{}, err
@@ -121,9 +162,9 @@ func (c *SessionCleaner) plan() (CleanupPlan, error) {
 
 	return CleanupPlan{
 		ExitedSessions:   domain.ExitedSessionNames(sessions),
-		DetachedSessions: c.detachedSessions(sessions, managed),
+		DetachedSessions: c.detachedSessions(sessions, managed, deadline),
 		ZombieServers:    toZombieServers(domain.ZombieServers(domain.ZellijServers(processes), sessions)),
-		OrphanClients:    orphanPIDs(domain.OrphanZellijClients(processes)),
+		OrphanClients:    toOrphanClients(domain.OrphanZellijClients(processes)),
 	}, nil
 }
 
@@ -140,16 +181,27 @@ func (c *SessionCleaner) plan() (CleanupPlan, error) {
 // 誤って判断すると、使用中のセッションを終了させてしまう。飛ばす条件は
 // 3 つある。list-clients が失敗した、応答の形が想定と違う、そして
 // 確認の予算を使い切った、である。
-func (c *SessionCleaner) detachedSessions(sessions []domain.SessionEntry, managed map[string]bool) []string {
-	deadline := c.Clock.Now().Add(planBudget)
-
-	var detached []string
+func (c *SessionCleaner) detachedSessions(
+	sessions []domain.SessionEntry, managed map[string]bool, deadline time.Time,
+) []string {
+	// **古いものから確かめる。** 予算が尽きると後ろは見送られるので、
+	// 順番が固定だと末尾のセッションが毎回あぶれて永久に残る。放置が長い
+	// ものほど片付ける価値が高いので、古い順に予算を使う。
+	candidates := make([]domain.SessionEntry, 0, len(sessions))
 	for _, session := range sessions {
 		if session.Exited || !managed[session.Name] || session.Age < domain.CleanupMinAge {
 			continue
 		}
+		candidates = append(candidates, session)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].Age > candidates[j].Age
+	})
+
+	var detached []string
+	for _, session := range candidates {
 		// 予算を使い切ったら、残りは次回の掃除に任せる。
-		if !c.Clock.Now().Before(deadline) {
+		if c.expired(deadline) {
 			break
 		}
 		if c.attached(session.Name) {
@@ -174,19 +226,33 @@ func (c *SessionCleaner) attached(name string) bool {
 	return count > 0
 }
 
-// apply は掃除を実行する。
+// apply は掃除を実行し、実際に片付けた件数を返す。
 //
 // **消す直前にもう一度確かめる。** 対象を選んでから実行するまでの間に、
 // 利用者がセッションを開くことはありうる(掃除はセッションの起動前に走るので、
 // まさにその瞬間が重なりやすい)。選んだ時点の判断だけで消すと、開いた
 // ばかりのセッションを落とす。
 //
+// **締切を過ぎたら残りは次回に回す。** ここで粘っても起動が待たされるだけで、
+// 取りこぼしは次の掃除が拾う。
+//
 // **個別の失敗は無視して先へ進む。** 1 件消せないことより、掃除全体が
 // 途中で止まって蓄積が残るほうが害が大きい。消せなかったものは次回また
 // 対象になる。
-func (c *SessionCleaner) apply(plan CleanupPlan) {
+func (c *SessionCleaner) apply(plan CleanupPlan, deadline time.Time) CleanupCounts {
+	var done CleanupCounts
+
 	for _, name := range plan.DetachedSessions {
+		if c.expired(deadline) {
+			return done
+		}
 		// 選んでから今までの間に誰かが開いていないか、もう一度見る。
+		//
+		// ここから kill までのごく短い間(数百ミリ秒)は、依然として
+		// 取りこぼしうる窓である。zellij の kill-session には
+		// delete-session のような「動いていたら拒む」防御が無いため、
+		// これ以上は縮められない。窓を最小にすることまでが打てる手で、
+		// 万一巻き込んでもタスクはレジストリから復元される。
 		if c.attached(name) {
 			continue
 		}
@@ -197,16 +263,59 @@ func (c *SessionCleaner) apply(plan CleanupPlan) {
 		// SessionController.DeleteSession を参照)。kill の直後でまだ
 		// 動いていると見なされた場合は削除に失敗し、EXITED として残って
 		// 次回の掃除が拾う。
-		_ = c.Remover.KillSession(name)
+		if err := c.Remover.KillSession(name); err != nil {
+			continue
+		}
 		_ = c.Remover.DeleteSession(name)
+		done.DetachedSessions++
 	}
-	for _, name := range c.stillExited(plan.ExitedSessions) {
-		_ = c.Remover.DeleteSession(name)
+
+	for _, name := range c.stillExited(plan.ExitedSessions, deadline) {
+		if c.expired(deadline) {
+			return done
+		}
+		if err := c.Remover.DeleteSession(name); err != nil {
+			continue
+		}
+		done.ExitedSessions++
 	}
-	c.stopZombies(plan.ZombieServers)
-	for _, pid := range plan.OrphanClients {
-		_ = c.Signaler.Kill(pid)
+
+	// プロセスへ送る前に ps を引き直す。PID は使い回されるので、選んだ
+	// ときと同じ PID が別のプロセスになっていることがある。
+	commands := c.currentCommands()
+	done.ZombieServers = c.stopZombies(plan.ZombieServers, commands, deadline)
+	for _, orphan := range plan.OrphanClients {
+		if c.expired(deadline) {
+			return done
+		}
+		if !sameProcess(commands, orphan.PID, orphan.Command) {
+			continue
+		}
+		if err := c.Signaler.Kill(orphan.PID); err != nil {
+			continue
+		}
+		done.OrphanClients++
 	}
+	return done
+}
+
+// currentCommands は今動いているプロセスの PID とコマンド行の対応を返す。
+// 引けなかった場合は nil を返し、そのときは何にもシグナルを送らない。
+func (c *SessionCleaner) currentCommands() map[int]string {
+	out, err := c.Processes.ListProcesses()
+	if err != nil {
+		return nil
+	}
+	return domain.ProcessCommands(domain.ParseProcessList(out))
+}
+
+// sameProcess は pid が今も同じコマンドで動いているかを返す。
+//
+// **一致を確かめられないものへは送らない。** PID の使い回しで無関係の
+// プロセス(利用者のエディタや別のセッションのペイン)を殺しうる。
+func sameProcess(commands map[int]string, pid int, command string) bool {
+	current, ok := commands[pid]
+	return ok && current == command
 }
 
 // stillExited は今も終了済みであるものだけを返す。
@@ -216,8 +325,8 @@ func (c *SessionCleaner) apply(plan CleanupPlan) {
 // あって消してはならない。
 //
 // 一覧を引き直せなかったときは 1 件も返さない(確かめられないなら消さない)。
-func (c *SessionCleaner) stillExited(names []string) []string {
-	if len(names) == 0 {
+func (c *SessionCleaner) stillExited(names []string, deadline time.Time) []string {
+	if len(names) == 0 || c.expired(deadline) {
 		return nil
 	}
 	out, err := c.Sessions.ListSessions()
@@ -238,25 +347,41 @@ func (c *SessionCleaner) stillExited(names []string) []string {
 	return still
 }
 
-// stopZombies はゾンビサーバを止める。
+// stopZombies はゾンビサーバを止め、止めた件数を返す。
 //
 // まず TERM を送って後始末の機会を与え、猶予の後にまだ居るものだけ KILL する。
 // いきなり KILL するとソケットのファイルが残り、zellij が次に同じ名前の
 // セッションを作るときに失敗しうる。
-func (c *SessionCleaner) stopZombies(servers []ZombieServer) {
-	if len(servers) == 0 {
-		return
-	}
+//
+// 送る前に PID とコマンド行の一致を確かめる。PID は使い回されるので、
+// 選んだときと同じ PID が別のプロセスになっていることがある。
+func (c *SessionCleaner) stopZombies(
+	servers []ZombieServer, commands map[int]string, deadline time.Time,
+) int {
+	targets := make([]ZombieServer, 0, len(servers))
 	for _, server := range servers {
-		_ = c.Signaler.Terminate(server.PID)
+		if sameProcess(commands, server.PID, server.Command) {
+			targets = append(targets, server)
+		}
+	}
+	if len(targets) == 0 || c.expired(deadline) {
+		return 0
+	}
+
+	stopped := 0
+	for _, server := range targets {
+		if err := c.Signaler.Terminate(server.PID); err == nil {
+			stopped++
+		}
 	}
 	// 全部まとめて待つ。1 件ずつ待つと台数ぶん猶予が積み上がる。
 	c.Sleeper.Sleep(zombieGrace)
-	for _, server := range servers {
+	for _, server := range targets {
 		if c.Signaler.IsAlive(server.PID) {
 			_ = c.Signaler.Kill(server.PID)
 		}
 	}
+	return stopped
 }
 
 // toZombieServers は domain の型を境界の型へ移し替える。
@@ -266,19 +391,21 @@ func toZombieServers(servers []domain.ZellijServer) []ZombieServer {
 	}
 	out := make([]ZombieServer, 0, len(servers))
 	for _, server := range servers {
-		out = append(out, ZombieServer{PID: server.PID, Session: server.Session})
+		out = append(out, ZombieServer{
+			PID: server.PID, Session: server.Session, Command: server.Command,
+		})
 	}
 	return out
 }
 
-// orphanPIDs は孤児クライアントの PID だけを取り出す。
-func orphanPIDs(entries []domain.ProcessEntry) []int {
+// toOrphanClients は孤児クライアントを境界の型へ移し替える。
+func toOrphanClients(entries []domain.ProcessEntry) []OrphanClient {
 	if len(entries) == 0 {
 		return nil
 	}
-	pids := make([]int, 0, len(entries))
+	out := make([]OrphanClient, 0, len(entries))
 	for _, entry := range entries {
-		pids = append(pids, entry.PID)
+		out = append(out, OrphanClient{PID: entry.PID, Command: entry.Command})
 	}
-	return pids
+	return out
 }
