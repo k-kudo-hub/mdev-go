@@ -351,3 +351,74 @@ func TestServersInSocketDir(t *testing.T) {
 		})
 	}
 }
+
+// TestOrphanZellijClientsMatchesSessionForm は `zellij --session <名前>
+// action ...` の形も拾うことを確かめる。
+//
+// ペインが行う attach 確認(list-clients)は実測でこの形になる。前置きの
+// `zellij action` だけを見ていると、いちばん数が出る呼び出しを取りこぼす。
+func TestOrphanZellijClientsMatchesSessionForm(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		// --- 拾うもの ---
+		{name: "素の action", command: "zellij action list-tabs", want: true},
+		{
+			name:    "--session 付き(ペインの attach 確認の形)",
+			command: "zellij --session my-session action list-clients",
+			want:    true,
+		},
+		{
+			name:    "絶対パス + --session",
+			command: "/opt/homebrew/bin/zellij --session my-session action list-clients",
+			want:    true,
+		},
+		{name: "短縮形の -s", command: "zellij -s my-session action close-tab", want: true},
+		// --- 拾わないもの ---
+		{name: "action ではない(attach)", command: "zellij attach my-session", want: false},
+		{name: "action ではない(run)", command: "zellij run -- npm test", want: false},
+		{name: "サーバ", command: "/opt/homebrew/bin/zellij --server /tmp/z/a", want: false},
+		{
+			// `--` の後ろは利用者のコマンドなので、そこに action が
+			// 出てきても zellij のサブコマンドではない。
+			name:    "-- の後ろの action",
+			command: "zellij run -- nvim action.md",
+			want:    false,
+		},
+		{name: "別のコマンド", command: "nvim action", want: false},
+		{name: "名前に zellij を含むだけ", command: "grep zellij action", want: false},
+		{name: "zellij 単体", command: "zellij", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entries := domain.ParseProcessList("2001 1 03:00 " + tt.command + "\n")
+			got := len(domain.OrphanZellijClients(entries)) == 1
+			if got != tt.want {
+				t.Errorf("OrphanZellijClients(%q) 検出 = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestOrphanZellijClientsRequiresLostParent は親が生きている呼び出しを
+// 巻き込まないことを確かめる。
+//
+// PPID=1 は「呼び出し元が先に死んだ」印である。実行中の呼び出しを撃つと、
+// タブ操作の途中で zellij の状態が壊れる。
+func TestOrphanZellijClientsRequiresLostParent(t *testing.T) {
+	t.Parallel()
+
+	entries := domain.ParseProcessList(
+		"2001    1 03:00 zellij --session s action list-clients\n" +
+			"2002 1500 03:00 zellij --session s action list-clients\n")
+	got := domain.OrphanZellijClients(entries)
+	if len(got) != 1 || got[0].PID != 2001 {
+		t.Errorf("OrphanZellijClients = %#v, want PID 2001 のみ", got)
+	}
+}
