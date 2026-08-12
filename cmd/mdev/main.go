@@ -13,6 +13,7 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/git"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/news"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/procscan"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/release"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/shell"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
@@ -147,6 +148,11 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Clock:      clock,
 	}
 
+	// zellij のセッション操作。掃除(sessions clean)と、ペインの
+	// 「誰か開いているか」の確認の両方が使う。
+	zellijSessions := zellij.NewSessionController()
+	processes := procscan.NewScanner()
+
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
 			Pending:     paneStore,
@@ -194,6 +200,12 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			},
 		},
 		Env: app.PaneEnv{ZellijSession: getenv("ZELLIJ_SESSION_NAME")},
+		// 誰も開いていないセッションではポーリングを落とす。閉じたまま
+		// 残ったセッションが zellij サーバを劣化させ続けないようにする。
+		Attach: tui.AttachWatch{
+			Checker: zellijSessions,
+			Session: getenv("ZELLIJ_SESSION_NAME"),
+		},
 	}
 
 	// 更新まわり。状態(REPO_URL / VERSION / .update-check)は CONDUCTOR_HOME
@@ -211,6 +223,18 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Remote:    remoteTags,
 			Installer: release.NewInstaller(),
 			Getenv:    getenv,
+		},
+		SessionClean: &app.SessionCleaner{
+			Sessions:  zellijSessions,
+			Clients:   zellijSessions,
+			Remover:   zellijSessions,
+			Processes: processes,
+			Signaler:  processes,
+			Sockets:   zellijSessions,
+			Traces: store.NewSessionTraceStore(
+				store.RegistryRoot(conductorHome), store.PendingRoot(home)),
+			Sleeper: sleeper,
+			Clock:   clock,
 		},
 		UpdateCheck: &app.UpdateChecker{
 			Config: paneStore,

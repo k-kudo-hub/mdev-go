@@ -114,6 +114,12 @@ func (m TaskControlModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.forceRefreshCmd()
 		return m, cmd
 
+	case attachCheckedMsg:
+		// 減速の判断を更新し、減速から復帰したときだけ読み直しを 1 本出す。
+		// 次の合図は張らない(pane.go のチェーン 1 本の不変条件)。
+		cmd := m.polling.observeAttach(msg, m.refreshCmd)
+		return m, cmd
+
 	case tickMsg:
 		if m.busy || m.awaiting {
 			// 削除の途中と 2 打鍵目の待ち受け中は読み直さない。現行版は

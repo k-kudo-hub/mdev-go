@@ -14,6 +14,9 @@ type (
 		// poll はこの読み直しがポーリング起源かどうかを表す。真のときだけ
 		// 着弾で次の合図を張る(pane.go の「完了起点」の説明を参照)。
 		poll bool
+		// fetched は取得(r キー)の完了として出した読み直しであることを
+		// 表す。取得中の画面を解くのはこの 1 本だけである。
+		fetched bool
 	}
 	// newsReloadMsg は取得中の画面を出した後に実際の取得へ進む合図である。
 	newsReloadMsg struct{}
@@ -67,11 +70,15 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case newsRefreshedMsg:
 		// 必ずここを通す(実行中の数を減らし、ポーリング起源なら次の合図を張る)。
 		next := m.polling.arrive(msg.poll)
-		if m.fetching && msg.poll {
-			// 取得に入る前に発行したポーリングの読み直しが着弾した。ここで
-			// 差し替えると取得中の画面が消え、まだ走っている取得が終わったように
-			// 見える。r も再び効くようになり、取得が二重に走る。表示は取得の
-			// 完了(force 起源の着弾)まで据え置く。
+		if m.fetching && !msg.fetched {
+			// 取得中は、取得そのものの完了以外の着弾をすべて捨てる。
+			// 差し替えると取得中の画面が消え、まだ走っている取得が終わった
+			// ように見える。r も再び効くようになり、取得が二重に走る。
+			//
+			// 起源(poll)ではなく「取得の完了か」で見るのは、減速からの
+			// 復帰で出す読み直しのように、ポーリング起源でない着弾が
+			// 取得中に来ることがあるためである。Dashboard / Done が
+			// 待ち受け中の着弾をすべて捨てるのと同じ考え方になる。
 			return m, next
 		}
 		m.snapshot, m.fetching = msg.snapshot, false
@@ -84,8 +91,14 @@ func (m NewsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.polling.force()
 		return m, func() tea.Msg {
 			m.pane.Reload()
-			return newsRefreshedMsg{snapshot: m.pane.Refresh()}
+			return newsRefreshedMsg{snapshot: m.pane.Refresh(), fetched: true}
 		}
+
+	case attachCheckedMsg:
+		// 減速の判断を更新し、減速から復帰したときだけ読み直しを 1 本出す。
+		// 次の合図は張らない(pane.go のチェーン 1 本の不変条件)。
+		cmd := m.polling.observeAttach(msg, m.refreshCmd)
+		return m, cmd
 
 	case tickMsg:
 		if m.fetching {

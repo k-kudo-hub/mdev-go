@@ -44,6 +44,8 @@ type Deps struct {
 	Update UpdateService
 	// UpdateCheck は起動時の更新確認のユースケース。
 	UpdateCheck UpdateCheckService
+	// SessionClean は溜まったセッションと残骸を片付けるユースケース。
+	SessionClean SessionCleanService
 	// Getenv は環境変数を読む。テストで差し替える。
 	Getenv func(string) string
 }
@@ -62,6 +64,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newRecordCommand(deps))
 	cmd.AddCommand(newHooksCommand(deps))
 	cmd.AddCommand(newPaneCommand(deps))
+	cmd.AddCommand(newSessionsCommand(deps))
 	cmd.AddCommand(newUpdateCommand(deps))
 	cmd.AddCommand(newCheckUpdateCommand(deps))
 	return cmd

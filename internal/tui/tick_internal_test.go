@@ -832,8 +832,18 @@ func TestNewsKeepsFetchingScreenWhenPollArrives(t *testing.T) {
 		t.Errorf("取得中に %T を予約している(二重の取得)", immediate(cmd))
 	}
 
-	// 取得が終わった着弾で、はじめて通常の画面へ戻る。
-	done, cmd := update(t, during, newsRefreshedMsg{snapshot: service.snapshot})
+	// 減速からの復帰で出る読み直し(ポーリング起源ではない)が着弾しても、
+	// 取得中の画面は据え置く。起源ではなく「取得の完了か」で見ているため。
+	recovered, cmd := update(t, during, newsRefreshedMsg{
+		snapshot: app.NewsSnapshot{Text: "復帰の読み直し", FetchingText: "取得中", Count: 1},
+	})
+	wantNoContinuation(t, cmd)
+	if got := recovered.View().Content; got != "取得中" {
+		t.Errorf("取得中の画面が差し替わった(復帰の読み直し): %q", got)
+	}
+
+	// 取得そのものの完了で、はじめて通常の画面へ戻る。
+	done, cmd := update(t, recovered, newsRefreshedMsg{snapshot: service.snapshot, fetched: true})
 	wantNoContinuation(t, cmd)
 	if got := done.View().Content; got != "ニュース画面" {
 		t.Errorf("取得後に通常の画面へ戻っていない: %q", got)

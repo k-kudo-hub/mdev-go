@@ -103,6 +103,12 @@ func (m DoneModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case attachCheckedMsg:
+		// 減速の判断を更新し、減速から復帰したときだけ読み直しを 1 本出す。
+		// 次の合図は張らない(pane.go のチェーン 1 本の不変条件)。
+		cmd := m.polling.observeAttach(msg, m.refreshCmd)
+		return m, cmd
+
 	case tickMsg:
 		if m.awaiting {
 			// 2 打鍵目の待ち受け中は集計し直さない。現行版は `read -t 3` が
