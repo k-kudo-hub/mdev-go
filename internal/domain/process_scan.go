@@ -8,17 +8,17 @@ import (
 
 // ps の出力から zellij のプロセスを見分けるための目印。
 const (
-	// zellijServerMarker は zellij のサーバプロセスの目印である。
+	// zellijServerFlag は zellij のサーバプロセスを表す引数である。
 	// 実出力: `zellij --server /var/folders/.../zellij-501/.../<session>`
-	zellijServerMarker = "--server"
+	zellijServerFlag = "--server"
 	// zellijActionMarker は `zellij action ...` のクライアントの目印である。
 	zellijActionMarker = "zellij action"
 	// mdevPaneMarker は mdev が管理するセッションであることの目印である。
 	// ペインの中身が `<CONDUCTOR_HOME>/bin/mdev pane <name>` で起動される。
 	mdevPaneMarker = "/bin/mdev pane"
-	// zellijBinaryMarker は zellij の実行ファイルであることの目印である。
-	// 絶対パスで出ることもあるため、部分一致で見る。
-	zellijBinaryMarker = "zellij"
+	// zellijBinaryName は zellij の実行ファイル名である。
+	// 絶対パスで出ることもあるため、パスの最後の要素と比べる。
+	zellijBinaryName = "zellij"
 )
 
 // orphanPPID は親を失ったプロセスの親 PID である(init に引き取られた状態)。
@@ -136,31 +136,68 @@ type ZellijServer struct {
 
 // ZellijServers は動いている zellij サーバを返す。
 //
-// セッション名を取り出せない行(ソケットのパスが無いなど)は落とす。
-// 名前が分からないサーバを掃除の対象にすると、使用中のものを巻き込む。
+// セッション名を取り出せない行は落とす。名前が分からないサーバを掃除の
+// 対象にすると、使用中のものを巻き込む。
 func ZellijServers(entries []ProcessEntry) []ZellijServer {
 	var servers []ZellijServer
 	for _, entry := range entries {
-		if !strings.Contains(entry.Command, zellijBinaryMarker) ||
-			!strings.Contains(entry.Command, zellijServerMarker) {
+		socket, ok := zellijServerSocket(entry.Command)
+		if !ok {
 			continue
 		}
-		fields := strings.Fields(entry.Command)
-		socket := fields[len(fields)-1]
-		// `--server` の直後が無い(パスを取れない)場合は諦める。
-		if socket == zellijServerMarker {
-			continue
-		}
-		name := socket
-		if i := strings.LastIndex(socket, "/"); i >= 0 {
-			name = socket[i+1:]
-		}
+		name := socketSessionName(socket)
 		if name == "" {
 			continue
 		}
 		servers = append(servers, ZellijServer{PID: entry.PID, Elapsed: entry.Elapsed, Session: name})
 	}
 	return servers
+}
+
+// zellijServerSocket はコマンド行が zellij サーバのものなら、そのソケットの
+// パスを返す。
+//
+// **形をきっちり見る。** 判定に使うのは次の 3 つで、どれか 1 つでも
+// 合わなければサーバとみなさない。
+//
+//   - 実行ファイルの名前(パスの最後の要素)が "zellij" であること
+//   - 2 つ目の語がちょうど `--server` であること
+//   - その後ろにソケットのパスがあること
+//
+// 部分一致で見ていたときは、`nvim --server /tmp/zellij-x` のような
+// 無関係のプロセスまでサーバとして拾い、掃除が kill しにいく恐れがあった。
+//
+// パスは **`--server` の後ろから行末まで** を丸ごと採る。最後の語だけを
+// 見ると、空白を含むパス(macOS の一時ディレクトリは既定では含まないが、
+// TMPDIR は利用者が変えられる)で名前を取り違える。
+func zellijServerSocket(command string) (string, bool) {
+	trimmed := strings.TrimSpace(command)
+	fields := strings.Fields(trimmed)
+	if len(fields) < 3 {
+		return "", false
+	}
+	if socketBase(fields[0]) != zellijBinaryName || fields[1] != zellijServerFlag {
+		return "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+	rest = strings.TrimSpace(strings.TrimPrefix(rest, zellijServerFlag))
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
+}
+
+// socketSessionName はソケットのパスからセッション名(最後の要素)を返す。
+func socketSessionName(socket string) string {
+	return socketBase(socket)
+}
+
+// socketBase はパスの最後の要素を返す。
+func socketBase(path string) string {
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }
 
 // MdevManagedSessions は mdev が管理しているセッション名の集合を返す。

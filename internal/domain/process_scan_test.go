@@ -241,3 +241,63 @@ func TestZombieServersSparesYoungServers(t *testing.T) {
 		})
 	}
 }
+
+// TestZellijServersRejectsLookAlikes は zellij サーバでないプロセスを
+// サーバとみなさないことを確かめる。
+//
+// 部分一致で見ていたときは、`nvim --server /tmp/zellij-x` のような無関係の
+// プロセスまで拾い、掃除が kill しにいく恐れがあった。
+func TestZellijServersRejectsLookAlikes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "nvim の --server", command: "nvim --server /tmp/zellij-501/x"},
+		{name: "実行ファイル名が違う", command: "/usr/bin/zellijctl --server /tmp/z/a"},
+		{name: "--server ではない", command: "/opt/homebrew/bin/zellij --serverish /tmp/z/a"},
+		{name: "パスが無い", command: "/opt/homebrew/bin/zellij --server"},
+		{name: "クライアント", command: "zellij --new-session-with-layout /l.kdl --session a"},
+		{name: "名前に zellij を含むだけ", command: "grep zellij --server /tmp/z/a"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entries := domain.ParseProcessList("100 1 10:00 " + tt.command + "\n")
+			if got := domain.ZellijServers(entries); len(got) != 0 {
+				t.Errorf("ZellijServers = %#v, want 空", got)
+			}
+		})
+	}
+}
+
+// TestZellijServersWithSpacedSocketPath は空白を含むソケットのパスから
+// 正しくセッション名を取ることを確かめる。
+//
+// 最後の語だけを見ると、名前が途中で切れて別のセッションを指す。
+func TestZellijServersWithSpacedSocketPath(t *testing.T) {
+	t.Parallel()
+
+	entries := domain.ParseProcessList(
+		"100 1 10:00 /opt/homebrew/bin/zellij --server /tmp/my tmp/zellij-501/v1/my session\n")
+	got := domain.ZellijServers(entries)
+	want := []domain.ZellijServer{{PID: 100, Elapsed: 10 * time.Minute, Session: "my session"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ZellijServers = %#v, want %#v", got, want)
+	}
+}
+
+// TestMdevManagedSessionsWithSpacedName は空白入りのセッション名でも
+// mdev 管理の判定が働くことを確かめる。
+func TestMdevManagedSessionsWithSpacedName(t *testing.T) {
+	t.Parallel()
+
+	got := domain.MdevManagedSessions(domain.ParseProcessList(
+		"100 1 10:00 /opt/homebrew/bin/zellij --server /tmp/z/my session\n" +
+			"101 100 10:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n"))
+	want := map[string]bool{"my session": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MdevManagedSessions = %v, want %v", got, want)
+	}
+}
