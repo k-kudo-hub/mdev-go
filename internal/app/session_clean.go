@@ -113,6 +113,8 @@ type SessionCleaner struct {
 	Remover   SessionRemover
 	Processes ProcessLister
 	Signaler  ProcessSignaler
+	Sockets   SessionSocketLocator
+	Traces    SessionTraceChecker
 	Sleeper   Sleeper
 	Clock     Clock
 }
@@ -161,9 +163,9 @@ func (c *SessionCleaner) plan(deadline time.Time) (CleanupPlan, error) {
 	managed := domain.MdevManagedSessions(processes)
 
 	return CleanupPlan{
-		ExitedSessions:   domain.ExitedSessionNames(sessions),
+		ExitedSessions:   c.exitedSessions(sessions),
 		DetachedSessions: c.detachedSessions(sessions, managed, deadline),
-		ZombieServers:    toZombieServers(domain.ZombieServers(domain.ZellijServers(processes), sessions)),
+		ZombieServers:    c.zombieServers(processes, sessions, deadline),
 		OrphanClients:    toOrphanClients(domain.OrphanZellijClients(processes)),
 	}, nil
 }
@@ -210,6 +212,65 @@ func (c *SessionCleaner) detachedSessions(
 		detached = append(detached, session.Name)
 	}
 	return detached
+}
+
+// exitedSessions は削除してよい終了済みセッションを返す。
+//
+// **mdev が扱った跡のあるものだけを消す。** 終了済みセッションのメタデータは
+// attach で復活させるための資産(resurrection)であり、mdev がそれを使わない
+// のは **mdev 自身の設計判断**(init.zsh が明示的に作り直す)であって、
+// 利用者が手で作ったセッションにまで押し付けてよいものではない。
+//
+// この掃除はセッションを開くたびに走るので、無条件に消すと利用者の
+// `dev` のようなセッションの復活先が毎回失われる。痕跡が無い終了済み
+// セッションは放っておく(メタデータが残っていても無害である)。
+func (c *SessionCleaner) exitedSessions(sessions []domain.SessionEntry) []string {
+	var targets []string
+	for _, name := range domain.ExitedSessionNames(sessions) {
+		if !c.Traces.HasTrace(name) {
+			continue
+		}
+		targets = append(targets, name)
+	}
+	return targets
+}
+
+// zombieServers は止めてよいゾンビサーバだけを返す。
+//
+// 絞り込みは 3 段構えで、どれか 1 つでも通らなければ対象から外す。
+//
+//  1. **自分から見える範囲のソケットであること。** zellij の list-sessions は
+//     自分の一時ディレクトリ配下しか見ないので、別の一時ディレクトリで
+//     起動されたサーバは必ず「一覧に出ない」ように見える。それはゾンビでは
+//     なく、こちらから見えていないだけである
+//  2. 一覧に生きていると出ておらず、起動から十分に経っていること
+//  3. **そのセッションにクライアントが居ないと確かめられること。** ここが
+//     detached 経路と同じ最後の砦になる。確かめられない(セッションが
+//     応答しない)場合も撃たない
+//
+// 3 番目の条件により、ソケットごと死んでいるサーバは掃除できなくなる
+// (list-clients が失敗するため)。それでも撃たないほうを選ぶ。使用中の
+// セッションを落とす事故を一度起こしており、取りこぼしとは害の大きさが
+// 釣り合わない。残ったものは利用者が手で始末できる。
+func (c *SessionCleaner) zombieServers(
+	processes []domain.ProcessEntry, sessions []domain.SessionEntry, deadline time.Time,
+) []ZombieServer {
+	scoped := domain.ServersInSocketDir(domain.ZellijServers(processes), c.Sockets.SocketDir())
+
+	var targets []ZombieServer
+	for _, server := range domain.ZombieServers(scoped, sessions) {
+		if c.expired(deadline) {
+			break
+		}
+		// detached と同じ確認をゾンビにも通す。
+		if c.attached(server.Session) {
+			continue
+		}
+		targets = append(targets, ZombieServer{
+			PID: server.PID, Session: server.Session, Command: server.Command,
+		})
+	}
+	return targets
 }
 
 // attached は今アタッチしているクライアントが居るかを返す。
@@ -382,20 +443,6 @@ func (c *SessionCleaner) stopZombies(
 		}
 	}
 	return stopped
-}
-
-// toZombieServers は domain の型を境界の型へ移し替える。
-func toZombieServers(servers []domain.ZellijServer) []ZombieServer {
-	if len(servers) == 0 {
-		return nil
-	}
-	out := make([]ZombieServer, 0, len(servers))
-	for _, server := range servers {
-		out = append(out, ZombieServer{
-			PID: server.PID, Session: server.Session, Command: server.Command,
-		})
-	}
-	return out
 }
 
 // toOrphanClients は孤児クライアントを境界の型へ移し替える。

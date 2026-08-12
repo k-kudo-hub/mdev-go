@@ -102,6 +102,27 @@ func (p *fakeProcessStore) Kill(pid int) error {
 
 func (p *fakeProcessStore) IsAlive(pid int) bool { return p.aliveAfterTerm[pid] }
 
+// fakeTraces は mdev の痕跡の有無を返す代役である。
+type fakeTraces struct {
+	// has は痕跡があるセッション名。nil ならすべて痕跡ありとして扱う。
+	has map[string]bool
+}
+
+func (t fakeTraces) HasTrace(session string) bool {
+	if t.has == nil {
+		return true
+	}
+	return t.has[session]
+}
+
+// fakeSockets は自分から見えるソケット置き場を返す代役である。
+type fakeSockets struct{ dir string }
+
+func (s fakeSockets) SocketDir() string { return s.dir }
+
+// testSocketDir は fixture のソケットが置かれている場所である。
+const testSocketDir = "/tmp/z"
+
 // fakeSleeper は待ちを記録するだけで実際には待たない。
 type fakeSleeper struct{ slept []time.Duration }
 
@@ -129,18 +150,25 @@ const (
 
 // newCleaner は既定の状況(in-use に 1 つ attach、idle は誰も居ない)の
 // 掃除ユースケースを返す。
-func newCleaner() (*app.SessionCleaner, *fakeSessionStore, *fakeProcessStore, *fakeSleeper) {
+func newCleanFakes() (*fakeSessionStore, *fakeProcessStore) {
 	sessions := &fakeSessionStore{
 		sessionsOut: cleanSessionList,
 		clients: map[string]string{
 			"in-use": "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n1  terminal_3  mdev pane news\n",
 			"idle":   "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n",
 			"manual": "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n",
+			// ゾンビにも「誰も居ない」ことを確かめさせる。
+			"zombie": "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n",
 		},
 		clientErrs:       map[string]error{},
 		clientsOnRecheck: map[string]string{},
 	}
 	processes := &fakeProcessStore{out: cleanProcessList, aliveAfterTerm: map[int]bool{}}
+	return sessions, processes
+}
+
+func newCleaner() (*app.SessionCleaner, *fakeSessionStore, *fakeProcessStore, *fakeSleeper) {
+	sessions, processes := newCleanFakes()
 	sleeper := &fakeSleeper{}
 	return &app.SessionCleaner{
 		Sessions:  sessions,
@@ -148,6 +176,8 @@ func newCleaner() (*app.SessionCleaner, *fakeSessionStore, *fakeProcessStore, *f
 		Remover:   sessions,
 		Processes: processes,
 		Signaler:  processes,
+		Sockets:   fakeSockets{dir: testSocketDir},
+		Traces:    fakeTraces{},
 		Sleeper:   sleeper,
 		Clock:     testClock,
 	}, sessions, processes, sleeper
@@ -395,7 +425,7 @@ func TestCleanWithNothingToDo(t *testing.T) {
 	cleaner := &app.SessionCleaner{
 		Sessions: sessions, Clients: sessions, Remover: sessions,
 		Processes: processes, Signaler: processes, Sleeper: &fakeSleeper{},
-		Clock: testClock,
+		Sockets: fakeSockets{dir: testSocketDir}, Traces: fakeTraces{}, Clock: testClock,
 	}
 
 	got, err := cleaner.Clean(false)
@@ -574,7 +604,7 @@ func TestCleanStopsCheckingWhenBudgetIsSpent(t *testing.T) {
 	cleaner := &app.SessionCleaner{
 		Sessions: sessions, Clients: sessions, Remover: sessions,
 		Processes: processes, Signaler: processes, Sleeper: &fakeSleeper{},
-		Clock: clock,
+		Sockets: fakeSockets{dir: testSocketDir}, Traces: fakeTraces{}, Clock: clock,
 	}
 
 	got, err := cleaner.Clean(true)
@@ -724,7 +754,7 @@ func TestCleanChecksOldestSessionsFirst(t *testing.T) {
 	cleaner := &app.SessionCleaner{
 		Sessions: sessions, Clients: sessions, Remover: sessions,
 		Processes: processes, Signaler: processes, Sleeper: &fakeSleeper{},
-		Clock: testClock,
+		Sockets: fakeSockets{dir: testSocketDir}, Traces: fakeTraces{}, Clock: testClock,
 	}
 
 	got, err := cleaner.Clean(true)
@@ -734,5 +764,193 @@ func TestCleanChecksOldestSessionsFirst(t *testing.T) {
 	want := []string{"oldest", "middle", "young"}
 	if !slices.Equal(got.Plan.DetachedSessions, want) {
 		t.Errorf("確かめる順 = %v, want %v(古い順)", got.Plan.DetachedSessions, want)
+	}
+}
+
+// TestCleanAbortsWhenSessionListIsUnreadable は **実際に起きた事故の再現**
+// である。
+//
+// PATH に何もしない zellij スタブ(rc=0・無出力)が入った状態で --auto が
+// 走り、使用中セッションのサーバを TERM → KILL した。セッション一覧が
+// 空に見えると、生きているセッションのサーバがすべて「一覧に出ないサーバ」
+// = ゾンビに見えるためである。
+//
+// 判断材料が空のときは掃除全体を中止し、**1 件もシグナルを送らない**。
+func TestCleanAbortsWhenSessionListIsUnreadable(t *testing.T) {
+	t.Parallel()
+
+	cleaner, sessions, processes, _ := newCleaner()
+	// スタブの zellij が返す状態(adapter が判断不能として error にする)。
+	sessions.sessionsOut = ""
+	sessions.sessionsErr = errors.New("セッションの有無を判断できません")
+
+	if _, err := cleaner.Clean(false); err == nil {
+		t.Fatal("判断材料が無いのに掃除を続けました")
+	}
+	if len(processes.calls) != 0 {
+		t.Errorf("シグナルを送りました: %v", processes.calls)
+	}
+	if len(sessions.calls) != 0 {
+		t.Errorf("セッションを操作しました: %v", sessions.calls)
+	}
+}
+
+// TestCleanNeverKillsAttachedZombieCandidate は、一覧に出ないサーバでも
+// クライアントが居るなら撃たないことを確かめる。
+//
+// detached 経路と同じ「触れない側へ倒す」原則をゾンビ経路にも通す。
+func TestCleanNeverKillsAttachedZombieCandidate(t *testing.T) {
+	t.Parallel()
+
+	cleaner, sessions, processes, _ := newCleaner()
+	// 一覧には出ないが、クライアントが 1 つ居る。
+	sessions.clients["zombie"] = attachedClients
+
+	got, err := cleaner.Clean(false)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	if len(got.Plan.ZombieServers) != 0 {
+		t.Errorf("ゾンビ = %+v, want 空(誰か開いている)", got.Plan.ZombieServers)
+	}
+	for _, call := range processes.calls {
+		if call == "term 400" || call == "kill 400" {
+			t.Errorf("開かれているサーバへシグナルを送りました: %v", processes.calls)
+		}
+	}
+}
+
+// TestCleanSkipsZombieWhenClientsUnknown は応答しないセッションのサーバへ
+// 撃たないことを確かめる。
+//
+// この条件により、ソケットごと死んだサーバは掃除できなくなる。それでも
+// 撃たないほうを選ぶ(使用中セッションを落とす事故と、取りこぼしとでは
+// 害の大きさが釣り合わない)。
+func TestCleanSkipsZombieWhenClientsUnknown(t *testing.T) {
+	t.Parallel()
+
+	cleaner, sessions, processes, _ := newCleaner()
+	sessions.clientErrs["zombie"] = errors.New("session not found")
+
+	got, err := cleaner.Clean(false)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	if len(got.Plan.ZombieServers) != 0 {
+		t.Errorf("ゾンビ = %+v, want 空(確かめられない)", got.Plan.ZombieServers)
+	}
+	// 孤児クライアント(500)の掃除はセッションと無関係なので続く。
+	for _, call := range processes.calls {
+		if call == "term 400" || call == "kill 400" {
+			t.Errorf("確かめられないサーバへシグナルを送りました: %v", processes.calls)
+		}
+	}
+}
+
+// TestCleanScopesZombiesToOwnSocketDir は自分から見える範囲の外にある
+// サーバを候補にしないことを確かめる。
+//
+// zellij の list-sessions は自分の一時ディレクトリ配下しか見ないため、
+// 別の一時ディレクトリで起動されたサーバは必ず「一覧に出ない」ように
+// 見える。それはゾンビではなく、こちらから見えていないだけである。
+func TestCleanScopesZombiesToOwnSocketDir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		socketDir string
+		wantCount int
+	}{
+		{name: "同じ置き場なら候補になる", socketDir: testSocketDir, wantCount: 1},
+		{name: "別の置き場は候補にしない", socketDir: "/var/folders/other/T/zellij-501", wantCount: 0},
+		// 範囲を決められないなら 1 件も撃たない。
+		{name: "置き場が分からなければ候補にしない", socketDir: "", wantCount: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			sessions, processes := newCleanFakes()
+			cleaner := &app.SessionCleaner{
+				Sessions: sessions, Clients: sessions, Remover: sessions,
+				Processes: processes, Signaler: processes, Sleeper: &fakeSleeper{},
+				Sockets: fakeSockets{dir: tt.socketDir}, Traces: fakeTraces{}, Clock: testClock,
+			}
+
+			got, err := cleaner.Clean(true)
+			if err != nil {
+				t.Fatalf("Clean() = %v", err)
+			}
+			if len(got.Plan.ZombieServers) != tt.wantCount {
+				t.Errorf("ゾンビ = %+v, want %d 件", got.Plan.ZombieServers, tt.wantCount)
+			}
+		})
+	}
+}
+
+// TestCleanOnlyDeletesExitedSessionsMdevTouched は、mdev が扱った跡の無い
+// 終了済みセッションに触れないことを確かめる。
+//
+// 終了済みセッションのメタデータは attach で復活させるための資産である。
+// mdev がそれを使わないのは mdev 自身の設計判断であって、利用者が手で
+// 作ったセッションにまで押し付けてよいものではない。この掃除はセッションを
+// 開くたびに走るので、無条件に消すと利用者の `dev` のようなセッションの
+// 復活先が毎回失われる。
+func TestCleanOnlyDeletesExitedSessionsMdevTouched(t *testing.T) {
+	t.Parallel()
+
+	sessions, processes := newCleanFakes()
+	cleaner := &app.SessionCleaner{
+		Sessions: sessions, Clients: sessions, Remover: sessions,
+		Processes: processes, Signaler: processes, Sleeper: &fakeSleeper{},
+		Sockets: fakeSockets{dir: testSocketDir},
+		// gone-1 は mdev が扱った跡があるが、gone-2 は利用者のセッション。
+		Traces: fakeTraces{has: map[string]bool{"gone-1": true}},
+		Clock:  testClock,
+	}
+
+	got, err := cleaner.Clean(false)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	if want := []string{"gone-1"}; !slices.Equal(got.Plan.ExitedSessions, want) {
+		t.Errorf("終了済み = %v, want %v(痕跡のあるものだけ)", got.Plan.ExitedSessions, want)
+	}
+	for _, call := range sessions.calls {
+		if call == "delete gone-2" {
+			t.Errorf("利用者のセッションを消しました: %v", sessions.calls)
+		}
+	}
+	if !slices.Contains(sessions.calls, "delete gone-1") {
+		t.Errorf("mdev のセッションが消えていません: %v", sessions.calls)
+	}
+}
+
+// TestCleanLeavesAllExitedWithoutTraces は痕跡が 1 つも無ければ終了済みを
+// 1 件も消さないことを確かめる(mdev を入れたばかりの環境など)。
+func TestCleanLeavesAllExitedWithoutTraces(t *testing.T) {
+	t.Parallel()
+
+	sessions, processes := newCleanFakes()
+	cleaner := &app.SessionCleaner{
+		Sessions: sessions, Clients: sessions, Remover: sessions,
+		Processes: processes, Signaler: processes, Sleeper: &fakeSleeper{},
+		Sockets: fakeSockets{dir: testSocketDir},
+		Traces:  fakeTraces{has: map[string]bool{}},
+		Clock:   testClock,
+	}
+
+	got, err := cleaner.Clean(false)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	if len(got.Plan.ExitedSessions) != 0 {
+		t.Errorf("終了済み = %v, want 空", got.Plan.ExitedSessions)
+	}
+	for _, call := range sessions.calls {
+		if strings.HasPrefix(call, "delete gone-") {
+			t.Errorf("痕跡が無いのに消しました: %v", sessions.calls)
+		}
 	}
 }

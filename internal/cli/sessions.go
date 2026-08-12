@@ -103,7 +103,7 @@ func printCleanResult(w io.Writer, result app.CleanupResult) {
 		return
 	}
 
-	printCleanTargets(w, "終了済みセッション(削除)", plan.ExitedSessions)
+	printCleanTargets(w, "終了済みセッション(mdev が扱ったもの・削除)", plan.ExitedSessions)
 	printCleanTargets(w, "誰も開いていない mdev セッション(終了して削除)", plan.DetachedSessions)
 
 	if len(plan.ZombieServers) > 0 {

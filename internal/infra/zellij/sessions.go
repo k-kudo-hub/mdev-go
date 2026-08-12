@@ -2,6 +2,11 @@ package zellij
 
 import (
 	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
@@ -12,6 +17,10 @@ import (
 //
 // どの呼び出しにも commandTimeout(10 秒)の上限を付ける。掃除はセッションの
 // 起動前に走るため、zellij が返らなくなると起動そのものが止まってしまう。
+// socketDirPrefix は zellij のソケット置き場の名前の頭である。
+// 実体は `<一時ディレクトリ>/zellij-<uid>`。
+const socketDirPrefix = "zellij-"
+
 type SessionController struct {
 	// output はコマンドの標準出力と実行の成否を返す。テストで差し替える。
 	output func(timeout time.Duration, name string, args ...string) (string, error)
@@ -29,6 +38,7 @@ var (
 	_ app.SessionClientLister  = (*SessionController)(nil)
 	_ app.SessionRemover       = (*SessionController)(nil)
 	_ app.SessionAttachChecker = (*SessionController)(nil)
+	_ app.SessionSocketLocator = (*SessionController)(nil)
 )
 
 // NewSessionController は zellij コマンドを実行する SessionController を返す。
@@ -42,23 +52,41 @@ func NewSessionController() *SessionController {
 
 // ListSessions は `zellij list-sessions --no-formatting` の出力を返す。
 //
-// **セッションが 1 つも無い状態を失敗にしない。** zellij はこのとき rc=1 で
-// 終わり、標準出力は空、標準エラーへ「No active zellij sessions found.」を
-// 出す(実機で確認)。これを error にすると、セッションが無い環境では
-// 掃除全体が止まり、動いているゾンビサーバや孤児プロセスを片付けられない。
+// **「0 件」と認めるのは、標準エラーに明示の文言があるときだけである。**
+// zellij はセッションが 1 つも無いと rc=1・標準出力は空・標準エラーへ
+// 「No active zellij sessions found.」を出す(実機で確認)。
 //
-// 一方で **どんな失敗も 0 件と読んではならない。** 0 件とみなすと、
-// 生きているセッションのサーバがすべて「一覧に出ないサーバ」= ゾンビに
-// 見えてしまう。区別は標準エラーの文言で行う(domain.IsNoSessionsOutput)。
+// rc=0 で何も返さない応答は **判断不能として error にする。** ここを
+// 「0 件」として通すと、生きているセッションのサーバがすべて
+// 「一覧に出ないサーバ」= ゾンビに見え、掃除が撃ちにいく。実際に、PATH に
+// 何もしない zellij スタブ(rc=0・無出力)が入った状態で使用中セッションの
+// サーバを落とす事故が起きた。zellij CLI の rc=0 は「やり遂げた」ことを
+// 意味しないので、成功したという申告だけを根拠にしてはならない。
 func (c *SessionController) ListSessions() (string, error) {
 	stdout, stderr, err := c.outputBoth(commandTimeout, binaryName, "list-sessions", "--no-formatting")
 	if err == nil {
-		return stdout, nil
+		if strings.TrimSpace(stdout) != "" {
+			return stdout, nil
+		}
+		return "", errors.New(
+			"zellij list-sessions が何も返しませんでした(セッションの有無を判断できません)")
 	}
 	if domain.IsNoSessionsOutput(stdout, stderr) {
 		return "", nil
 	}
 	return "", err //nolint:wrapcheck // 呼び出し側が用途に応じて包む
+}
+
+// SocketDir は自分が見ている zellij のソケット置き場を返す。
+//
+// zellij はソケットを `<一時ディレクトリ>/zellij-<uid>/contract_version_N/<名前>`
+// に置く(実機で確認)。一時ディレクトリは TMPDIR 由来なので、**同じ
+// 一時ディレクトリを見ているサーバだけが list-sessions の対象になる。**
+// 別の TMPDIR で起動されたサーバは一覧に出ないが、それは「ゾンビ」では
+// なく「こちらから見えていないだけ」である。掃除の対象を自分の見える
+// 範囲へ絞るために使う。
+func (c *SessionController) SocketDir() string {
+	return filepath.Join(os.TempDir(), socketDirPrefix+strconv.Itoa(os.Getuid()))
 }
 
 // ListClients はセッションにアタッチしているクライアントの一覧を返す。

@@ -59,6 +59,7 @@ func TestZellijServers(t *testing.T) {
 	want := []domain.ZellijServer{{
 		PID: 18001, Elapsed: time.Hour + 59*time.Second, Session: "mdev-go-224042",
 		Command: "/opt/homebrew/bin/zellij --server /var/folders/5w/T/zellij-501/contract_version_1/mdev-go-224042",
+		Socket:  "/var/folders/5w/T/zellij-501/contract_version_1/mdev-go-224042",
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ZellijServers = %#v, want %#v", got, want)
@@ -288,6 +289,7 @@ func TestZellijServersWithSpacedSocketPath(t *testing.T) {
 	want := []domain.ZellijServer{{
 		PID: 100, Elapsed: 10 * time.Minute, Session: "my session",
 		Command: "/opt/homebrew/bin/zellij --server /tmp/my tmp/zellij-501/v1/my session",
+		Socket:  "/tmp/my tmp/zellij-501/v1/my session",
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ZellijServers = %#v, want %#v", got, want)
@@ -305,5 +307,47 @@ func TestMdevManagedSessionsWithSpacedName(t *testing.T) {
 	want := map[string]bool{"my session": true}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("MdevManagedSessions = %v, want %v", got, want)
+	}
+}
+
+// TestServersInSocketDir は掃除の対象を「自分から見える範囲」へ絞ることを
+// 確かめる。
+//
+// zellij の list-sessions は自分の一時ディレクトリ配下しか見ないため、
+// 別の一時ディレクトリで起動されたサーバは必ず「一覧に出ない」ように
+// 見える。それはゾンビではなく、こちらから見えていないだけである。
+func TestServersInSocketDir(t *testing.T) {
+	t.Parallel()
+
+	servers := []domain.ZellijServer{
+		{PID: 1, Session: "mine", Socket: "/tmp/z/zellij-501/v1/mine"},
+		{PID: 2, Session: "other", Socket: "/var/folders/x/T/zellij-501/v1/other"},
+		// 前方一致で騙されないこと(/tmp/z-evil は /tmp/z の配下ではない)。
+		{PID: 3, Session: "evil", Socket: "/tmp/z-evil/v1/evil"},
+	}
+
+	tests := []struct {
+		name string
+		dir  string
+		want []int
+	}{
+		{name: "自分の置き場だけ残る", dir: "/tmp/z/zellij-501", want: []int{1}},
+		{name: "末尾のスラッシュは無視する", dir: "/tmp/z/zellij-501/", want: []int{1}},
+		{name: "前方一致で他の置き場を巻き込まない", dir: "/tmp/z", want: []int{1}},
+		// 範囲を決められないなら 1 件も返さない。
+		{name: "置き場が分からなければ空", dir: "", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got []int
+			for _, server := range domain.ServersInSocketDir(servers, tt.dir) {
+				got = append(got, server.PID)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ServersInSocketDir(%q) = %v, want %v", tt.dir, got, tt.want)
+			}
+		})
 	}
 }

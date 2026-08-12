@@ -2,7 +2,10 @@ package zellij
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -113,5 +116,49 @@ func TestIsAttachedFallsBackToAttached(t *testing.T) {
 				t.Errorf("IsAttached = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestListSessionsRejectsSilentSuccess は **実際に起きた事故の入口** を
+// 塞いだことを確かめる。
+//
+// PATH に何もしない zellij スタブ(rc=0・無出力)が入った状態で --auto が
+// 走り、使用中セッションのサーバを TERM → KILL した。rc=0 で何も返さない
+// 応答を「0 件」として通すと、生きているセッションのサーバがすべて
+// 「一覧に出ないサーバ」= ゾンビに見えるためである。
+//
+// zellij CLI の rc=0 は「やり遂げた」ことを意味しない。成功したという
+// 申告だけを根拠にしてはならない。
+func TestListSessionsRejectsSilentSuccess(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		stdout, stderr string
+	}{
+		{name: "rc=0 で完全に無出力(スタブ)", stdout: "", stderr: ""},
+		{name: "rc=0 で空白だけ", stdout: "  \n", stderr: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c, _ := newZeroSessionController(tt.stdout, tt.stderr, nil)
+			got, err := c.ListSessions()
+			if err == nil {
+				t.Errorf("判断不能なのに通しました(出力 = %q)", got)
+			}
+		})
+	}
+}
+
+// TestSocketDirIsUnderTempDir はソケット置き場が一時ディレクトリ配下の
+// `zellij-<uid>` であることを確かめる(実機で確認した置き場所)。
+func TestSocketDirIsUnderTempDir(t *testing.T) {
+	t.Parallel()
+
+	got := NewSessionController().SocketDir()
+	want := filepath.Join(os.TempDir(), "zellij-"+strconv.Itoa(os.Getuid()))
+	if got != want {
+		t.Errorf("SocketDir() = %q, want %q", got, want)
 	}
 }

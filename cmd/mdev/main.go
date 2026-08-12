@@ -230,8 +230,11 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Remover:   zellijSessions,
 			Processes: processes,
 			Signaler:  processes,
-			Sleeper:   sleeper,
-			Clock:     clock,
+			Sockets:   zellijSessions,
+			Traces: store.NewSessionTraceStore(
+				store.RegistryRoot(conductorHome), store.PendingRoot(home)),
+			Sleeper: sleeper,
+			Clock:   clock,
 		},
 		UpdateCheck: &app.UpdateChecker{
 			Config: paneStore,

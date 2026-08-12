@@ -134,6 +134,9 @@ type ZellijServer struct {
 	// シグナルを送る直前に引き直して照合するために持つ。PID は使い回される
 	// ので、選んだときと同じ PID が別のプロセスになっていることがある。
 	Command string
+	// Socket はサーバが使っているソケットのパスである。
+	// 掃除の対象を自分の見える範囲へ絞るために使う。
+	Socket string
 	// Session はサーバが持つセッション名。
 	//
 	// サーバのコマンド行の末尾がソケットのパスで、その最後の要素が
@@ -158,7 +161,8 @@ func ZellijServers(entries []ProcessEntry) []ZellijServer {
 			continue
 		}
 		servers = append(servers, ZellijServer{
-			PID: entry.PID, Elapsed: entry.Elapsed, Session: name, Command: entry.Command,
+			PID: entry.PID, Elapsed: entry.Elapsed, Session: name,
+			Command: entry.Command, Socket: socket,
 		})
 	}
 	return servers
@@ -304,4 +308,29 @@ func ProcessCommands(entries []ProcessEntry) map[int]string {
 		commands[entry.PID] = entry.Command
 	}
 	return commands
+}
+
+// ServersInSocketDir は dir の配下にソケットを持つサーバだけを返す。
+//
+// **自分から見える範囲だけを掃除の候補にする。** zellij の `list-sessions`
+// は自分の一時ディレクトリ配下しか見ないため、別の一時ディレクトリで
+// 起動されたサーバは必ず「一覧に出ないサーバ」に見える。それはゾンビでは
+// なく、こちらから見えていないだけである。範囲で絞らないと、別の環境で
+// 動いている正常なセッションを撃つことになる。
+//
+// dir が空(範囲を決められない)場合は 1 件も返さない。
+func ServersInSocketDir(servers []ZellijServer, dir string) []ZellijServer {
+	if dir == "" {
+		return nil
+	}
+	prefix := strings.TrimSuffix(dir, "/") + "/"
+
+	var scoped []ZellijServer
+	for _, server := range servers {
+		if !strings.HasPrefix(server.Socket, prefix) {
+			continue
+		}
+		scoped = append(scoped, server)
+	}
+	return scoped
 }

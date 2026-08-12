@@ -56,3 +56,28 @@ type ProcessSignaler interface {
 type SessionAttachChecker interface {
 	IsAttached(session string) bool
 }
+
+// SessionSocketLocator は自分が見ている zellij のソケット置き場を返す。
+//
+// 掃除の対象を「自分から見える範囲」へ絞るために使う。zellij は
+// 一時ディレクトリ配下にソケットを置き、`list-sessions` はその範囲しか
+// 見ない。別の一時ディレクトリで起動されたサーバは一覧に出ないが、
+// それは「ゾンビ」ではなく「こちらから見えていないだけ」である。
+//
+// 空文字を返した場合は範囲を決められないということなので、呼び出し側は
+// ゾンビの掃除を行わない(触れない側へ倒す)。
+type SessionSocketLocator interface {
+	SocketDir() string
+}
+
+// SessionTraceChecker は mdev がそのセッション名で残した痕跡を探す。
+//
+// 終了済みセッションのメタデータを消してよいかの判断に使う。mdev が
+// resurrection(終了済みセッションへ attach して復活させる仕組み)を
+// 使わないのは **mdev 自身の設計判断** であって、利用者が手で作った
+// セッションにまで押し付けてよいものではない。痕跡が無い終了済み
+// セッションには触れない(メタデータが残っていても無害である)。
+type SessionTraceChecker interface {
+	// HasTrace は mdev がそのセッションを扱った跡があるかを返す。
+	HasTrace(session string) bool
+}
