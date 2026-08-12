@@ -13,9 +13,9 @@ ADR-0004 の実施フェーズ 1。mdev バイナリの版の可視化・GitHub 
 
 ### B. Release へのバイナリ添付(ADR D2)
 
-- [ ] tag.yml 拡張: macos-latest で darwin/arm64 + darwin/amd64 をビルド(CGO_ENABLED=0、`-X main.version=<tag>`)、checksums.txt 生成、`gh release create <tag> dist/*` で**原子的に**添付
-- [ ] tag.yml にアセット添付の検証ステップ(`gh release view --json assets` で 3 件確認、ADR D9-3)
-- [ ] ランナー変更に伴う実行時間・権限(permissions)の確認
+- [x] tag.yml 拡張: macos-latest で darwin/arm64 + darwin/amd64 をビルド(CGO_ENABLED=0、`-X main.version=<tag>`)、checksums.txt 生成、`gh release create <tag> dist/*` で**原子的に**添付
+- [x] tag.yml にアセット添付の検証ステップ(`gh release view --json assets` で 3 件確認、ADR D9-3)
+- [x] ランナー変更に伴う実行時間・権限(permissions)の確認
 
 ### C. `mdev update` の自己更新(ADR D4-2 の前半)
 

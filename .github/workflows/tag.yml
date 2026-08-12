@@ -17,7 +17,11 @@ concurrency:
 jobs:
   tag:
     if: github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
+    # macos-latest で組む。Go のリンカが darwin 向けバイナリへ付ける
+    # ad-hoc 署名は macOS 上でこそ確実で、Linux からのクロスコンパイルでは
+    # 「壊れている」と見なされて起動できないことがある(ADR-0004 D2)。
+    # ci.yml と同じランナーでもある。
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,10 +50,20 @@ jobs:
             echo "level=$level" >> "$GITHUB_OUTPUT"
           fi
 
+      - uses: actions/setup-go@v7
+        if: steps.bump.outputs.skip != 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+          # ci.yml と同じ理由(actions/setup-go#427)でキーを明示する。
+          cache-dependency-path: |
+            go.mod
+            Makefile
+
       - name: Create and push tag
+        id: tag
         if: steps.bump.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           LEVEL: ${{ steps.bump.outputs.level }}
         run: |
           current=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -57,4 +71,49 @@ jobs:
           echo "Bumping $current -> $next ($LEVEL)"
           git tag "$next"
           git push origin "$next"
-          gh release create "$next" --generate-notes --title "$next"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+
+      # `mdev update` はここで添付したバイナリを取って自分を置き換える。
+      # 版はタグそのものを焼き込む(mdev version が名乗る値になる)。
+      - name: Build release binaries
+        if: steps.bump.outputs.skip != 'true'
+        env:
+          NEXT: ${{ steps.tag.outputs.next }}
+        run: |
+          mkdir -p dist
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
+              go build -trimpath -ldflags "-s -w -X main.version=$NEXT" \
+              -o "dist/mdev_darwin_$arch" ./cmd/mdev
+          done
+          # 自己更新は取得したバイナリをこの一覧と突き合わせてから置き換える。
+          # 名前だけを載せるため dist の中で実行する。
+          (cd dist && shasum -a 256 mdev_darwin_* > checksums.txt)
+          ls -l dist
+
+      # **リリースの作成とアセットの添付を 1 コマンドで行う**(ADR-0004 D2)。
+      # 分けると、リリースはあるがバイナリがまだ無い時間帯ができ、その間に
+      # `mdev update` が走ると取得に失敗する。
+      - name: Create release with binaries
+        if: steps.bump.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.tag.outputs.next }}
+        run: |
+          gh release create "$NEXT" --generate-notes --title "$NEXT" dist/*
+
+      # 添付が欠けたまま緑になると、次の `mdev update` が失敗して初めて
+      # 気づくことになる。ここで確かめて落とす(ADR-0004 D9-3)。
+      - name: Verify release assets
+        if: steps.bump.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.tag.outputs.next }}
+        run: |
+          assets=$(gh release view "$NEXT" --json assets --jq '[.assets[].name] | sort | join(",")')
+          echo "assets: $assets"
+          expected="checksums.txt,mdev_darwin_amd64,mdev_darwin_arm64"
+          if [ "$assets" != "$expected" ]; then
+            echo "アセットが揃っていません(expected: $expected)" >&2
+            exit 1
+          fi
