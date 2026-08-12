@@ -23,6 +23,7 @@ detached セッションの無限ポーリング蓄積(zellij サーバ劣化 �
 ### B. 未アタッチ時のポーリング減速(mdev-go)
 
 - [x] domain: 減速判定の純粋関数のテスト+実装(attach 確認は 30 秒間隔。未アタッチが確認できたら **読み直しを止め**、30 秒ごとの attach 確認だけを続ける)
+- [x] レビュー指摘の反映(kill 安全性: 空白入り名のパース・サーバ判定の厳密化・消す直前の再確認・作成猶予・確認予算 / 機能不全: セッション 0 件・task-control の配線 / 堅牢化: 判断不能は attach 扱い・古い確認結果の破棄・取得中の着弾)
 - [x] infra+tui: poller への組み込み(`zellij action list-clients` の呼び出しは既存 zellij adapter 経由・10 秒上限。list-clients 自体の失敗は「attach あり」扱い = 安全側)
 - [x] attach 復帰の即時化: キー操作を attach の証拠として扱い即座に通常速度へ。確認で復帰を検知したときは読み直しを 1 本出す(最大 30 秒)
 
@@ -44,5 +45,7 @@ detached セッションの無限ポーリング蓄積(zellij サーバ劣化 �
 ## 備考
 
 - attach 復帰の検知に `tea.WindowSizeMsg` は使えない。実測(zellij 0.44.1 + bubbletea v2.0.8)で、**同じ大きさで attach し直すと端末から何の合図も来ない**ことを確認した(サイズが変わったときだけ SIGWINCH 経由で届く)。そのため確認は自分から行う
+- `zellij delete-session` に `--force` は付けない。付けないと zellij 自身が動作中セッションの削除を拒む(実機で確認)ため、最後の砦として効く
+- `zellij list-sessions` はセッション 0 件のとき rc=1・標準出力は空・標準エラーに「No active zellij sessions found.」を出す。**どんな失敗も 0 件と読んではならない**(0 件とみなすと生きているサーバがすべてゾンビに見える)
 - 対象外(別途): タブ構築のレイアウトファイル化(ADR 先行・フォローアップ)、zellij 本体への issue 報告
 - kill の安全策: 「mdev 管理セッション」の判定は bin/mdev pane プロセスの有無で行い、`dev` 等の手動セッションは EXITED 以外触らない

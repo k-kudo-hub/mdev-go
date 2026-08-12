@@ -83,7 +83,7 @@ func (m WaitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case attachCheckedMsg:
 		// 減速の判断を更新し、減速から復帰したときだけ読み直しを 1 本出す。
 		// 次の合図は張らない(pane.go のチェーン 1 本の不変条件)。
-		cmd := m.polling.observeAttach(msg.attached, m.refreshCmd)
+		cmd := m.polling.observeAttach(msg, m.refreshCmd)
 		return m, cmd
 
 	case tickMsg:

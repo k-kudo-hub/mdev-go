@@ -71,7 +71,14 @@ func tickCmd(d time.Duration) tea.Cmd {
 //
 // この合図はポーリングのチェーンの一部では **ない**。受け取っても次の合図を
 // 張らず、実行中の数も変えない。張ってしまうとチェーンが 2 本になる。
-type attachCheckedMsg struct{ attached bool }
+//
+// token は発行の順番である。古い確認の結果が遅れて着いたときに捨てるために
+// 持つ。これが無いと、キー操作で通常へ戻した直後に、それ以前に出した
+// 「誰も居ない」という結果が着いて **また減速する** ことが起きる。
+type attachCheckedMsg struct {
+	attached bool
+	token    int
+}
 
 // AttachWatch はセッションを誰か開いているかを見張る。
 //
@@ -84,12 +91,12 @@ type AttachWatch struct {
 }
 
 // cmd は確認を 1 回行う tea.Cmd を返す。見張らない設定なら nil を返す。
-func (w AttachWatch) cmd() tea.Cmd {
+func (w AttachWatch) cmd(token int) tea.Cmd {
 	if w.Checker == nil || w.Session == "" {
 		return nil
 	}
 	return func() tea.Msg {
-		return attachCheckedMsg{attached: w.Checker.IsAttached(w.Session)}
+		return attachCheckedMsg{attached: w.Checker.IsAttached(w.Session), token: token}
 	}
 }
 
@@ -124,6 +131,9 @@ type poller struct {
 	watch AttachWatch
 	// now は「今」を供給する。テストで差し替える。
 	now func() time.Time
+	// attachToken は最後に出した確認の番号である。
+	// これより古い結果は捨てる(attachCheckedMsg を参照)。
+	attachToken int
 }
 
 // newPoller は間隔 d のポーリングを返す。
@@ -156,7 +166,13 @@ func (p poller) pollInterval() time.Duration {
 // 減速していたところへ attach が戻ったときだけ、読み直しを 1 本出す。
 // 出さないと、画面は止めていた間の古い内容のまま次の合図まで残る。
 // この読み直しは poll=false(チェーンの外)なので、着弾しても何も予約しない。
-func (p *poller) observeAttach(attached bool, refresh func(poll bool) tea.Cmd) tea.Cmd {
+func (p *poller) observeAttach(msg attachCheckedMsg, refresh func(poll bool) tea.Cmd) tea.Cmd {
+	// 古い確認の結果は捨てる。キー操作で通常へ戻した直後に、それ以前に
+	// 出した「誰も居ない」が着いて再び減速するのを防ぐ。
+	if msg.token != p.attachToken {
+		return nil
+	}
+	attached := msg.attached
 	recovered := p.pace.Detached() && attached
 	p.pace = p.pace.Observe(attached)
 	if !recovered || refresh == nil {
@@ -179,8 +195,11 @@ func (p *poller) armWithAttachCheck() tea.Cmd {
 	if !p.pace.ShouldCheck(now) {
 		return next
 	}
-	check := p.watch.cmd()
+	p.attachToken++
+	check := p.watch.cmd(p.attachToken)
 	if check == nil {
+		// 見張らない設定では番号を進めない(進めると意味の無い値になる)。
+		p.attachToken--
 		return next
 	}
 	// 結果を待たずに「確認を始めた」ことを記録する(重ねて出さないため)。
@@ -242,6 +261,9 @@ func (p *poller) force() {
 	// 確認の結果を待たずに減速を解く(実測で、同じ大きさで attach し直した
 	// ときは端末から何の合図も来ないため、こちらから拾える証拠は貴重である)。
 	p.pace = p.pace.Observe(true)
+	// 走っている確認の結果を無効にする。これが着いてから減速し直すと、
+	// 触っているのに画面が止まる。
+	p.attachToken++
 }
 
 // promptExpiredMsg は 2 打鍵目の待ち受けが時間切れになったことを表す。
@@ -365,9 +387,10 @@ type Panes struct {
 // arg はペインが取る引数である。task-control だけがタブ名を必要とし、
 // 他のペインは無視する。
 func (p Panes) model(name, arg string) (tea.Model, error) {
-	// 減速の対象はポーリングで回り続ける 4 ペインだけである。
-	// task-create と task-control は利用者のキー入力で動くので、誰も
-	// 開いていなければそもそも何も起きない。
+	// 減速の対象はポーリングで回り続けるペインである。task-create だけは
+	// 対象外で、ポーリングを持たず利用者のキー入力だけで動く。
+	// task-control はタブごとに 1 つ常駐して 2 秒で回るため、放置された
+	// セッションではタブの数だけ積み上がる。ここを外すと減速の意味が薄れる。
 	switch name {
 	case NameDashboard:
 		m := NewDashboardModel(p.Dashboard, p.Env)
@@ -388,7 +411,9 @@ func (p Panes) model(name, arg string) (tea.Model, error) {
 	case NameTaskCreate:
 		return NewTaskCreateModel(p.TaskCreate, p.Env), nil
 	case NameTaskControl:
-		return NewTaskControlModel(p.TaskControl, p.Env, arg), nil
+		m := NewTaskControlModel(p.TaskControl, p.Env, arg)
+		m.polling = m.polling.withAttachWatch(p.Attach)
+		return m, nil
 	default:
 		return nil, fmt.Errorf("不明なペインです: %s", name)
 	}

@@ -88,12 +88,12 @@ func TestPollerSlowsDownWhenDetached(t *testing.T) {
 		t.Errorf("確認前の間隔 = %v, want %v", got, testPollInterval)
 	}
 
-	p.observeAttach(false, nil)
+	observeNow(&p, false, nil)
 	if got := p.pollInterval(); got != app.AttachCheckInterval {
 		t.Errorf("未アタッチの間隔 = %v, want %v", got, app.AttachCheckInterval)
 	}
 
-	p.observeAttach(true, nil)
+	observeNow(&p, true, nil)
 	if got := p.pollInterval(); got != testPollInterval {
 		t.Errorf("attach 復帰後の間隔 = %v, want %v(即座に通常へ戻る)", got, testPollInterval)
 	}
@@ -123,7 +123,7 @@ func TestPollerKeepsSingleChain(t *testing.T) {
 
 	// 確認の結果を取り込んでも、合図は 1 本も増えない。
 	before := p.inFlight
-	p.observeAttach(false, nil)
+	observeNow(&p, false, nil)
 	if p.inFlight != before {
 		t.Errorf("確認で実行中の数が変わりました: %d → %d", before, p.inFlight)
 	}
@@ -153,7 +153,7 @@ func TestPollerRearmUsesPacedInterval(t *testing.T) {
 
 	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
 	p := newPacedPoller(&fakeAttachChecker{}, &now)
-	p.observeAttach(false, nil)
+	observeNow(&p, false, nil)
 
 	if got := p.pollInterval(); got != app.AttachCheckInterval {
 		t.Errorf("rearm の間隔 = %v, want %v", got, app.AttachCheckInterval)
@@ -262,7 +262,7 @@ func TestPollerStopsRefreshingWhenDetached(t *testing.T) {
 	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
 	checker := &fakeAttachChecker{attached: false}
 	p := newPacedPoller(checker, &now)
-	p.observeAttach(false, nil)
+	observeNow(&p, false, nil)
 
 	// 生成直後の 1 本を着弾させ、「読み直しを出せる状態」にしておく。
 	// ここを 1 のままにすると、減速ではなく「重なり防止」で読み直しが
@@ -305,10 +305,10 @@ func TestPollerRecoversOnAttach(t *testing.T) {
 
 	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
 	p := newPacedPoller(&fakeAttachChecker{}, &now)
-	p.observeAttach(false, nil)
+	observeNow(&p, false, nil)
 
 	refresh := &countingRefresh{}
-	cmd := p.observeAttach(true, refresh.cmd)
+	cmd := observeNow(&p, true, refresh.cmd)
 	if cmd == nil {
 		t.Fatal("復帰の読み直しが出ていません")
 	}
@@ -333,7 +333,7 @@ func TestPollerObserveAttachIsIdempotent(t *testing.T) {
 	p := newPacedPoller(&fakeAttachChecker{attached: true}, &now)
 
 	refresh := &countingRefresh{}
-	if cmd := p.observeAttach(true, refresh.cmd); cmd != nil {
+	if cmd := observeNow(&p, true, refresh.cmd); cmd != nil {
 		t.Error("減速していないのに復帰の読み直しを出しました")
 	}
 	if len(refresh.calls) != 0 {
@@ -351,7 +351,7 @@ func TestPollerForceCountsAsAttached(t *testing.T) {
 
 	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
 	p := newPacedPoller(&fakeAttachChecker{}, &now)
-	p.observeAttach(false, nil)
+	observeNow(&p, false, nil)
 	if got := p.pollInterval(); got != app.AttachCheckInterval {
 		t.Fatalf("減速していません: %v", got)
 	}
@@ -371,3 +371,153 @@ func TestPollerForceCountsAsAttached(t *testing.T) {
 		t.Errorf("読み直し = %v, want 1 本", refresh.calls)
 	}
 }
+
+// observeNow は「今出ている確認の結果が返った」ことを模す。
+//
+// 実際の確認は armWithAttachCheck が番号を進めてから出す。テストでは
+// その番号をそのまま使い、古い結果として捨てられないようにする。
+func observeNow(p *poller, attached bool, refresh func(poll bool) tea.Cmd) tea.Cmd {
+	return p.observeAttach(attachCheckedMsg{attached: attached, token: p.attachToken}, refresh)
+}
+
+// TestPollerIgnoresStaleAttachResult は古い確認の結果を捨てることを
+// 確かめる(指摘 8)。
+//
+// キー操作で通常へ戻した直後に、それ以前に出した「誰も居ない」が遅れて
+// 着くことがある。そのまま取り込むと、触っているのに画面がまた止まる。
+func TestPollerIgnoresStaleAttachResult(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	p := newPacedPoller(&fakeAttachChecker{attached: false}, &now)
+
+	// 確認を 1 本出す(番号が進む)。
+	runAttachChecks(t, p.arrive(true))
+	stale := p.attachToken
+
+	// 結果が返る前にキーを押した = 誰かが開いている。
+	p.force()
+	if p.pace.Detached() {
+		t.Fatal("キー操作で減速が解けていません")
+	}
+
+	// ここで古い「誰も居ない」が着く。
+	if cmd := p.observeAttach(attachCheckedMsg{attached: false, token: stale}, nil); cmd != nil {
+		t.Error("古い結果で読み直しを出しました")
+	}
+	if p.pace.Detached() {
+		t.Error("古い結果で再び減速しました(触っているのに画面が止まる)")
+	}
+	if got := p.pollInterval(); got != testPollInterval {
+		t.Errorf("間隔 = %v, want %v", got, testPollInterval)
+	}
+}
+
+// TestPollerAcceptsLatestAttachResult は最新の確認の結果は取り込むことを
+// 確かめる(古い結果を捨てる仕組みが、正しい結果まで捨てていないこと)。
+func TestPollerAcceptsLatestAttachResult(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	p := newPacedPoller(&fakeAttachChecker{attached: false}, &now)
+
+	runAttachChecks(t, p.arrive(true))
+	if cmd := p.observeAttach(attachCheckedMsg{attached: false, token: p.attachToken}, nil); cmd != nil {
+		t.Error("減速へ入るときに読み直しを出しました")
+	}
+	if !p.pace.Detached() {
+		t.Error("最新の結果が取り込まれていません")
+	}
+}
+
+// TestPollingPanesWatchAttach はポーリングで回るペインすべてに attach の
+// 見張りが配線されていることを確かめる(指摘 6)。
+//
+// task-control はタブごとに 1 つ常駐して 2 秒で回るため、放置された
+// セッションではタブの数だけ積み上がる。ここが漏れると減速の意味が薄れる。
+func TestPollingPanesWatchAttach(t *testing.T) {
+	t.Parallel()
+
+	panes := Panes{
+		Dashboard:   &tickDashboard{},
+		Waiting:     &tickWaiting{},
+		Done:        &tickDone{},
+		News:        &tickNews{},
+		TaskCreate:  tickTaskCreate{},
+		TaskControl: tickTaskControl{},
+		Env:         tickEnv,
+		Attach:      AttachWatch{Checker: &fakeAttachChecker{}, Session: "s1"},
+	}
+
+	// ポーリングを持つペインはすべて見張りを受け取る。task-create だけは
+	// ポーリングを持たないので対象外である。
+	tests := []struct {
+		name string
+		get  func(tea.Model) (poller, bool)
+	}{
+		{name: NameDashboard, get: func(m tea.Model) (poller, bool) {
+			v, ok := m.(DashboardModel)
+			return v.polling, ok
+		}},
+		{name: NameWaiting, get: func(m tea.Model) (poller, bool) {
+			v, ok := m.(WaitingModel)
+			return v.polling, ok
+		}},
+		{name: NameDone, get: func(m tea.Model) (poller, bool) {
+			v, ok := m.(DoneModel)
+			return v.polling, ok
+		}},
+		{name: NameNews, get: func(m tea.Model) (poller, bool) {
+			v, ok := m.(NewsModel)
+			return v.polling, ok
+		}},
+		{name: NameTaskControl, get: func(m tea.Model) (poller, bool) {
+			v, ok := m.(TaskControlModel)
+			return v.polling, ok
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			model, err := panes.model(tt.name, "tab")
+			if err != nil {
+				t.Fatalf("model(%q) = %v", tt.name, err)
+			}
+			p, ok := tt.get(model)
+			if !ok {
+				t.Fatalf("%s のモデルの型が違います: %T", tt.name, model)
+			}
+			if p.watch.Checker == nil || p.watch.Session == "" {
+				t.Errorf("%s に attach の見張りが配線されていません", tt.name)
+			}
+		})
+	}
+}
+
+// tickTaskCreate / tickTaskControl は配線の確認だけに使う代役である。
+// 呼ばれない前提なのでゼロ値を返す。
+type tickTaskCreate struct{}
+
+func (tickTaskCreate) Menu(app.PaneEnv) string           { return "" }
+func (tickTaskCreate) Directories() ([]string, bool)     { return nil, false }
+func (tickTaskCreate) TaskTypes() []app.TaskTypeChoice   { return nil }
+func (tickTaskCreate) Agents() []string                  { return nil }
+func (tickTaskCreate) SkipNameInput() bool               { return false }
+func (tickTaskCreate) DefaultName(string, string) string { return "" }
+func (tickTaskCreate) ResolveName(string, string) string { return "" }
+func (tickTaskCreate) UniqueName(base string) string     { return base }
+func (tickTaskCreate) Create(app.PaneEnv, string, string, string, string) (string, error) {
+	return "", nil
+}
+
+type tickTaskControl struct{}
+
+func (tickTaskControl) Refresh(app.PaneEnv, string) (string, error) { return "", nil }
+func (tickTaskControl) GoToMain() error                             { return nil }
+func (tickTaskControl) ToggleWaiting(app.PaneEnv, string) error     { return nil }
+func (tickTaskControl) PrepareDelete(app.PaneEnv, string) (app.DeletePreparation, error) {
+	return app.DeletePreparation{}, nil
+}
+func (tickTaskControl) CommitDelete(app.PaneEnv, string) error { return nil }
