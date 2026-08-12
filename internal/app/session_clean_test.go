@@ -201,13 +201,13 @@ func TestCleanPlan(t *testing.T) {
 		t.Errorf("detached = %v, want %v", got.Plan.DetachedSessions, want)
 	}
 	want := []app.ZombieServer{{
-		PID: 400, Session: "zombie",
+		PID: 400, PPID: 1, Session: "zombie",
 		Command: "/opt/homebrew/bin/zellij --server /tmp/z/zombie",
 	}}
 	if !slices.Equal(got.Plan.ZombieServers, want) {
 		t.Errorf("ゾンビ = %v, want %v", got.Plan.ZombieServers, want)
 	}
-	want500 := []app.OrphanClient{{PID: 500, Command: "zellij action list-tabs"}}
+	want500 := []app.OrphanClient{{PID: 500, PPID: 1, Command: "zellij action list-tabs"}}
 	if !slices.Equal(got.Plan.OrphanClients, want500) {
 		t.Errorf("孤児 = %v, want %v", got.Plan.OrphanClients, want500)
 	}
@@ -952,5 +952,52 @@ func TestCleanLeavesAllExitedWithoutTraces(t *testing.T) {
 		if strings.HasPrefix(call, "delete gone-") {
 			t.Errorf("痕跡が無いのに消しました: %v", sessions.calls)
 		}
+	}
+}
+
+// TestCleanVerifiesParentBeforeSignalingOrphan は、コマンド行が同じでも
+// 親が生きていれば撃たないことを確かめる。
+//
+// 孤児クライアントは `zellij --session <名前> action list-clients` という
+// **毎回まったく同じコマンド行**になる。選んだ後にその PID がペインの
+// 新しい attach 確認へ回っていると、コマンド行の一致だけでは見分けられない。
+// 親が生きている(PPID≠1)なら、それは走っている呼び出しであって孤児ではない。
+func TestCleanVerifiesParentBeforeSignalingOrphan(t *testing.T) {
+	t.Parallel()
+
+	const orphanCommand = "zellij --session in-use action list-clients"
+	sessions, processes := newCleanFakes()
+	// 孤児(PPID=1)として選ばれる。
+	processes.out = "  PID  PPID     ELAPSED COMMAND\n" +
+		"100     1 40:00 /opt/homebrew/bin/zellij --server /tmp/z/in-use\n" +
+		"101   100 40:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n" +
+		"500     1 05:00 " + orphanCommand + "\n"
+	// 送る直前には、同じ PID・同じコマンド行のまま **親が生きている**。
+	// ペインが新しく起こした attach 確認に PID が回った状態である。
+	processes.outOnRecheck = "  PID  PPID     ELAPSED COMMAND\n" +
+		"100     1 40:00 /opt/homebrew/bin/zellij --server /tmp/z/in-use\n" +
+		"101   100 40:00 /home/u/.claude-conductor/bin/mdev pane dashboard\n" +
+		"500   101 00:01 " + orphanCommand + "\n"
+
+	cleaner := &app.SessionCleaner{
+		Sessions: sessions, Clients: sessions, Remover: sessions,
+		Processes: processes, Signaler: processes, Sleeper: &fakeSleeper{},
+		Sockets: fakeSockets{dir: testSocketDir}, Traces: fakeTraces{}, Clock: testClock,
+	}
+
+	got, err := cleaner.Clean(false)
+	if err != nil {
+		t.Fatalf("Clean() = %v", err)
+	}
+	if len(got.Plan.OrphanClients) != 1 {
+		t.Fatalf("計画 = %+v, want 孤児 1 件", got.Plan.OrphanClients)
+	}
+	for _, call := range processes.calls {
+		if call == "kill 500" {
+			t.Errorf("親が生きているプロセスを撃ちました: %v", processes.calls)
+		}
+	}
+	if got.Done.OrphanClients != 0 {
+		t.Errorf("片付けた孤児 = %d, want 0", got.Done.OrphanClients)
 	}
 }

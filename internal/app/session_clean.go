@@ -29,6 +29,8 @@ const zombieGrace = 3 * time.Second
 type ZombieServer struct {
 	// PID はサーバのプロセス ID。
 	PID int
+	// PPID は選んだ時点の親 PID。送る直前の照合に使う。
+	PPID int
 	// Session はサーバが持つセッション名。
 	Session string
 	// Command は選んだ時点のコマンド行。送る直前の照合に使う。
@@ -55,6 +57,8 @@ type CleanupPlan struct {
 type OrphanClient struct {
 	// PID はプロセス ID。
 	PID int
+	// PPID は選んだ時点の親 PID。送る直前の照合に使う。
+	PPID int
 	// Command は選んだ時点のコマンド行。送る直前の照合に使う。
 	Command string
 }
@@ -267,7 +271,7 @@ func (c *SessionCleaner) zombieServers(
 			continue
 		}
 		targets = append(targets, ZombieServer{
-			PID: server.PID, Session: server.Session, Command: server.Command,
+			PID: server.PID, PPID: server.PPID, Session: server.Session, Command: server.Command,
 		})
 	}
 	return targets
@@ -343,13 +347,13 @@ func (c *SessionCleaner) apply(plan CleanupPlan, deadline time.Time) CleanupCoun
 
 	// プロセスへ送る前に ps を引き直す。PID は使い回されるので、選んだ
 	// ときと同じ PID が別のプロセスになっていることがある。
-	commands := c.currentCommands()
-	done.ZombieServers = c.stopZombies(plan.ZombieServers, commands, deadline)
+	current := c.currentProcesses()
+	done.ZombieServers = c.stopZombies(plan.ZombieServers, current, deadline)
 	for _, orphan := range plan.OrphanClients {
 		if c.expired(deadline) {
 			return done
 		}
-		if !sameProcess(commands, orphan.PID, orphan.Command) {
+		if !sameProcess(current, orphan.PID, orphan.PPID, orphan.Command) {
 			continue
 		}
 		if err := c.Signaler.Kill(orphan.PID); err != nil {
@@ -360,23 +364,29 @@ func (c *SessionCleaner) apply(plan CleanupPlan, deadline time.Time) CleanupCoun
 	return done
 }
 
-// currentCommands は今動いているプロセスの PID とコマンド行の対応を返す。
+// currentProcesses は今動いているプロセスを PID で引ける表にして返す。
 // 引けなかった場合は nil を返し、そのときは何にもシグナルを送らない。
-func (c *SessionCleaner) currentCommands() map[int]string {
+func (c *SessionCleaner) currentProcesses() map[int]domain.ProcessEntry {
 	out, err := c.Processes.ListProcesses()
 	if err != nil {
 		return nil
 	}
-	return domain.ProcessCommands(domain.ParseProcessList(out))
+	return domain.ProcessesByPID(domain.ParseProcessList(out))
 }
 
-// sameProcess は pid が今も同じコマンドで動いているかを返す。
+// sameProcess は pid が今も同じプロセスかを返す。
 //
 // **一致を確かめられないものへは送らない。** PID の使い回しで無関係の
 // プロセス(利用者のエディタや別のセッションのペイン)を殺しうる。
-func sameProcess(commands map[int]string, pid int, command string) bool {
-	current, ok := commands[pid]
-	return ok && current == command
+//
+// コマンド行だけでなく **親 PID も見る。** 孤児クライアントは
+// `zellij --session <名前> action list-clients` という毎回まったく同じ
+// コマンド行になるため、選んだ後にその PID がペインの新しい attach 確認へ
+// 回っていると、コマンド行の一致だけでは見分けられない。親が生きている
+// (PPID≠1)なら、それは走っている呼び出しであって孤児ではない。
+func sameProcess(byPID map[int]domain.ProcessEntry, pid, ppid int, command string) bool {
+	current, ok := byPID[pid]
+	return ok && current.Command == command && current.PPID == ppid
 }
 
 // stillExited は今も終了済みであるものだけを返す。
@@ -417,11 +427,11 @@ func (c *SessionCleaner) stillExited(names []string, deadline time.Time) []strin
 // 送る前に PID とコマンド行の一致を確かめる。PID は使い回されるので、
 // 選んだときと同じ PID が別のプロセスになっていることがある。
 func (c *SessionCleaner) stopZombies(
-	servers []ZombieServer, commands map[int]string, deadline time.Time,
+	servers []ZombieServer, byPID map[int]domain.ProcessEntry, deadline time.Time,
 ) int {
 	targets := make([]ZombieServer, 0, len(servers))
 	for _, server := range servers {
-		if sameProcess(commands, server.PID, server.Command) {
+		if sameProcess(byPID, server.PID, server.PPID, server.Command) {
 			targets = append(targets, server)
 		}
 	}
@@ -452,7 +462,7 @@ func toOrphanClients(entries []domain.ProcessEntry) []OrphanClient {
 	}
 	out := make([]OrphanClient, 0, len(entries))
 	for _, entry := range entries {
-		out = append(out, OrphanClient{PID: entry.PID, Command: entry.Command})
+		out = append(out, OrphanClient{PID: entry.PID, PPID: entry.PPID, Command: entry.Command})
 	}
 	return out
 }

@@ -135,6 +135,8 @@ func parseElapsed(field string) time.Duration {
 type ZellijServer struct {
 	// PID はサーバのプロセス ID。
 	PID int
+	// PPID は親 PID。シグナルを送る直前の照合に使う。
+	PPID int
 	// Elapsed は起動からの経過時間。ゾンビ判定の猶予に使う。
 	Elapsed time.Duration
 	// Command は ps が出したコマンド行である。
@@ -169,7 +171,7 @@ func ZellijServers(entries []ProcessEntry) []ZellijServer {
 			continue
 		}
 		servers = append(servers, ZellijServer{
-			PID: entry.PID, Elapsed: entry.Elapsed, Session: name,
+			PID: entry.PID, PPID: entry.PPID, Elapsed: entry.Elapsed, Session: name,
 			Command: entry.Command, Socket: socket,
 		})
 	}
@@ -294,8 +296,12 @@ func ZombieServers(servers []ZellijServer, sessions []SessionEntry) []ZellijServ
 //
 //   - **PPID が 1 であること。** 呼び出し元が先に死んだ印である。実行中の
 //     呼び出しを撃つと、タブ操作の途中で zellij の状態が壊れる
-//   - **zellij の action サブコマンドであること。** 実行ファイル名と語の
-//     並びで見る(isZellijActionClient)
+//   - **zellij の action サブコマンドであること。** 実行ファイル名と
+//     サブコマンドの位置で見る(isZellijActionClient)
+//   - **起動から CleanupMinAge 以上経っていること。** ゾンビサーバと同じ
+//     猶予である。積み上がって困る孤児は数時間単位で残るのに対し、
+//     `zellij action X &` のように起こして親が先に終わった直後のプロセスは
+//     秒単位で PPID=1 になる。後者はまだ仕事の途中なので撃ってはいけない
 //
 // ゾンビサーバと違い、**ソケットの置き場による範囲の絞り込みはできない。**
 // クライアントのコマンド行にはソケットのパスが出ないためである
@@ -315,6 +321,9 @@ func OrphanZellijClients(entries []ProcessEntry) []ProcessEntry {
 		if entry.PPID != orphanPPID {
 			continue
 		}
+		if entry.Elapsed < CleanupMinAge {
+			continue
+		}
 		if !isZellijActionClient(entry.Command) {
 			continue
 		}
@@ -323,40 +332,75 @@ func OrphanZellijClients(entries []ProcessEntry) []ProcessEntry {
 	return orphans
 }
 
-// ProcessCommands は PID からコマンド行を引ける表を返す。
+// ProcessesByPID は PID からプロセスを引ける表を返す。
 //
 // シグナルを送る直前の照合に使う。PID は使い回されるため、選んだときと
 // 同じ PID が別のプロセスになっていることがある。
-func ProcessCommands(entries []ProcessEntry) map[int]string {
-	commands := make(map[int]string, len(entries))
+func ProcessesByPID(entries []ProcessEntry) map[int]ProcessEntry {
+	byPID := make(map[int]ProcessEntry, len(entries))
 	for _, entry := range entries {
-		commands[entry.PID] = entry.Command
+		byPID[entry.PID] = entry
 	}
-	return commands
+	return byPID
+}
+
+// zellijValueFlags は値を 1 つ取る zellij のグローバルオプションである。
+//
+// サブコマンドの位置を数えるときに、値をオプションの一部として飛ばすために
+// 使う。`zellij --session action attach` の "action" はセッション名であって
+// サブコマンドではない。表に無いオプションで値が "action" だった場合は
+// サブコマンドと読んでしまうため、zellij が持つ値付きオプションはすべて
+// 挙げてある。
+var zellijValueFlags = map[string]bool{
+	"-c": true, "--config": true,
+	"--config-dir": true,
+	"--data-dir":   true,
+	"-l":           true, "--layout": true,
+	"--layout-string": true,
+	"--max-panes":     true,
+	"-n":              true, "--new-session-with-layout": true,
+	"-s": true, "--session": true,
 }
 
 // isZellijActionClient はコマンド行が zellij のタブ操作かどうかを返す。
 //
-// 実行ファイルの名前(パスの最後の要素)が "zellij" で、`--` より前に
-// `action` という語が現れることを条件にする。`zellij action ...` と
-// `zellij --session <名前> action ...` の両方がこれで拾える。
+// 条件は次の 2 つである。
 //
-// `--` より前に限るのは、その後ろが利用者のコマンドだからである
+//   - 実行ファイルの名前(パスの最後の要素)が "zellij" であること。
+//     `grep zellij action` のような無関係のプロセスを拾わないため
+//   - オプションを除いた **最初の位置引数**(= サブコマンド)が "action"
+//     であること
+//
+// サブコマンドの位置で見るのは、`action` という名前のセッションやレイアウトが
+// あると語の並びのどこかに "action" が現れてしまうためである。
+// `zellij attach action` はセッション名が action なだけで、タブ操作の
+// 呼び出しではない。逆に `zellij --session action action list-clients` は
+// 名前も action だがサブコマンドも action なので、これは拾う。
+//
+// `--` が現れたらそこで打ち切る。後ろは利用者のコマンドである
 // (`zellij run -- nvim action.md` の action.md を取り違えない)。
-// 実行ファイル名まで見るのは、`grep zellij action` のような無関係の
-// プロセスを拾わないためである。
 func isZellijActionClient(command string) bool {
 	fields := strings.Fields(command)
 	if len(fields) < 2 || socketBase(fields[0]) != zellijBinaryName {
 		return false
 	}
-	for _, field := range fields[1:] {
+
+	for i := 1; i < len(fields); i++ {
+		field := fields[i]
 		if field == zellijArgsSeparator {
 			return false
 		}
-		if field == zellijActionSubcommand {
-			return true
+		if zellijValueFlags[field] {
+			// 次の語はこのオプションの値なので飛ばす。
+			i++
+			continue
 		}
+		if strings.HasPrefix(field, "-") {
+			// `--flag=値` と値を取らないオプション。1 語で完結する。
+			continue
+		}
+		// 最初の位置引数がサブコマンドである。
+		return field == zellijActionSubcommand
 	}
 	return false
 }
