@@ -11,8 +11,16 @@ const (
 	// zellijServerFlag は zellij のサーバプロセスを表す引数である。
 	// 実出力: `zellij --server /var/folders/.../zellij-501/.../<session>`
 	zellijServerFlag = "--server"
-	// zellijActionMarker は `zellij action ...` のクライアントの目印である。
-	zellijActionMarker = "zellij action"
+	// zellijActionSubcommand はタブ操作を行うサブコマンドである。
+	//
+	// 実際の呼び出しは `zellij action ...` と
+	// `zellij --session <名前> action ...` の 2 通りある(後者はペインが
+	// 行う attach 確認の形)。前置きの文字列で照合すると後者を取りこぼす
+	// ので、語の並びとして探す。
+	zellijActionSubcommand = "action"
+	// zellijArgsSeparator は「これより後ろは zellij ではなく利用者の
+	// コマンド」を表す区切りである(`zellij run -- npm test` の `--`)。
+	zellijArgsSeparator = "--"
 	// mdevPaneMarker は mdev が管理するセッションであることの目印である。
 	// ペインの中身が `<CONDUCTOR_HOME>/bin/mdev pane <name>` で起動される。
 	mdevPaneMarker = "/bin/mdev pane"
@@ -127,6 +135,8 @@ func parseElapsed(field string) time.Duration {
 type ZellijServer struct {
 	// PID はサーバのプロセス ID。
 	PID int
+	// PPID は親 PID。シグナルを送る直前の照合に使う。
+	PPID int
 	// Elapsed は起動からの経過時間。ゾンビ判定の猶予に使う。
 	Elapsed time.Duration
 	// Command は ps が出したコマンド行である。
@@ -161,7 +171,7 @@ func ZellijServers(entries []ProcessEntry) []ZellijServer {
 			continue
 		}
 		servers = append(servers, ZellijServer{
-			PID: entry.PID, Elapsed: entry.Elapsed, Session: name,
+			PID: entry.PID, PPID: entry.PPID, Elapsed: entry.Elapsed, Session: name,
 			Command: entry.Command, Socket: socket,
 		})
 	}
@@ -276,21 +286,45 @@ func ZombieServers(servers []ZellijServer, sessions []SessionEntry) []ZellijServ
 	return zombies
 }
 
-// OrphanZellijClients は親を失った `zellij action ...` のプロセスを返す。
+// OrphanZellijClients は親を失った zellij のタブ操作プロセスを返す。
 //
 // タブ操作の呼び出しが返らなくなり、呼び出し元だけが先に終わると
 // この形で残る。実環境では 200 個超まで積み上がり、うち数個が 100% CPU で
 // 空転してマシン全体を劣化させた(internal/infra/proc の説明を参照)。
 //
-// PPID が 1 であることを条件に含めるのは、動いている呼び出し(親が生きて
-// いるもの)を巻き込まないためである。
+// 条件は 2 つで、どちらも欠かせない。
+//
+//   - **PPID が 1 であること。** 呼び出し元が先に死んだ印である。実行中の
+//     呼び出しを撃つと、タブ操作の途中で zellij の状態が壊れる
+//   - **zellij の action サブコマンドであること。** 実行ファイル名と
+//     サブコマンドの位置で見る(isZellijActionClient)
+//   - **起動から CleanupMinAge 以上経っていること。** ゾンビサーバと同じ
+//     猶予である。積み上がって困る孤児は数時間単位で残るのに対し、
+//     `zellij action X &` のように起こして親が先に終わった直後のプロセスは
+//     秒単位で PPID=1 になる。後者はまだ仕事の途中なので撃ってはいけない
+//
+// ゾンビサーバと違い、**ソケットの置き場による範囲の絞り込みはできない。**
+// クライアントのコマンド行にはソケットのパスが出ないためである
+// (出るのは `--session <名前>` までで、どの一時ディレクトリを見ているかは
+// 分からない)。それでよいと判断しているのは、この形のプロセスが
+// **どの環境から見てもゴミだから**である。親を失った `zellij action` は
+// 結果を受け取る相手がもう居らず、生きているセッションの役に立つことは無い。
+// 一方サーバのほうは、別の一時ディレクトリで動いていれば「こちらから
+// 見えていないだけの正常なセッション」でありうるので、範囲を絞る必要がある。
+//
+// 送る直前には PID とコマンド行の一致を確かめる(SessionCleaner.apply)。
+// PID は使い回されるため、ここで選んだ後に無関係のプロセスへ回っている
+// ことがある。
 func OrphanZellijClients(entries []ProcessEntry) []ProcessEntry {
 	var orphans []ProcessEntry
 	for _, entry := range entries {
 		if entry.PPID != orphanPPID {
 			continue
 		}
-		if !strings.Contains(entry.Command, zellijActionMarker) {
+		if entry.Elapsed < CleanupMinAge {
+			continue
+		}
+		if !isZellijActionClient(entry.Command) {
 			continue
 		}
 		orphans = append(orphans, entry)
@@ -298,16 +332,77 @@ func OrphanZellijClients(entries []ProcessEntry) []ProcessEntry {
 	return orphans
 }
 
-// ProcessCommands は PID からコマンド行を引ける表を返す。
+// ProcessesByPID は PID からプロセスを引ける表を返す。
 //
 // シグナルを送る直前の照合に使う。PID は使い回されるため、選んだときと
 // 同じ PID が別のプロセスになっていることがある。
-func ProcessCommands(entries []ProcessEntry) map[int]string {
-	commands := make(map[int]string, len(entries))
+func ProcessesByPID(entries []ProcessEntry) map[int]ProcessEntry {
+	byPID := make(map[int]ProcessEntry, len(entries))
 	for _, entry := range entries {
-		commands[entry.PID] = entry.Command
+		byPID[entry.PID] = entry
 	}
-	return commands
+	return byPID
+}
+
+// zellijValueFlags は値を 1 つ取る zellij のグローバルオプションである。
+//
+// サブコマンドの位置を数えるときに、値をオプションの一部として飛ばすために
+// 使う。`zellij --session action attach` の "action" はセッション名であって
+// サブコマンドではない。表に無いオプションで値が "action" だった場合は
+// サブコマンドと読んでしまうため、zellij が持つ値付きオプションはすべて
+// 挙げてある。
+var zellijValueFlags = map[string]bool{
+	"-c": true, "--config": true,
+	"--config-dir": true,
+	"--data-dir":   true,
+	"-l":           true, "--layout": true,
+	"--layout-string": true,
+	"--max-panes":     true,
+	"-n":              true, "--new-session-with-layout": true,
+	"-s": true, "--session": true,
+}
+
+// isZellijActionClient はコマンド行が zellij のタブ操作かどうかを返す。
+//
+// 条件は次の 2 つである。
+//
+//   - 実行ファイルの名前(パスの最後の要素)が "zellij" であること。
+//     `grep zellij action` のような無関係のプロセスを拾わないため
+//   - オプションを除いた **最初の位置引数**(= サブコマンド)が "action"
+//     であること
+//
+// サブコマンドの位置で見るのは、`action` という名前のセッションやレイアウトが
+// あると語の並びのどこかに "action" が現れてしまうためである。
+// `zellij attach action` はセッション名が action なだけで、タブ操作の
+// 呼び出しではない。逆に `zellij --session action action list-clients` は
+// 名前も action だがサブコマンドも action なので、これは拾う。
+//
+// `--` が現れたらそこで打ち切る。後ろは利用者のコマンドである
+// (`zellij run -- nvim action.md` の action.md を取り違えない)。
+func isZellijActionClient(command string) bool {
+	fields := strings.Fields(command)
+	if len(fields) < 2 || socketBase(fields[0]) != zellijBinaryName {
+		return false
+	}
+
+	for i := 1; i < len(fields); i++ {
+		field := fields[i]
+		if field == zellijArgsSeparator {
+			return false
+		}
+		if zellijValueFlags[field] {
+			// 次の語はこのオプションの値なので飛ばす。
+			i++
+			continue
+		}
+		if strings.HasPrefix(field, "-") {
+			// `--flag=値` と値を取らないオプション。1 語で完結する。
+			continue
+		}
+		// 最初の位置引数がサブコマンドである。
+		return field == zellijActionSubcommand
+	}
+	return false
 }
 
 // ServersInSocketDir は dir の配下にソケットを持つサーバだけを返す。

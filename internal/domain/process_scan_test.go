@@ -57,7 +57,7 @@ func TestZellijServers(t *testing.T) {
 
 	got := domain.ZellijServers(domain.ParseProcessList(realProcessList))
 	want := []domain.ZellijServer{{
-		PID: 18001, Elapsed: time.Hour + 59*time.Second, Session: "mdev-go-224042",
+		PID: 18001, PPID: 1, Elapsed: time.Hour + 59*time.Second, Session: "mdev-go-224042",
 		Command: "/opt/homebrew/bin/zellij --server /var/folders/5w/T/zellij-501/contract_version_1/mdev-go-224042",
 		Socket:  "/var/folders/5w/T/zellij-501/contract_version_1/mdev-go-224042",
 	}}
@@ -287,7 +287,7 @@ func TestZellijServersWithSpacedSocketPath(t *testing.T) {
 		"100 1 10:00 /opt/homebrew/bin/zellij --server /tmp/my tmp/zellij-501/v1/my session\n")
 	got := domain.ZellijServers(entries)
 	want := []domain.ZellijServer{{
-		PID: 100, Elapsed: 10 * time.Minute, Session: "my session",
+		PID: 100, PPID: 1, Elapsed: 10 * time.Minute, Session: "my session",
 		Command: "/opt/homebrew/bin/zellij --server /tmp/my tmp/zellij-501/v1/my session",
 		Socket:  "/tmp/my tmp/zellij-501/v1/my session",
 	}}
@@ -347,6 +347,159 @@ func TestServersInSocketDir(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ServersInSocketDir(%q) = %v, want %v", tt.dir, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestOrphanZellijClientsMatchesSessionForm は `zellij --session <名前>
+// action ...` の形も拾うことを確かめる。
+//
+// ペインが行う attach 確認(list-clients)は実測でこの形になる。前置きの
+// `zellij action` だけを見ていると、いちばん数が出る呼び出しを取りこぼす。
+func TestOrphanZellijClientsMatchesSessionForm(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		// --- 拾うもの ---
+		{name: "素の action", command: "zellij action list-tabs", want: true},
+		{
+			name:    "--session 付き(ペインの attach 確認の形)",
+			command: "zellij --session my-session action list-clients",
+			want:    true,
+		},
+		{
+			name:    "絶対パス + --session",
+			command: "/opt/homebrew/bin/zellij --session my-session action list-clients",
+			want:    true,
+		},
+		{name: "短縮形の -s", command: "zellij -s my-session action close-tab", want: true},
+		// --- 拾わないもの ---
+		{name: "action ではない(attach)", command: "zellij attach my-session", want: false},
+		{name: "action ではない(run)", command: "zellij run -- npm test", want: false},
+		{name: "サーバ", command: "/opt/homebrew/bin/zellij --server /tmp/z/a", want: false},
+		{
+			// `--` の後ろは利用者のコマンドなので、そこに action が
+			// 出てきても zellij のサブコマンドではない。
+			name:    "-- の後ろの action",
+			command: "zellij run -- nvim action.md",
+			want:    false,
+		},
+		{name: "別のコマンド", command: "nvim action", want: false},
+		{name: "名前に zellij を含むだけ", command: "grep zellij action", want: false},
+		{name: "zellij 単体", command: "zellij", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entries := domain.ParseProcessList("2001 1 03:00 " + tt.command + "\n")
+			got := len(domain.OrphanZellijClients(entries)) == 1
+			if got != tt.want {
+				t.Errorf("OrphanZellijClients(%q) 検出 = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestOrphanZellijClientsRequiresLostParent は親が生きている呼び出しを
+// 巻き込まないことを確かめる。
+//
+// PPID=1 は「呼び出し元が先に死んだ」印である。実行中の呼び出しを撃つと、
+// タブ操作の途中で zellij の状態が壊れる。
+func TestOrphanZellijClientsRequiresLostParent(t *testing.T) {
+	t.Parallel()
+
+	entries := domain.ParseProcessList(
+		"2001    1 03:00 zellij --session s action list-clients\n" +
+			"2002 1500 03:00 zellij --session s action list-clients\n")
+	got := domain.OrphanZellijClients(entries)
+	if len(got) != 1 || got[0].PID != 2001 {
+		t.Errorf("OrphanZellijClients = %#v, want PID 2001 のみ", got)
+	}
+}
+
+// TestOrphanZellijClientsRequiresSubcommandPosition は "action" が
+// **サブコマンドの位置**にあるときだけ拾うことを確かめる。
+//
+// 語の並びのどこかに "action" があれば真としていたため、`action` という
+// 名前のセッションを扱う呼び出しを孤児と誤認していた。
+func TestOrphanZellijClientsRequiresSubcommandPosition(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{
+			// セッション名が action。サブコマンドは attach なので対象外。
+			name:    "action という名前のセッションへ attach",
+			command: "zellij attach action",
+			want:    false,
+		},
+		{
+			// セッション名も action だが、サブコマンドは action である。
+			name:    "action という名前のセッションへの action",
+			command: "zellij --session action action list-clients",
+			want:    true,
+		},
+		{name: "-s の値が action", command: "zellij -s action attach", want: false},
+		{name: "-s の値が action でサブコマンドも action", command: "zellij -s action action list-tabs", want: true},
+		{name: "レイアウト名が action", command: "zellij -l action", want: false},
+		{name: "--layout の値が action", command: "zellij --layout action", want: false},
+		{name: "--flag=値 の形", command: "zellij --session=action action list-tabs", want: true},
+		{name: "素の action", command: "zellij action list-tabs", want: true},
+		{name: "--session 付き", command: "zellij --session s action list-clients", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entries := domain.ParseProcessList("2001 1 03:00 " + tt.command + "\n")
+			got := len(domain.OrphanZellijClients(entries)) == 1
+			if got != tt.want {
+				t.Errorf("OrphanZellijClients(%q) 検出 = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestOrphanZellijClientsSparesYoungProcesses は起動したばかりの呼び出しを
+// 撃たないことを確かめる。
+//
+// ハングして積み上がる孤児は数時間単位で残る。一方 `zellij action X &` の
+// ように起こして親が先に終わった直後のプロセスは、まだ仕事の途中でありながら
+// PPID=1 になる。撃つと zellij の状態が壊れるので、ゾンビサーバと同じ猶予を
+// 置く。
+func TestOrphanZellijClientsSparesYoungProcesses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		elapsed string
+		want    bool
+	}{
+		{name: "起動直後", elapsed: "00:02", want: false},
+		{name: "59 秒", elapsed: "00:59", want: false},
+		{name: "60 秒ちょうど", elapsed: "01:00", want: true},
+		{name: "数時間", elapsed: "03:20:00", want: true},
+		// 経過時間を読めない場合は 0 = 起動直後の扱い(安全側)。
+		{name: "読めない書式", elapsed: "ELAPSED", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entries := domain.ParseProcessList(
+				"2001 1 " + tt.elapsed + " zellij --session s action list-clients\n")
+			got := len(domain.OrphanZellijClients(entries)) == 1
+			if got != tt.want {
+				t.Errorf("経過 %q の検出 = %v, want %v", tt.elapsed, got, tt.want)
 			}
 		})
 	}
