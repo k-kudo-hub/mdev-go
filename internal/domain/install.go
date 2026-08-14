@@ -12,6 +12,18 @@ import (
 // 更新は自己置換 + 自分自身の install(冪等再適用)へ移る。
 const MdevRepoURL = "https://github.com/" + MdevRepoSlug
 
+// IsMdevRepoURL は更新元が mdev-go を指しているかを返す。
+//
+// 指しているなら移行は済んでいる。conductor の資産と mdev 本体という 2 本
+// 立ての版はもう存在せず、VERSION にはバイナリ自身の版が入っている
+// (ADR D3-2)。更新確認はこれを見て 1 本の比較に畳む。
+//
+// 末尾の `.git` とスラッシュは無視する。git remote の書き方はどちらもある。
+func IsMdevRepoURL(url string) bool {
+	slug, ok := RepoSlug(url)
+	return ok && slug == MdevRepoSlug
+}
+
 // InstallPaths は install が触る場所である。
 type InstallPaths struct {
 	// Home は利用者のホーム。

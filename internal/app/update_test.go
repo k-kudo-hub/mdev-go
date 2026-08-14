@@ -361,3 +361,60 @@ func TestUpdateCheckSkipsMdevNoticeForDescribeBuild(t *testing.T) {
 		t.Errorf("案内が出ています:\n%s", got)
 	}
 }
+
+// TestCheckCollapsesToMdevAfterMigration は移行後に版の比較が 1 本へ
+// 畳まれることを確かめる(ADR D3-2)。
+//
+// REPO_URL が mdev-go を指した時点で、conductor の資産と mdev 本体という
+// 2 本立ての版は存在しない。両方出すと、同じリポジトリの同じタグを 2 回
+// 知らせることになる。
+func TestCheckCollapsesToMdevAfterMigration(t *testing.T) {
+	t.Parallel()
+	skipUnsupportedPlatform(t)
+
+	state := &fakeUpdateState{repoURL: domain.MdevRepoURL, version: "v0.1.0"}
+	remote := &fakeRemoteTags{tag: "v9.9.9", ok: true}
+	checker := &app.UpdateChecker{
+		Config:      &fakeConfigLoader{},
+		State:       state,
+		Remote:      remote,
+		Clock:       fakeClock{now: codexNow},
+		MdevVersion: "v0.1.0",
+	}
+
+	notice := checker.Check(false)
+
+	// mdev の案内だけが出る。
+	if !strings.Contains(notice, "v9.9.9") {
+		t.Errorf("案内が出ていない: %q", notice)
+	}
+	if strings.Count(notice, "v9.9.9") != 1 {
+		t.Errorf("同じ版を 2 回知らせている:\n%s", notice)
+	}
+	// conductor 側のキャッシュは触らない(引いていない)。
+	if state.cacheDate != "" || state.cacheTag != "" {
+		t.Errorf("conductor 側を引いた: %q %q", state.cacheDate, state.cacheTag)
+	}
+}
+
+// TestCheckKeepsBothLinesBeforeMigration は移行前は 2 本立てのままである
+// ことを確かめる。
+func TestCheckKeepsBothLinesBeforeMigration(t *testing.T) {
+	t.Parallel()
+
+	state := &fakeUpdateState{repoURL: "https://github.com/k-kudo-hub/claude-conductor", version: "v0.1.0"}
+	checker := &app.UpdateChecker{
+		Config:      &fakeConfigLoader{},
+		State:       state,
+		Remote:      &fakeRemoteTags{tag: "v9.9.9", ok: true},
+		Clock:       fakeClock{now: codexNow},
+		MdevVersion: app.DevVersion,
+	}
+
+	if notice := checker.Check(false); !strings.Contains(notice, "v9.9.9") {
+		t.Errorf("conductor の案内が出ていない: %q", notice)
+	}
+	if state.cacheTag != "v9.9.9" {
+		t.Errorf("conductor 側のキャッシュが更新されていない: %q", state.cacheTag)
+	}
+}

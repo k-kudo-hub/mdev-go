@@ -185,6 +185,13 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Zshrc:         filepath.Join(home, ".zshrc"),
 	}
 	files := store.NewFileStore()
+	installer := &app.Installer{
+		Paths:    installPaths,
+		Files:    files,
+		Assets:   store.NewAssetStore(conductorHome),
+		Commands: shell.NewCommandChecker(),
+		Version:  version,
+	}
 
 	// ニュースの取得。News ペインの r キーと `mdev news fetch` が同じ実体を使う。
 	newsFetcher := news.NewFetcher(conductorHome)
@@ -276,15 +283,13 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		HookSettings: hookSettings,
 		Panes:        panes,
 		Update: &app.Updater{
-			State:     updateState,
-			Remote:    remoteTags,
-			Installer: release.NewInstaller(),
+			State: updateState,
 			Self: &app.SelfUpdater{
 				Version:  version,
 				Remote:   remoteTags,
 				Replacer: release.NewSelfReplacer(),
 			},
-			Getenv: getenv,
+			Install: installer,
 		},
 		SessionClean: sessionCleaner,
 		Session: &app.SessionLauncher{
@@ -317,17 +322,11 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Assets:   store.NewAssetStore(conductorHome),
 			Files:    files,
 		},
-		News:   &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
-		Codex:  codexNotifier,
-		Agent:  &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
-		Assets: store.NewAssetStore(conductorHome),
-		Install: &app.Installer{
-			Paths:    installPaths,
-			Files:    files,
-			Assets:   store.NewAssetStore(conductorHome),
-			Commands: shell.NewCommandChecker(),
-			Version:  version,
-		},
+		News:    &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
+		Codex:   codexNotifier,
+		Agent:   &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
+		Assets:  store.NewAssetStore(conductorHome),
+		Install: installer,
 		Uninstall: &app.Uninstaller{
 			Paths:       installPaths,
 			Files:       files,

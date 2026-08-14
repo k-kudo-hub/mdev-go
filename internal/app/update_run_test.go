@@ -2,168 +2,140 @@ package app_test
 
 import (
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
+	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
-// fakeInstaller は再インストールの代役である。
-type fakeInstaller struct {
-	calls                     int
-	tarballURL, version, repo string
-	err                       error
+// fakeInstallRunner は設定の貼り直しの代役である。
+type fakeInstallRunner struct {
+	calls int
+	err   error
 }
 
-func (f *fakeInstaller) Install(tarballURL, version, repoURL string) error {
+func (f *fakeInstallRunner) Install(out io.Writer) error {
 	f.calls++
-	f.tarballURL, f.version, f.repo = tarballURL, version, repoURL
+	_, _ = io.WriteString(out, "install を実行しました\n")
 	return f.err
 }
 
-// newUpdater は既定で「更新あり」になる Updater を組み立てる。
-func newUpdater() (*app.Updater, *fakeUpdateState, *fakeRemoteTags, *fakeInstaller, map[string]string) {
-	state := &fakeUpdateState{repoURL: "https://github.com/o/r.git", version: "v0.1.0"}
+// newUpdater は自バイナリが最新の Updater を組み立てる。
+func newUpdater() (*app.Updater, *fakeUpdateState, *fakeRemoteTags, *fakeInstallRunner) {
+	state := &fakeUpdateState{repoURL: domain.MdevRepoURL, version: "v0.2.0"}
 	remote := &fakeRemoteTags{tag: "v0.2.0", ok: true}
-	installer := &fakeInstaller{}
-	env := map[string]string{}
+	install := &fakeInstallRunner{}
 	return &app.Updater{
-		State:     state,
-		Remote:    remote,
-		Installer: installer,
-		Getenv:    func(k string) string { return env[k] },
-	}, state, remote, installer, env
+		State: state,
+		Self: &app.SelfUpdater{
+			Version: "v0.2.0",
+			Remote:  remote,
+		},
+		Install: install,
+	}, state, remote, install
 }
 
-// TestUpdateInstallsLatest は更新の成功経路を確かめる。
-// test.sh「53. update.sh」の 1 つ目に対応する。
-func TestUpdateInstallsLatest(t *testing.T) {
-	updater, _, _, installer, _ := newUpdater()
+// TestUpdateAppliesInstallWhenUpToDate は自分が最新のときに設定を貼り直す
+// ことを確かめる。
+//
+// ADR D4-2 の 2 段目である。conductor の tarball を取ってきて install.sh を
+// bash で走らせる旧フローは、REPO_URL が mdev-go を指した時点で成立しない
+// (その tarball には install.sh も scripts/ も無い)。
+func TestUpdateAppliesInstallWhenUpToDate(t *testing.T) {
+	t.Parallel()
+
+	updater, _, _, install := newUpdater()
 	var out strings.Builder
 
 	if err := updater.Update(&out); err != nil {
-		t.Fatalf("Update が失敗しました: %v", err)
+		t.Fatalf("Update = %v", err)
 	}
-	// tarball の URL は REPO_URL から起こした slug で組み立てる。
-	if want := "https://github.com/o/r/archive/refs/tags/v0.2.0.tar.gz"; installer.tarballURL != want {
-		t.Errorf("tarball URL = %q, want %q", installer.tarballURL, want)
+	if install.calls != 1 {
+		t.Errorf("install の呼び出し = %d 回, want 1", install.calls)
 	}
-	// tarball には .git が無いため、版と更新元は env で渡すしかない。
-	if installer.version != "v0.2.0" || installer.repo != "https://github.com/o/r.git" {
-		t.Errorf("install へ渡した値 = (%q, %q)", installer.version, installer.repo)
-	}
-	for _, want := range []string{"最新バージョンを確認しています", "v0.1.0 -> v0.2.0 に更新します", "v0.2.0 に更新しました"} {
+	for _, want := range []string{"設定を最新の形へ揃えています", "install を実行しました"} {
 		if !strings.Contains(out.String(), want) {
-			t.Errorf("出力に %q がありません:\n%q", want, out.String())
+			t.Errorf("出力に %q がありません:\n%s", want, out.String())
 		}
 	}
 }
 
-// TestUpdateHonorsTarballOverride は取得元の差し替えを確かめる。
-func TestUpdateHonorsTarballOverride(t *testing.T) {
-	updater, _, _, installer, env := newUpdater()
-	env[app.TarballURLEnv] = "file:///tmp/release.tar.gz"
-
-	if err := updater.Update(&strings.Builder{}); err != nil {
-		t.Fatalf("Update が失敗しました: %v", err)
-	}
-	if installer.tarballURL != "file:///tmp/release.tar.gz" {
-		t.Errorf("tarball URL = %q", installer.tarballURL)
-	}
-}
-
-// TestUpdateUpToDate は既に最新のときに何も取りに行かないことを確かめる。
-func TestUpdateUpToDate(t *testing.T) {
-	updater, state, _, installer, _ := newUpdater()
-	state.version = "v0.2.0"
-	var out strings.Builder
-
-	if err := updater.Update(&out); err != nil {
-		t.Fatalf("Update が失敗しました: %v", err)
-	}
-	if installer.calls != 0 {
-		t.Errorf("install が %d 回呼ばれました, want 0", installer.calls)
-	}
-	if want := "既に最新です（v0.2.0）。"; !strings.Contains(out.String(), want) {
-		t.Errorf("出力 = %q, want %q を含む", out.String(), want)
-	}
-}
-
-// TestUpdateFailures は失敗が必ず error になることを確かめる。
+// TestUpdateStopsAfterSelfReplace は自分を置き換えたらそこで終えることを
+// 確かめる。
 //
-// 更新確認(黙って諦める)と違い、こちらは利用者が明示的に叩くコマンドなので、
-// 黙って何もしないと古いまま使い続けることになる。
-func TestUpdateFailures(t *testing.T) {
-	tests := []struct {
-		name    string
-		setup   func(state *fakeUpdateState, remote *fakeRemoteTags, installer *fakeInstaller)
-		wantMsg string
-	}{
-		{
-			name: "REPO_URL が無い",
-			setup: func(state *fakeUpdateState, _ *fakeRemoteTags, _ *fakeInstaller) {
-				state.repoURL = ""
-			},
-			wantMsg: "更新元リポジトリが不明です",
-		},
-		{
-			name: "REPO_URL を解釈できない",
-			setup: func(state *fakeUpdateState, _ *fakeRemoteTags, _ *fakeInstaller) {
-				state.repoURL = "notaurl"
-			},
-			wantMsg: "リポジトリURLを解釈できません",
-		},
-		{
-			name: "最新版を取れない",
-			setup: func(_ *fakeUpdateState, remote *fakeRemoteTags, _ *fakeInstaller) {
-				remote.ok = false
-			},
-			wantMsg: "最新バージョンの取得に失敗しました",
-		},
-		{
-			name: "再インストールに失敗",
-			setup: func(_ *fakeUpdateState, _ *fakeRemoteTags, installer *fakeInstaller) {
-				installer.err = errors.New("ダウンロードに失敗しました")
-			},
-			wantMsg: "ダウンロードに失敗しました",
-		},
+// 今動いているのは置き換える **前** の中身なので、そのまま設定を貼ると
+// 古い実装で貼ることになる。実行し直しを案内して終える。
+func TestUpdateStopsAfterSelfReplace(t *testing.T) {
+	t.Parallel()
+	skipUnsupportedPlatform(t)
+
+	updater, _, _, install := newUpdater()
+	self, _, replacer := newSelfUpdater("v0.10.0")
+	updater.Self = self
+
+	var out strings.Builder
+	if err := updater.Update(&out); err != nil {
+		t.Fatalf("Update = %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			updater, state, remote, installer, _ := newUpdater()
-			tt.setup(state, remote, installer)
-			var out strings.Builder
-
-			err := updater.Update(&out)
-			if err == nil {
-				t.Fatalf("error になりませんでした(出力 = %q)", out.String())
-			}
-			if !strings.Contains(err.Error(), tt.wantMsg) {
-				t.Errorf("error = %v, want %q を含む", err, tt.wantMsg)
-			}
-			// 失敗したのに「更新しました」と出してはならない。
-			if strings.Contains(out.String(), "更新しました") {
-				t.Errorf("失敗したのに完了と出ています: %q", out.String())
-			}
-		})
+	if install.calls != 0 {
+		t.Errorf("置き換えた後に install を呼んだ: %d 回", install.calls)
+	}
+	if len(replacer.calls) != 1 {
+		t.Errorf("自己置換 = %d 回, want 1", len(replacer.calls))
 	}
 }
 
-// TestUpdateNormalizesBrokenVersion は VERSION が壊れていても更新できる
-// ことを確かめる。現行版はここで算術エラーになる。
-func TestUpdateNormalizesBrokenVersion(t *testing.T) {
-	updater, state, _, installer, _ := newUpdater()
-	state.version = ""
-	var out strings.Builder
+// TestUpdateReportsSelfUpdateFailure は自己置換の失敗を返すことを確かめる。
+//
+// 失敗したまま設定を貼ると、新しい設定と古いバイナリが混ざる。
+func TestUpdateReportsSelfUpdateFailure(t *testing.T) {
+	t.Parallel()
+	skipUnsupportedPlatform(t)
 
+	updater, _, _, install := newUpdater()
+	self, _, replacer := newSelfUpdater("v0.10.0")
+	replacer.err = errors.New("置き換えられない")
+	updater.Self = self
+
+	var out strings.Builder
+	if err := updater.Update(&out); err == nil {
+		t.Fatal("エラーを返すはず")
+	}
+	if install.calls != 0 {
+		t.Errorf("失敗したのに install を呼んだ: %d 回", install.calls)
+	}
+}
+
+// TestUpdateReportsInstallFailure は設定の貼り直しの失敗を返すことを確かめる。
+//
+// 利用者が明示的に叩くコマンドなので、黙って何もしないと更新したつもりで
+// 古いまま使い続けることになる。
+func TestUpdateReportsInstallFailure(t *testing.T) {
+	t.Parallel()
+
+	updater, _, _, install := newUpdater()
+	install.err = errors.New("書けない")
+
+	var out strings.Builder
+	if err := updater.Update(&out); err == nil {
+		t.Fatal("エラーを返すはず")
+	}
+}
+
+// TestUpdateWithoutSelfUpdater は自バイナリの更新を持たない構成を確かめる。
+func TestUpdateWithoutSelfUpdater(t *testing.T) {
+	t.Parallel()
+
+	updater, _, _, install := newUpdater()
+	updater.Self = nil
+
+	var out strings.Builder
 	if err := updater.Update(&out); err != nil {
-		t.Fatalf("Update が失敗しました: %v", err)
+		t.Fatalf("Update = %v", err)
 	}
-	if installer.calls != 1 {
-		t.Errorf("install の呼び出し = %d, want 1", installer.calls)
-	}
-	if want := "v0.0.0 -> v0.2.0 に更新します"; !strings.Contains(out.String(), want) {
-		t.Errorf("出力 = %q, want %q を含む", out.String(), want)
+	if install.calls != 1 {
+		t.Errorf("install の呼び出し = %d 回, want 1", install.calls)
 	}
 }

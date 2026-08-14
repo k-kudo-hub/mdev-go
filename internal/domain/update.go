@@ -194,3 +194,12 @@ func RenderUpdateStarting(current, latest string) string {
 func RenderUpdateDone(latest string) string {
 	return "\n" + ansiGreen + ansiBold + "✅ " + latest + " に更新しました。" + ansiReset + "\n"
 }
+
+// RenderUpdateApplying は設定の貼り直しに移るときの 1 行を返す。
+//
+// 自分が最新のときの `mdev update` はこれだけを前置きにして install を通す。
+// 何も出さずに install の出力へ移ると、更新を頼んだのに設置の話が始まった
+// ように見える。
+func RenderUpdateApplying() string {
+	return ansiBold + "設定を最新の形へ揃えています..." + ansiReset + "\n"
+}

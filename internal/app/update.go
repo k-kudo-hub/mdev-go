@@ -75,8 +75,14 @@ func (c *UpdateChecker) Check(force bool) string {
 	today := c.Clock.Now().Format(domain.DailyFileDateLayout)
 	conductorTag, mdevTag := c.latestTags(today, force, repoURL)
 
-	// conductor の資産と mdev 本体は別々に版が進む。どちらが古いのかが
-	// 分からないと、`mdev update` で何が変わるのかが読めない。
+	// 移行が済んでいれば版は 1 本しかない(ADR D3-2)。conductor 側の案内を
+	// 出すと、同じリポジトリの同じタグを 2 回知らせることになる。
+	if domain.IsMdevRepoURL(repoURL) {
+		return c.mdevNotice(today, mdevTag)
+	}
+	// 移行の途中では conductor の資産と mdev 本体が別々に版を進める。
+	// どちらが古いのかが分からないと、`mdev update` で何が変わるのかが
+	// 読めないため、行を分けて出す。
 	return c.conductorNotice(today, conductorTag) + c.mdevNotice(today, mdevTag)
 }
 
@@ -88,14 +94,21 @@ func (c *UpdateChecker) Check(force bool) string {
 //
 // 引けなかった場合は空文字を返し、その側の案内は出ない。
 func (c *UpdateChecker) latestTags(today string, force bool, repoURL string) (string, string) {
-	conductor := c.cachedTag(c.State.ReadUpdateCache, today, force)
+	// 移行後は更新元が mdev-go 自身なので、conductor 側は引かない。
+	// 同じリポジトリへ 2 回問い合わせても答えは同じである。
+	migrated := domain.IsMdevRepoURL(repoURL)
+
+	conductor := ""
+	if !migrated {
+		conductor = c.cachedTag(c.State.ReadUpdateCache, today, force)
+	}
 	mdev := ""
 	if c.mdevSupported() {
 		mdev = c.cachedTag(c.State.ReadMdevUpdateCache, today, force)
 	}
 
 	var wg sync.WaitGroup
-	if conductor == "" {
+	if conductor == "" && !migrated {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
