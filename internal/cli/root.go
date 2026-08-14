@@ -48,6 +48,8 @@ type Deps struct {
 	SessionClean SessionCleanService
 	// News は当日の AI 関連ニュースを取得するユースケース。
 	News NewsService
+	// Codex は codex の notify を処理するユースケース。
+	Codex CodexService
 	// Version はビルド時に焼き込まれた mdev の版である。
 	//
 	// 焼き込まれていない場合は空になる(参照は VersionOrDev を通す)。
@@ -87,6 +89,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newUpdateCommand(deps))
 	cmd.AddCommand(newCheckUpdateCommand(deps))
 	cmd.AddCommand(newNewsCommand(deps))
+	cmd.AddCommand(newCodexCommand(deps))
 	return cmd
 }
 

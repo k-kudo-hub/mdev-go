@@ -1,0 +1,164 @@
+[
+  {
+    "name": "task-tab",
+    "description": "conductor のタスクタブでターンが終わったとき。pending とレジストリの両方が更新される",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "019ffa99-28ef-7d93-9d02-a606a979e0b7",
+      "cwd": "/Users/dev/work/repo",
+      "last-assistant-message": "変更を \"3 件\" 反映しました。\\ もう一度確認してください"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042",
+      "TASK_TAB_NAME": "fix-bug",
+      "TASK_TYPE": "bugfix",
+      "TASK_AGENT": "codex"
+    }
+  },
+  {
+    "name": "default-agent",
+    "description": "TASK_AGENT が無いとき。claude ではなく codex に落ちる",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "th-default-agent",
+      "cwd": "/Users/dev/work/other",
+      "last-assistant-message": "done"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042",
+      "TASK_TAB_NAME": "docs"
+    }
+  },
+  {
+    "name": "no-message",
+    "description": "last-assistant-message が無いとき。既定の文言になる",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "th-no-message",
+      "cwd": "/Users/dev/work/repo"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042",
+      "TASK_TAB_NAME": "fix-bug"
+    }
+  },
+  {
+    "name": "outside-task-tab",
+    "description": "TASK_TAB_NAME が無いとき。タブ名は cwd の basename になり、レジストリには入らない",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "th-outside",
+      "cwd": "/Users/dev/work/scratch",
+      "last-assistant-message": "終わりました"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042"
+    }
+  },
+  {
+    "name": "outside-zellij",
+    "description": "zellij の外で動いているとき。セッション名は unknown になる",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "th-outside-zellij",
+      "cwd": "/Users/dev/work/repo",
+      "last-assistant-message": "終わりました"
+    },
+    "env": {
+      "TASK_TAB_NAME": "fix-bug"
+    }
+  },
+  {
+    "name": "no-cwd",
+    "description": "cwd が無く TASK_TAB_NAME も無いとき。タブ名は unknown になる",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "th-no-cwd",
+      "last-assistant-message": "終わりました"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042"
+    }
+  },
+  {
+    "name": "keeps-waiting",
+    "description": "退避中(Waiting)の pending は上書きしない。レジストリだけ更新される",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "th-waiting",
+      "cwd": "/Users/dev/work/repo",
+      "last-assistant-message": "終わりました"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042",
+      "TASK_TAB_NAME": "review",
+      "TASK_TYPE": "review",
+      "TASK_AGENT": "codex"
+    },
+    "pending": {
+      "mdev-go-224042/th-waiting.json": "{\"tab\":\"review\",\"session\":\"mdev-go-224042\",\"claude_session_id\":\"th-waiting\",\"message\":\"レビュー待ち\",\"event\":\"Waiting\",\"time\":\"09:00:00\",\"agent\":\"codex\"}\n"
+    }
+  },
+  {
+    "name": "overwrites-stop",
+    "description": "既に done の pending は上書きする",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "th-stop",
+      "cwd": "/Users/dev/work/repo",
+      "last-assistant-message": "2 回目のターンが終わりました"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042",
+      "TASK_TAB_NAME": "fix-bug",
+      "TASK_AGENT": "codex"
+    },
+    "pending": {
+      "mdev-go-224042/th-stop.json": "{\"tab\":\"fix-bug\",\"session\":\"mdev-go-224042\",\"claude_session_id\":\"th-stop\",\"message\":\"1 回目\",\"event\":\"Stop\",\"time\":\"09:00:00\",\"agent\":\"codex\"}\n"
+    }
+  },
+  {
+    "name": "transcript-from-sessions",
+    "description": "sessions/ 配下に会話ログがあるとき。transcript_path が入る",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "th-with-rollout",
+      "cwd": "/Users/dev/work/repo",
+      "last-assistant-message": "終わりました"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042",
+      "TASK_TAB_NAME": "fix-bug",
+      "TASK_AGENT": "codex"
+    },
+    "rollouts": {
+      "2026/08/14/rollout-2026-08-14T10-00-00-th-with-rollout.jsonl": "{\"type\":\"message\"}\n"
+    }
+  },
+  {
+    "name": "not-turn-complete",
+    "description": "別の種別。何も書かない",
+    "payload": {
+      "type": "session-start",
+      "thread-id": "th-other",
+      "cwd": "/Users/dev/work/repo"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042",
+      "TASK_TAB_NAME": "fix-bug"
+    }
+  },
+  {
+    "name": "empty-thread-id",
+    "description": "thread-id が空。何も書かない",
+    "payload": {
+      "type": "agent-turn-complete",
+      "thread-id": "",
+      "cwd": "/Users/dev/work/repo"
+    },
+    "env": {
+      "ZELLIJ_SESSION_NAME": "mdev-go-224042",
+      "TASK_TAB_NAME": "fix-bug"
+    }
+  }
+]
