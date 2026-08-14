@@ -337,12 +337,30 @@ type jsonMember struct {
 	value json.RawMessage
 }
 
-// insertMembers は obj の閉じ括弧の直前へ members を挿し込む編集を返す。
+// insertMembers は obj へ members を挿し込む編集を返す。
 //
 // インデントは閉じ括弧が乗っている行から読む。整形済みの設定に足したときに
 // 周りと段が揃い、1 行に詰めて書かれた設定ではそのまま 1 行に収まる。
+//
+// # 挿し込む位置
+//
+// 整形済みで既存のメンバーがある場合は、**最後のメンバーの直後**へ挿す。
+// 閉じ括弧の直前(= 改行と字下げの後ろ)へ挿すと、カンマだけの行ができて
+// しかも閉じ括弧が挿した値の末尾に張り付く。
+//
+//	"command": "codex"      ← 元の最後のメンバー
+//	,                       ← カンマだけの行
+//	  "detection": "screen"}  ← 閉じ括弧が潰れる
+//
+// 中身が空のときだけは閉じ括弧の直前へ挿し、閉じ括弧が自分の行に戻るよう
+// 改行と字下げを添える。
 func insertMembers(data []byte, obj objectSpan, members []jsonMember) byteEdit {
 	indent, pretty := objectIndent(data, obj)
+
+	at := obj.close
+	if pretty && !obj.empty {
+		at = lastNonSpace(data, obj.open+1, obj.close) + 1
+	}
 
 	var buf bytes.Buffer
 	for i, m := range members {
@@ -359,7 +377,26 @@ func insertMembers(data []byte, obj objectSpan, members []jsonMember) byteEdit {
 		buf.WriteString(": ")
 		buf.Write(indentJSONValue(m.value, indent, pretty))
 	}
-	return byteEdit{start: obj.close, end: obj.close, replacement: buf.Bytes()}
+	if pretty && at == obj.close {
+		// 閉じ括弧の直前へ挿した = 中身が空だった。閉じ括弧を自分の行へ戻す。
+		buf.WriteString("\n")
+		buf.WriteString(strings.TrimSuffix(indent, "  "))
+	}
+	return byteEdit{start: at, end: at, replacement: buf.Bytes()}
+}
+
+// lastNonSpace は data[from:to) の最後の非空白バイトの位置を返す。
+// 見つからなければ from-1 を返す。
+func lastNonSpace(data []byte, from, to int) int {
+	for i := to - 1; i >= from; i-- {
+		switch data[i] {
+		case ' ', '\t', '\n', '\r':
+			continue
+		default:
+			return i
+		}
+	}
+	return from - 1
 }
 
 // objectIndent は挿し込む行の字下げと、整形して書かれているかどうかを返す。

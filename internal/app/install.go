@@ -56,10 +56,25 @@ type Installer struct {
 	Files    FileStore
 	Assets   AssetReader
 	Commands CommandChecker
+	// Backup は settings.json を書き換える前に退避する。
+	//
+	// nil のときは退避しない(テストなど、退避の観測が要らない構成)。
+	Backup SettingsBackup
 	// Version は書き込む mdev の版(ADR D3-2 の版の単一化)。
 	Version string
 	// GOOS はテストで差し替える実行環境。空なら runtime.GOOS。
 	GOOS string
+}
+
+// SettingsBackup は settings.json を書き換える前に退避する。
+//
+// hooks の書き換えは利用者の設定ファイルへの破壊的な操作である。`mdev hooks
+// switch` は退避してから書いていたので、その仕事を引き取った install も
+// 同じようにする。
+type SettingsBackup interface {
+	// Backup は data を settings.json と同じディレクトリへ退避し、
+	// 作成したファイルのパスを返す。
+	Backup(data []byte) (string, error)
 }
 
 // Install は設置と移行を行い、経過を out へ書く。
@@ -285,6 +300,11 @@ func (i *Installer) configureHooks(out io.Writer) error {
 	if !result.Changed() {
 		return nil
 	}
+	// **書き換える前に退避する。** 利用者の設定ファイルなので、意図しない
+	// 結果になったときに戻せる状態を残す(`mdev hooks switch` と同じ)。
+	if err := i.backupSettings(out, current); err != nil {
+		return err
+	}
 	if err := i.Files.Write(i.Paths.Settings, result.Settings); err != nil {
 		return err
 	}
@@ -294,6 +314,22 @@ func (i *Installer) configureHooks(out io.Writer) error {
 	if len(result.Changes) > 0 {
 		_, _ = fmt.Fprintf(out, "  ✓ hooks を mdev へ切り替えました(%d 件)\n", len(result.Changes))
 	}
+	return nil
+}
+
+// backupSettings は settings.json を退避する。
+//
+// 退避に失敗したら **書き換えない**。戻せない状態で利用者の設定を書き換える
+// より、hooks が古いまま残るほうが害が小さい。
+func (i *Installer) backupSettings(out io.Writer, current []byte) error {
+	if i.Backup == nil {
+		return nil
+	}
+	path, err := i.Backup.Backup(current)
+	if err != nil {
+		return fmt.Errorf("settings.json を退避できません: %w", err)
+	}
+	_, _ = fmt.Fprintf(out, "  ✓ settings.json を退避しました: %s\n", path)
 	return nil
 }
 

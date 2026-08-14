@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -198,6 +199,67 @@ func TestMergeAgentDefaultsRejectsNonObjectRoot(t *testing.T) {
 			t.Parallel()
 			if _, _, err := domain.MergeAgentDefaults([]byte(config), defaults); err == nil {
 				t.Errorf("MergeAgentDefaults(%q) = nil, want エラー", config)
+			}
+		})
+	}
+}
+
+// TestMergeAgentDefaultsKeepsValidFormatting は補った結果が読める形になる
+// ことを確かめる。
+//
+// 挿し込む位置を誤ると、カンマだけの行ができたり閉じ括弧が値の末尾へ
+// 張り付いたりする。JSON としては妥当なので、機械の検証だけでは気づけない。
+func TestMergeAgentDefaultsKeepsValidFormatting(t *testing.T) {
+	t.Parallel()
+
+	defaults := readDefaultConfig(t)
+
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{
+			name:   "整形済み",
+			config: "{\n  \"agents\": {\n    \"codex\": {\n      \"command\": \"codex\"\n    }\n  }\n}\n",
+		},
+		{
+			name: "patterns をキー単位で補う",
+			config: "{\n  \"agents\": {\n    \"codex\": {\n      \"detection\": \"screen\",\n" +
+				"      \"patterns\": {\n        \"blocked\": []\n      }\n    }\n  }\n}\n",
+		},
+		{
+			name:   "タブ字下げ",
+			config: "{\n\t\"agents\": {\n\t\t\"codex\": {\n\t\t\t\"command\": \"codex\"\n\t\t}\n\t}\n}\n",
+		},
+		{
+			name:   "中身が空のエージェント",
+			config: "{\n  \"agents\": {\n    \"codex\": {\n    }\n  }\n}\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, additions, err := domain.MergeAgentDefaults([]byte(tt.config), defaults)
+			if err != nil {
+				t.Fatalf("MergeAgentDefaults = %v", err)
+			}
+			if len(additions) == 0 {
+				t.Fatal("補うものが無い(入力が想定と違う)")
+			}
+			if !json.Valid(got) {
+				t.Fatalf("壊れた JSON になった:\n%s", got)
+			}
+
+			for i, line := range strings.Split(string(got), "\n") {
+				trimmed := strings.TrimSpace(line)
+				if trimmed == "," {
+					t.Errorf("%d 行目がカンマだけの行になった:\n%s", i+1, got)
+				}
+				// 閉じ括弧が値の末尾へ張り付いていないこと。
+				if strings.HasSuffix(trimmed, "}}") || strings.HasSuffix(trimmed, "]}") {
+					t.Errorf("%d 行目で閉じ括弧が潰れた: %q\n%s", i+1, trimmed, got)
+				}
 			}
 		})
 	}

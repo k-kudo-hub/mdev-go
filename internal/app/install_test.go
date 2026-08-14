@@ -360,3 +360,103 @@ func TestInstallRefusesToRemoveScriptsFromDangerousHome(t *testing.T) {
 		t.Error("消してはいけないものが消えた")
 	}
 }
+
+// fakeSettingsBackup は settings.json の退避の代役である。
+type fakeSettingsBackup struct {
+	saved [][]byte
+	err   error
+}
+
+func (b *fakeSettingsBackup) Backup(data []byte) (string, error) {
+	if b.err != nil {
+		return "", b.err
+	}
+	b.saved = append(b.saved, data)
+	return "/home/dev/.claude/settings.json.mdev-backup-20260814T000000Z", nil
+}
+
+// TestInstallBacksUpSettingsBeforeWriting は settings.json を書き換える前に
+// 退避することを確かめる。
+//
+// hooks の書き換えは利用者の設定ファイルへの破壊的な操作である。
+// `mdev hooks switch` は退避してから書いていたので、その仕事を引き取った
+// install も同じようにする。
+func TestInstallBacksUpSettingsBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	const existing = `{"permissions":{"allow":[]},"hooks":{"Stop":[{"matcher":"","hooks":[` +
+		`{"type":"command","command":"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh"}]}]}}` + "\n"
+
+	files := newFakeFileStore()
+	files.files[testInstallPaths.Settings] = existing
+	backup := &fakeSettingsBackup{}
+
+	installer := newTestInstaller(files, allAvailable)
+	installer.Backup = backup
+
+	var out bytes.Buffer
+	if err := installer.Install(&out); err != nil {
+		t.Fatalf("Install = %v", err)
+	}
+
+	if len(backup.saved) != 1 {
+		t.Fatalf("退避 = %d 回, want 1", len(backup.saved))
+	}
+	// 退避されるのは **書き換える前** の中身である。
+	if string(backup.saved[0]) != existing {
+		t.Errorf("退避した中身が書き換え後になっている:\n%s", backup.saved[0])
+	}
+	if !strings.Contains(out.String(), "退避しました") {
+		t.Errorf("退避したことを伝えていない:\n%s", out.String())
+	}
+}
+
+// TestInstallSkipsBackupWhenNothingChanges は書き換えないなら退避もしない
+// ことを確かめる。install は繰り返し実行されるので、毎回退避すると
+// バックアップが際限なく増える。
+func TestInstallSkipsBackupWhenNothingChanges(t *testing.T) {
+	t.Parallel()
+
+	files := newFakeFileStore()
+	backup := &fakeSettingsBackup{}
+	installer := newTestInstaller(files, allAvailable)
+	installer.Backup = backup
+
+	var out bytes.Buffer
+	if err := installer.Install(&out); err != nil {
+		t.Fatalf("1 回目 = %v", err)
+	}
+	backup.saved = nil
+
+	if err := installer.Install(&out); err != nil {
+		t.Fatalf("2 回目 = %v", err)
+	}
+	if len(backup.saved) != 0 {
+		t.Errorf("2 回目に退避した: %d 回", len(backup.saved))
+	}
+}
+
+// TestInstallStopsWhenBackupFails は退避に失敗したら書き換えないことを
+// 確かめる。
+//
+// 戻せない状態で利用者の設定を書き換えるより、hooks が古いまま残るほうが
+// 害が小さい。
+func TestInstallStopsWhenBackupFails(t *testing.T) {
+	t.Parallel()
+
+	const existing = `{"hooks":{"Stop":[{"matcher":"","hooks":[` +
+		`{"type":"command","command":"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh"}]}]}}` + "\n"
+
+	files := newFakeFileStore()
+	files.files[testInstallPaths.Settings] = existing
+	installer := newTestInstaller(files, allAvailable)
+	installer.Backup = &fakeSettingsBackup{err: errWrite}
+
+	var out bytes.Buffer
+	if err := installer.Install(&out); err == nil {
+		t.Fatal("エラーを返すはず")
+	}
+	if files.files[testInstallPaths.Settings] != existing {
+		t.Errorf("退避に失敗したのに書き換えた:\n%s", files.files[testInstallPaths.Settings])
+	}
+}

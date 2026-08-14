@@ -190,7 +190,10 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Files:    files,
 		Assets:   store.NewAssetStore(conductorHome),
 		Commands: shell.NewCommandChecker(),
-		Version:  version,
+		// hooks の書き換えは利用者の設定ファイルへの破壊的な操作なので、
+		// hooks switch と同じ仕組みで退避してから書く。
+		Backup:  store.NewSettingsStore(installPaths.Settings, clock),
+		Version: version,
 	}
 
 	// ニュースの取得。News ペインの r キーと `mdev news fetch` が同じ実体を使う。
