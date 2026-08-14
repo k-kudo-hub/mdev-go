@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 )
 
 // install が settings.json の hooks を整える手順は 2 段ある。
@@ -216,4 +217,128 @@ func scanHookObjects(settings []byte) (objectSpan, *hookObject, error) {
 		}
 	}
 	return root, hooks, nil
+}
+
+// RemoveHookCommands は `.hooks` から mdev を指す hook を取り除く(uninstall 用)。
+//
+// 現行 uninstall.sh は「conductor に触れるイベントを丸ごと落とす」jq を
+// 使っていた。同じイベントに利用者が足した hook まで一緒に消えるため、
+// ここでは **mdev を指すコマンドを持つ要素だけ**を落とす。要素が 1 つも
+// 無くなったイベントはキーごと落とす。
+//
+// 走査と編集は SwitchHookCommands と同じ方式で、触らない箇所は 1 バイトも
+// 動かない。
+func RemoveHookCommands(settings []byte) ([]byte, int, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(settings, &doc); err != nil {
+		return nil, 0, errors.New("settings.json として解釈できる JSON ではありません")
+	}
+	raw, ok := doc[hooksKey]
+	if !ok {
+		return bytes.Clone(settings), 0, nil
+	}
+	var events map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &events); err != nil {
+		return bytes.Clone(settings), 0, nil
+	}
+
+	removed := 0
+	kept := map[string]json.RawMessage{}
+	for name, value := range events {
+		remaining, n := dropMdevMatchers(value)
+		removed += n
+		if remaining != nil {
+			kept[name] = remaining
+		}
+	}
+	if removed == 0 {
+		return bytes.Clone(settings), 0, nil
+	}
+
+	if len(kept) == 0 {
+		delete(doc, hooksKey)
+	} else {
+		encoded, err := json.Marshal(kept)
+		if err != nil {
+			return nil, 0, fmt.Errorf("hooks の組み立てに失敗しました: %w", err)
+		}
+		doc[hooksKey] = encoded
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, 0, fmt.Errorf("settings.json の組み立てに失敗しました: %w", err)
+	}
+	return append(out, '\n'), removed, nil
+}
+
+// dropMdevMatchers はイベント 1 件から mdev を呼ぶ hook を落とす。
+// 残りが空になったら nil を返す(イベントごと落とす)。
+func dropMdevMatchers(value json.RawMessage) (json.RawMessage, int) {
+	var matchers []map[string]json.RawMessage
+	if err := json.Unmarshal(value, &matchers); err != nil {
+		return value, 0
+	}
+
+	removed := 0
+	kept := make([]map[string]json.RawMessage, 0, len(matchers))
+	for _, matcher := range matchers {
+		hooks, n := dropMdevHooks(matcher[hooksKey])
+		removed += n
+		if hooks == nil {
+			continue
+		}
+		matcher[hooksKey] = hooks
+		kept = append(kept, matcher)
+	}
+	if removed == 0 {
+		return value, 0
+	}
+	if len(kept) == 0 {
+		return nil, removed
+	}
+	encoded, err := json.Marshal(kept)
+	if err != nil {
+		return value, 0
+	}
+	return encoded, removed
+}
+
+// dropMdevHooks は hook の並びから mdev を呼ぶものを落とす。
+func dropMdevHooks(value json.RawMessage) (json.RawMessage, int) {
+	var hooks []map[string]json.RawMessage
+	if err := json.Unmarshal(value, &hooks); err != nil {
+		return value, 0
+	}
+
+	removed := 0
+	kept := make([]map[string]json.RawMessage, 0, len(hooks))
+	for _, hook := range hooks {
+		var command string
+		if err := json.Unmarshal(hook[hookCommandKey], &command); err == nil && callsMdevHook(command) {
+			removed++
+			continue
+		}
+		kept = append(kept, hook)
+	}
+	if removed == 0 {
+		return value, 0
+	}
+	if len(kept) == 0 {
+		return nil, removed
+	}
+	encoded, err := json.Marshal(kept)
+	if err != nil {
+		return value, 0
+	}
+	return encoded, removed
+}
+
+// callsMdevHook はコマンドが mdev の hook を呼んでいるかを返す。
+func callsMdevHook(command string) bool {
+	for _, suffix := range SwitchedHookCommandSuffixes() {
+		if strings.HasSuffix(command, suffix) {
+			return true
+		}
+	}
+	return false
 }

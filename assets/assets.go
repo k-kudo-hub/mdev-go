@@ -11,6 +11,9 @@
 //     scripts/ を指したままなのは、これが Claude Code の settings.json へ
 //     写す雛形で、mdev の形への書き換えを `mdev hooks switch` が行うためで
 //     ある(雛形の側を書き換えると、切り替えと復元の対応が崩れる)
+//   - init.zsh: **mdev-go で新規に書いたもの**(conductor 側の 259 行の関数
+//     定義とは別物)。PATH を通して `mdev init zsh` を eval するだけの入口で、
+//     関数の中身はバイナリが出力する
 //   - layouts/multi.kdl: 5 つのペインを `bin/mdev pane <名前>` へ書き換え済み
 //   - layouts/dev.kdl: Agent ペインを `bin/mdev agent launch` へ書き換え済み
 //
@@ -35,7 +38,7 @@ import (
 // するためである。ディレクトリごと埋めると、置き忘れや消し忘れが
 // 実行ファイルの中身を黙って変える。
 //
-//go:embed config.default.json hooks.json layouts/multi.kdl layouts/dev.kdl
+//go:embed config.default.json hooks.json init.zsh layouts/multi.kdl layouts/dev.kdl
 var files embed.FS
 
 // Names は埋め込まれている資産の名前を昇順で返す。

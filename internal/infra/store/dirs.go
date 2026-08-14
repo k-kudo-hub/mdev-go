@@ -67,3 +67,15 @@ func (s *PaneStore) IsDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
+
+// codexHomeDirName は CODEX_HOME 未設定時のホーム直下のディレクトリ名。
+const codexHomeDirName = ".codex"
+
+// CodexConfigPath は codex の設定ファイルの場所を返す。
+// 現行版の `${CODEX_HOME:-$HOME/.codex}/config.toml` に対応する。
+func CodexConfigPath(codexHome, home string) string {
+	if codexHome == "" {
+		codexHome = filepath.Join(home, codexHomeDirName)
+	}
+	return filepath.Join(codexHome, "config.toml")
+}

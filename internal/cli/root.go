@@ -54,6 +54,10 @@ type Deps struct {
 	Agent AgentService
 	// Assets は同梱資産の解決。
 	Assets AssetService
+	// Install は設置と移行のユースケース。
+	Install InstallService
+	// Uninstall は取り除きのユースケース。
+	Uninstall UninstallService
 	// Version はビルド時に焼き込まれた mdev の版である。
 	//
 	// 焼き込まれていない場合は空になる(参照は VersionOrDev を通す)。
@@ -96,6 +100,8 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newCodexCommand(deps))
 	cmd.AddCommand(newAgentCommand(deps))
 	cmd.AddCommand(newAssetsCommand(deps))
+	cmd.AddCommand(newInstallCommand(deps))
+	cmd.AddCommand(newUninstallCommand(deps))
 	return cmd
 }
 

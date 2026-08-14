@@ -197,3 +197,108 @@ func TestInstallHooksRejectsBrokenSettings(t *testing.T) {
 		t.Error("エラーを返すはず")
 	}
 }
+
+// TestRemoveHookCommands は uninstall での hook の取り除きを確かめる。
+func TestRemoveHookCommands(t *testing.T) {
+	t.Parallel()
+
+	installed, err := domain.NewHookSettings(hooksTemplate(t))
+	if err != nil {
+		t.Fatalf("NewHookSettings = %v", err)
+	}
+
+	got, removed, err := domain.RemoveHookCommands(installed)
+	if err != nil {
+		t.Fatalf("RemoveHookCommands = %v", err)
+	}
+	if removed == 0 {
+		t.Fatal("1 件も外していない")
+	}
+	if strings.Contains(string(got), "mdev hook") {
+		t.Errorf("mdev の hook が残っている:\n%s", got)
+	}
+	if !json.Valid(got) {
+		t.Errorf("壊れた JSON になった:\n%s", got)
+	}
+}
+
+// TestRemoveHookCommandsKeepsForeign は利用者が足した hook を残すことを
+// 確かめる。
+//
+// 現行 uninstall.sh は conductor に触れるイベントを丸ごと落としていたため、
+// 同じイベントに足した hook まで一緒に消えていた。
+func TestRemoveHookCommandsKeepsForeign(t *testing.T) {
+	t.Parallel()
+
+	const settings = `{
+  "permissions": {"allow": []},
+  "hooks": {
+    "Stop": [{"matcher": "", "hooks": [
+      {"type": "command", "command": "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify"},
+      {"type": "command", "command": "my-own-notify"}
+    ]}],
+    "Notification": [{"matcher": "", "hooks": [
+      {"type": "command", "command": "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify"}
+    ]}]
+  }
+}
+`
+	got, removed, err := domain.RemoveHookCommands([]byte(settings))
+	if err != nil {
+		t.Fatalf("RemoveHookCommands = %v", err)
+	}
+	if removed != 2 {
+		t.Errorf("外した数 = %d, want 2", removed)
+	}
+
+	var doc struct {
+		Permissions json.RawMessage            `json:"permissions"`
+		Hooks       map[string]json.RawMessage `json:"hooks"`
+	}
+	if err := json.Unmarshal(got, &doc); err != nil {
+		t.Fatalf("JSON として読めない: %v\n%s", err, got)
+	}
+	if doc.Permissions == nil {
+		t.Errorf("他の設定が消えた:\n%s", got)
+	}
+	if !strings.Contains(string(got), "my-own-notify") {
+		t.Errorf("利用者の hook を消した:\n%s", got)
+	}
+	// 全部消えたイベントはキーごと落とす。
+	if _, ok := doc.Hooks["Notification"]; ok {
+		t.Errorf("空になったイベントが残っている:\n%s", got)
+	}
+}
+
+// TestRemoveHookCommandsNoop は mdev の hook が無いときに何もしないことを
+// 確かめる。
+func TestRemoveHookCommandsNoop(t *testing.T) {
+	t.Parallel()
+
+	for _, settings := range []string{
+		`{}`,
+		`{"hooks":{}}`,
+		`{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"other"}]}]}}`,
+	} {
+		got, removed, err := domain.RemoveHookCommands([]byte(settings))
+		if err != nil {
+			t.Fatalf("RemoveHookCommands = %v", err)
+		}
+		if removed != 0 {
+			t.Errorf("外した数 = %d, want 0", removed)
+		}
+		if string(got) != settings {
+			t.Errorf("書き換えた: %q -> %q", settings, got)
+		}
+	}
+}
+
+// TestRemoveHookCommandsRejectsBrokenJSON は壊れた settings.json を弾くことを
+// 確かめる。
+func TestRemoveHookCommandsRejectsBrokenJSON(t *testing.T) {
+	t.Parallel()
+
+	if _, _, err := domain.RemoveHookCommands([]byte(`{"hooks":`)); err == nil {
+		t.Error("エラーを返すはず")
+	}
+}

@@ -7,9 +7,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/cli"
+	"github.com/k-kudo-hub/mdev-go/internal/domain"
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/codex"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/git"
@@ -173,6 +175,17 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	zellijSessions := zellij.NewSessionController()
 	processes := procscan.NewScanner()
 
+	// 設置と取り除き。触る先が CONDUCTOR_HOME・settings.json・config.toml と
+	// 複数の根に散らばるため、絶対パスを 1 か所にまとめて渡す。
+	installPaths := domain.InstallPaths{
+		Home:          home,
+		ConductorHome: conductorHome,
+		Settings:      store.SettingsPath(home, getenv("MDEV_SETTINGS_FILE")),
+		CodexConfig:   store.CodexConfigPath(getenv("CODEX_HOME"), home),
+		Zshrc:         filepath.Join(home, ".zshrc"),
+	}
+	files := store.NewFileStore()
+
 	// ニュースの取得。News ペインの r キーと `mdev news fetch` が同じ実体を使う。
 	newsFetcher := news.NewFetcher(conductorHome)
 
@@ -268,6 +281,18 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Codex:  codexNotifier,
 		Agent:  &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
 		Assets: store.NewAssetStore(conductorHome),
+		Install: &app.Installer{
+			Paths:    installPaths,
+			Files:    files,
+			Assets:   store.NewAssetStore(conductorHome),
+			Commands: shell.NewCommandChecker(),
+			Version:  version,
+		},
+		Uninstall: &app.Uninstaller{
+			Paths:       installPaths,
+			Files:       files,
+			PendingRoot: store.PendingRoot(home),
+		},
 		UpdateCheck: &app.UpdateChecker{
 			Config:      paneStore,
 			State:       updateState,

@@ -20,6 +20,7 @@ func TestNames(t *testing.T) {
 	want := []string{
 		"config.default.json",
 		"hooks.json",
+		"init.zsh",
 		"layouts/dev.kdl",
 		"layouts/multi.kdl",
 	}
@@ -161,4 +162,31 @@ func domainTestdataPath(name string) string {
 		return filepath.Join("..", "internal", "domain", "testdata", "golden-config-merge", name)
 	}
 	return filepath.Join("..", "internal", "domain", "testdata", name)
+}
+
+// TestInitZshIsAShim は入口が中身を持たないことを確かめる。
+//
+// 関数の定義がここに戻ってくると、バイナリを更新しても古い関数が動き続ける
+// (機能を足すたびに入口の書き換えが要る、という元の問題に逆戻りする)。
+func TestInitZshIsAShim(t *testing.T) {
+	t.Parallel()
+
+	b, ok := assets.Read("init.zsh")
+	if !ok {
+		t.Fatal("init.zsh が埋め込まれていない")
+	}
+	body := string(b)
+
+	if !strings.Contains(body, `mdev" init zsh`) {
+		t.Errorf("mdev init zsh を呼んでいない:\n%s", body)
+	}
+	// mdev は PATH 上のバイナリが受ける。同名の関数を定義してはいけない。
+	for _, forbidden := range []string{"mdev()", "dev()", "zs()", "_conductor_session_name"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("入口が %q を定義している:\n%s", forbidden, body)
+		}
+	}
+	if strings.Contains(body, "/scripts/") {
+		t.Errorf("Shell スクリプトを呼んでいる:\n%s", body)
+	}
 }
