@@ -126,15 +126,45 @@ zs                # 期待: セッションの一覧が番号付きで出て、�
 3. タスク内で 1 往復し、入力待ちで放置 → **期待**: Waiting に出る
 4. `dd` で削除 → **期待**: アップロードののち Done に 1 件増える
 
-### 7. `mdev test`（開発用）
+### 7. `mdev test`（開発用・**実起動を含む**）
+
+このフェーズでしか確かめられない項目である。`mdev test` の実起動は新しい端末の窓を開いて**実 zellij でセッションを作る**ため、隔離した自動検証では扱えず、スクリプト側では dry-run とビルドまでしか見ていない（`scripts/verify-install-isolated.sh` の (c)）。
+
+まず副作用の無い範囲を確認する。
 
 ```sh
 cd ~/projects/mdev-go
-mdev test --dry-run <ブランチ名>    # 期待: WORKTREE / CONDUCTOR_HOME / SESSION / CMD が出る
-mdev test <ブランチ名>              # 期待: 新しい窓でテストセッションが開く
+mdev test --dry-run <ブランチ名>
+# 期待: WORKTREE / CONDUCTOR_HOME / BINARY / SESSION / CMD の 5 行が出て、
+#       .mdev-test/ は作られない
 ```
 
-**期待**: そのセッションのデータは `<worktree>/.mdev-test/` に入り、`~/.claude-conductor` は変わらない。
+続けて実起動する。**ここからセッションが増える。**
+
+```sh
+mdev test <ブランチ名>
+```
+
+**期待**:
+
+- 新しい端末の窓が開き、その中でテストセッションが立ち上がる
+- セッション名は `test-<ブランチ名>` を 24 文字へ切り詰めたもの
+- データは `<worktree>/.mdev-test/` に入り、**`~/.claude-conductor` は変わらない**
+- レイアウトのペインは `<worktree>/.mdev-test/bin/mdev` を指す（設置済みのバイナリではない）
+
+```sh
+grep -c "$PWD/.worktree/<ブランチ名>/.mdev-test/bin/mdev"     ~/projects/mdev-go/.worktree/<ブランチ名>/.mdev-test/layouts/multi.kdl   # 期待: 5
+ls ~/.claude-conductor/layouts/multi.kdl   # 期待: 変わっていない
+```
+
+**確認後は必ず片付ける。** テストセッションを残すと、次に `mdev` を開いたときの一覧に並び、掃除の対象にもなる。
+
+```sh
+zellij kill-session test-<切り詰めた名前>
+zellij delete-session test-<切り詰めた名前>
+rm -rf ~/projects/mdev-go/.worktree/<ブランチ名>/.mdev-test
+zellij list-sessions    # 期待: テストセッションが消えている
+```
 
 ### 8. `mdev update`
 
@@ -180,9 +210,13 @@ cd ~/projects/claude-conductor && git checkout <最終タグ> && ./install.sh
 
 ## 開発側の確認（任意）
 
-隔離環境での通し確認は Go のテストとは別にスクリプトがある。実環境には触れない。
+隔離環境での通し確認は Go のテストとは別にスクリプトがある。
 
 ```sh
 make build && scripts/verify-install-isolated.sh bin/mdev
-# 期待: 26 件成功 / 0 件失敗
+# 期待: 27 件成功 / 0 件失敗
 ```
+
+**実環境には触れない。** HOME・CONDUCTOR_HOME・CODEX_HOME に加えて **TMPDIR も隔離する**のが要点で、zellij のソケット置き場が `$TMPDIR/zellij-<uid>` で決まるためである。ここを実環境のままにすると、検証で作ったセッションが利用者の一覧に並び、掃除の対象にもなる。スクリプトは TMPDIR が一時ディレクトリの根そのものを指していたら起動を拒否する。
+
+`mdev test` の**実起動はこのスクリプトでは行わない**（隔離のしようがない副作用のため）。実起動の確認は上記の項目 7 で行う。

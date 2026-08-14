@@ -4,24 +4,78 @@
 # 使い方:
 #   scripts/verify-install-isolated.sh bin/mdev
 #
-# **実環境には一切触れない。** HOME・CONDUCTOR_HOME・CODEX_HOME をすべて
-# 一時ディレクトリへ向け、PATH も差し替えたスタブだけにする。読むのは
+# **実環境には一切触れない。** HOME・CONDUCTOR_HOME・CODEX_HOME・**TMPDIR** を
+# すべて一時ディレクトリへ向け、PATH も差し替えたスタブだけにする。読むのは
 # claude-conductor のソース(移行前の状態を作るため)だけである。
 #
 # Go のテストで足りない部分をここが埋める。install は「複数の根に散らばった
 # 実ファイルを、決まった順序で書き換える」処理なので、fake のファイル置き場
 # ではなく本物のファイルシステム上で通しで確かめる意味がある。
 #
+# # TMPDIR を隔離する理由
+#
+# **zellij のソケット置き場は TMPDIR で決まる**(`$TMPDIR/zellij-<uid>`)。
+# ここを実環境のままにすると、検証で作ったセッションが利用者の zellij サーバ
+# から見えてしまい、`list-sessions` に並び、掃除の対象にもなる。HOME と
+# CONDUCTOR_HOME だけ隔離しても足りない。
+#
+# 実際にこの手当てを怠って、検証用のセッションが実環境に残る事故を起こした。
+# 冒頭のガードはその再発防止である。
+#
 # 3 つのシナリオを見る。
 #
 #   (a) まっさらな環境への設置と冪等性、セッションの起動
 #   (b) 既存 Shell 環境からの移行(scripts 撤去・hooks 書き換え・
 #       REPO_URL 切り替え・**ユーザーデータが無傷であること**)
-#   (c) mdev test の dry-run と実ビルド
+#   (c) mdev test の解決とビルド(**実起動はしない**。下記)
+#
+# # (c) で実起動をしない理由
+#
+# `mdev test` の実起動は新しい端末の窓を開き、実 zellij でセッションを作る。
+# 隔離のしようがない副作用なので、ここでは解決(dry-run)とビルドの成否までを
+# 見る。実起動の確認はユーザーテスト 6-3 の項目にしてある。
 set -uo pipefail
 MDEV="${1:-bin/mdev}"
 [ -x "$MDEV" ] || { echo "実行できる mdev を渡してください: $MDEV" >&2; exit 1; }
 MDEV="$(cd "$(dirname "$MDEV")" && pwd)/$(basename "$MDEV")"
+
+# --- 隔離の要: TMPDIR ------------------------------------------------------
+# このスクリプト自身の TMPDIR を専用のディレクトリへ移す。以降の mktemp も
+# zellij のソケット置き場もここに閉じ込められる。
+#
+# 移す先は実環境の一時ディレクトリの **配下** で構わない。zellij が見るのは
+# `$TMPDIR/zellij-<uid>` なので、TMPDIR が 1 段でも深ければソケットは別の
+# 場所になる。禁じるのは「一時ディレクトリの根そのもの」を TMPDIR にする
+# ことで、それだと利用者のセッションと同じ置き場になってしまう。
+REAL_TMPDIR="${TMPDIR:-/tmp}"
+export TMPDIR="$(mktemp -d)/isolated-tmp"
+mkdir -p "$TMPDIR"
+
+# ガード: 一時ディレクトリの根を指していないこと。
+# macOS の既定は /var/folders/<x>/<y>/T、Linux などは /tmp である。
+guard_tmpdir() {
+    local dir="${1%/}"
+    case "$dir" in
+        /tmp|/var/tmp)
+            return 1 ;;
+        /var/folders/*/T)
+            return 1 ;;
+    esac
+    # 元の TMPDIR そのものも拒否する(上の型に当てはまらない設定への保険)。
+    [ "$dir" != "${REAL_TMPDIR%/}" ]
+}
+if ! guard_tmpdir "$TMPDIR"; then
+    echo "TMPDIR が実環境の一時ディレクトリそのものです: $TMPDIR" >&2
+    echo "検証で作った zellij セッションが利用者の一覧に並ぶため中止します。" >&2
+    exit 1
+fi
+# ソケット置き場が実環境と別になっていることを直に確かめる。
+if [ "$TMPDIR/zellij-$(id -u)" = "${REAL_TMPDIR%/}/zellij-$(id -u)" ]; then
+    echo "zellij のソケット置き場が実環境と同じです。中止します。" >&2
+    exit 1
+fi
+echo "隔離 TMPDIR: $TMPDIR"
+echo ""
 pass=0; fail=0
 ok()   { printf '  ✓ %s\n' "$1"; pass=$((pass+1)); }
 ng()   { printf '  ✗ %s\n' "$1"; fail=$((fail+1)); }
@@ -106,17 +160,24 @@ check ".zshrc 無変更" "$(cat "$W/home/.zshrc")" 'source "$HOME/.claude-conduc
 B_W="$W"
 
 echo ""
-echo "=== (c) mdev test の dry-run と実ビルド ==="
-WT=/Users/kazuto/projects/mdev-go/.worktree/add-installer-and-init-subcommands
-out=$("$MDEV" test --dry-run add-installer-and-init-subcommands 2>&1)
-check "dry-run が解決する" "$(echo "$out" | grep -c '^SESSION=test-add-installer')" "1"
+echo "=== (c) mdev test の解決とビルド ==="
+# **実起動はしない。** `mdev test` の実起動は新しい端末の窓を開いて実 zellij で
+# セッションを作る。隔離のしようがない副作用なので、ここでは解決(dry-run)と
+# ビルドの成否までを見る。実起動の確認はユーザーテスト 6-3 の項目にしてある。
+WT="$(cd "$(dirname "$MDEV")/.." && pwd)"
+WT_NAME="$(basename "$WT")"
+out=$("$MDEV" test --dry-run "$WT" 2>&1)
+check "dry-run が解決する" "$(echo "$out" | grep -c '^SESSION=test-')" "1"
 check "dry-run は隔離先を指す" "$(echo "$out" | grep -c "CONDUCTOR_HOME=$WT/.mdev-test")" "1"
-rm -rf "$WT/.mdev-test"
-TERM_PROGRAM=None "$MDEV" test "$WT" >/dev/null 2>&1
-check "実ビルドが成功する" "$([ -x "$WT/.mdev-test/bin/mdev" ] && echo yes || echo no)" "yes"
-check "組んだバイナリが動く" "$("$WT/.mdev-test/bin/mdev" version 2>/dev/null | head -1)" "dev"
-check "レイアウトが組んだバイナリを指す" "$(grep -c "$WT/.mdev-test/bin/mdev" "$WT/.mdev-test/layouts/multi.kdl")" "5"
-rm -rf "$WT/.mdev-test"
+check "dry-run は何も作らない" "$([ -e "$WT/.mdev-test" ] && echo yes || echo no)" "no"
+out_name=$("$MDEV" test --dry-run "$WT_NAME" 2>&1)
+check "ブランチ名でも解決する" "$(echo "$out_name" | grep -c "^WORKTREE=$WT\$")" "1"
+
+# ビルドだけを直に確かめる(mdev test が内部で走らせるのと同じコマンド)。
+BUILD_OUT="$W/built-mdev"
+(cd "$WT" && go build -o "$BUILD_OUT" ./cmd/mdev) >/dev/null 2>&1
+check "worktree のソースが組める" "$([ -x "$BUILD_OUT" ] && echo yes || echo no)" "yes"
+check "組んだバイナリが動く" "$("$BUILD_OUT" version 2>/dev/null | head -1)" "dev"
 
 echo ""
 echo "=== 結果: $pass 件成功 / $fail 件失敗 ==="
