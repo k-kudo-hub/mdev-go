@@ -249,4 +249,7 @@ type NewsFetcher interface {
 	// FetchNews は date(YYYY-MM-DD)のニュースを取り直す。同期で走らせ、
 	// 終わってから次の描画で新しい内容が出る。
 	FetchNews(date string)
+	// HasNews は date のニュースが既にあるかを返す。読めない場合は偽を返す
+	// (無いものとして取りに行く)。
+	HasNews(date string) bool
 }

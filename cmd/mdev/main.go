@@ -11,6 +11,7 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/cli"
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
+	"github.com/k-kudo-hub/mdev-go/internal/infra/codex"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/git"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/news"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/procscan"
@@ -59,6 +60,16 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Registry: store.NewRegistryStore(store.RegistryRoot(conductorHome)),
 		Focuser:  zellij.NewFocuser(),
 		Clock:    clock,
+	}
+
+	// codex の notify。hook を持たない codex でも done を拾うための経路で、
+	// 書き込み先は hook と同じ pending / レジストリである。会話ログの場所は
+	// payload に入らないため、CODEX_HOME から自分で引く。
+	codexNotifier := &app.CodexNotifier{
+		Pending:    pending,
+		Registry:   store.NewRegistryStore(store.RegistryRoot(conductorHome)),
+		Transcript: codex.NewLocator(getenv("CODEX_HOME"), home),
+		Clock:      clock,
 	}
 
 	// ロックを取れなかったことは stderr に警告するだけで処理は続ける
@@ -162,6 +173,9 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	zellijSessions := zellij.NewSessionController()
 	processes := procscan.NewScanner()
 
+	// ニュースの取得。News ペインの r キーと `mdev news fetch` が同じ実体を使う。
+	newsFetcher := news.NewFetcher(conductorHome)
+
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
 			Pending:     paneStore,
@@ -181,7 +195,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Done:    &app.DonePane{Daily: paneStore, Restorer: taskRestorer, Clock: clock},
 		News: &app.NewsPane{
 			News:    paneStore,
-			Fetcher: news.NewFetcher(conductorHome),
+			Fetcher: newsFetcher,
 			Opener:  shell.NewOpener(),
 			Clock:   clock,
 		},
@@ -250,6 +264,10 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Sleeper: sleeper,
 			Clock:   clock,
 		},
+		News:   &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
+		Codex:  codexNotifier,
+		Agent:  &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
+		Assets: store.NewAssetStore(conductorHome),
 		UpdateCheck: &app.UpdateChecker{
 			Config:      paneStore,
 			State:       updateState,

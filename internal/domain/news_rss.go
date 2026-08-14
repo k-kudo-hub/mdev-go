@@ -34,13 +34,14 @@ var htmlTagPattern = regexp.MustCompile(`<[^>]*>`)
 //   - 各断片の最初の <title> / <link> / <description> の中身を取る
 //   - タイトルと説明は CDATA の囲みを外す(URL は外さない)
 //   - **この時点で**タイトルか URL が空なら項目ごと捨てる
-//   - 残った項目のタイトルと説明から HTML タグを落とし、改行を空白にする
+//   - 残った項目のタイトルと説明から HTML タグを落とし、区切り文字を空白にする
+//   - URL からは区切り文字を落とし、前後の空白を落とす
 //   - 説明は NewsDescriptionLimit 文字までにして "..." を付ける
 //   - 先頭 NewsItemLimit 件で打ち切る
 //
-// 空判定と整形の順番、および URL に何もしないことは現行版のままである
-// (実測で確認済み)。順番を入れ替えると、タグだけのタイトル(整形すると
-// 空になる)を持つ項目が現行版では出るのにこちらでは消える、という差が出る。
+// 空判定と整形の順番は現行版のままである(実測で確認済み)。順番を入れ替えると、
+// タグだけのタイトル(整形すると空になる)を持つ項目が現行版では出るのに
+// こちらでは消える、という差が出る。
 func ParseRSSItems(data []byte) []NewsItem {
 	chunks := strings.Split(string(data), newsItemSeparator)
 	items := make([]NewsItem, 0, NewsItemLimit)
@@ -49,15 +50,15 @@ func ParseRSSItems(data []byte) []NewsItem {
 			break
 		}
 		title := stripCDATA(extractTag(chunk, "title"))
-		// URL は CDATA の囲みも HTML タグも外さず、改行も潰さない。
-		// 現行版が title / description にしか手を入れていないためである。
+		// URL は CDATA の囲みも HTML タグも外さない。現行版が
+		// title / description にしか gsub(/<[^>]*>/) を掛けていないためである。
 		link := extractTag(chunk, "link")
 		if title == "" || link == "" {
 			continue
 		}
 		items = append(items, NewsItem{
 			Title:       cleanNewsText(title),
-			URL:         link,
+			URL:         cleanNewsURL(link),
 			Description: truncateRunes(cleanNewsText(stripCDATA(extractTag(chunk, "description")))),
 		})
 	}
@@ -90,15 +91,40 @@ func stripCDATA(s string) string {
 	return strings.ReplaceAll(s, "]]>", "")
 }
 
-// cleanNewsText は HTML タグを落とし、改行を空白に潰す。
+// cleanNewsText は HTML タグを落とし、改行とタブを空白に潰す。
 //
 // 空判定の **後** に行う。引用符を含むタグ(<a href="...">)をそのまま
 // 出すと表示が崩れるので落とすが、それで空になっても項目は残す。
+//
+// \r だけは空白にせず落とす。CRLF の行末を両方とも空白にすると、元の
+// テキストで 1 つだった改行が空白 2 つになってしまう(現行版も同じ)。
 func cleanNewsText(s string) string {
 	s = htmlTagPattern.ReplaceAllString(s, "")
 	s = strings.ReplaceAll(s, "\r", "")
-	return strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(s, "\t", " ")
 }
+
+// cleanNewsURL は URL から区切り文字を落とし、前後の空白を落とす。
+//
+// URL に空白は含まれない一方、フィードは <link> を実際に複数行へ折り返す
+// (改行とインデントが値に入る)。テキストと違って改行を空白に **置き換えて
+// しまうと** URL の途中に空白が入って開けなくなるため、落とす。
+// 折り返しが入れたインデントは前後の空白として残るので、これも落とす。
+func cleanNewsURL(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\t", "")
+	return strings.Trim(s, asciiSpace)
+}
+
+// asciiSpace は現行版が LC_ALL=C の awk で [[:space:]] として扱う文字である。
+//
+// strings.TrimSpace を使わないのは、あちらが Unicode の空白(NBSP や
+// 全角空白)まで落とすためで、現行版はバイト指向で動くのでそれらを残す。
+// URL に紛れ込んだ NBSP を残すのは一見損だが、ここは互換の検証対象なので
+// 良し悪しではなく同じ結果を出すことを採る。
+const asciiSpace = " \t\n\v\f\r"
 
 // truncateRunes は説明文を上限までに切り詰める。
 //

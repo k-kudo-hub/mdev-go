@@ -1,0 +1,123 @@
+{
+  "search_dirs": ["~/projects", "~/works"],
+  "search_depth": 1,
+  "agent": {
+    "command": "claude",
+    "resume_args": "--resume"
+  },
+  "agents": {
+    "claude": {
+      "command": "claude",
+      "resume_args": "--resume",
+      "detection": "hooks"
+    },
+    "codex": {
+      "command": "codex",
+      "resume_args": "resume",
+      "detection": "screen",
+      "patterns": {
+        "neutral": [],
+        "blocked": [
+          "^ *Would you like to run the following command\\? *$",
+          "^ *Would you like to make the following edits\\? *$",
+          "^ *Would you like to grant these permissions\\? *$",
+          "^ *Press enter to confirm or esc to cancel *$"
+        ],
+        "working": ["\\([^)]*• [^)]* to interrupt\\)"]
+      }
+    }
+  },
+  "upload": {
+    "enabled": false,
+    "repo": "",
+    "base_dir": "work-log",
+    "branch": "main"
+  },
+  "update_check": {
+    "enabled": true
+  },
+  "skip_task_name_input": false,
+  "pricing": {
+    "claude-opus-4-7": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0,
+      "cache_hit": 0.5
+    },
+    "claude-opus-4-6": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0,
+      "cache_hit": 0.5
+    },
+    "claude-opus-4-5": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0,
+      "cache_hit": 0.5
+    },
+    "claude-sonnet-4-6": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6.0,
+      "cache_hit": 0.3
+    },
+    "claude-sonnet-4-5": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6.0,
+      "cache_hit": 0.3
+    },
+    "claude-haiku-4-5": {
+      "input": 1.0,
+      "output": 5.0,
+      "cache_write_5m": 1.25,
+      "cache_write_1h": 2.0,
+      "cache_hit": 0.1
+    },
+    "gpt-5.6-sol": {
+      "input": 5.0,
+      "output": 30.0,
+      "cache_write": 6.25,
+      "cache_hit": 0.5
+    },
+    "fast_multiplier": 6
+  },
+  "task_types": {
+    "dev": {
+      "description": "Claude Code + LazyVim + lazygit",
+      "layout": [
+        { "action": "new-pane", "direction": "right", "command": "nvim" },
+        { "action": "new-pane", "direction": "down", "command": "lazygit" },
+        { "action": "move-focus", "direction": "left" }
+      ]
+    },
+    "review": {
+      "description": "Claude Code only",
+      "layout": []
+    },
+    "docs": {
+      "description": "Claude Code only",
+      "layout": []
+    },
+    "survey": {
+      "description": "Claude Code only",
+      "layout": []
+    },
+    "k8s": {
+      "description": "Claude Code + k9s + Shell + LazyVim",
+      "layout": [
+        { "action": "new-pane", "direction": "right", "command": "k9s" },
+        { "action": "new-pane", "direction": "down", "command": "nvim" },
+        { "action": "move-focus", "direction": "left" },
+        { "action": "new-pane", "direction": "down" },
+        { "action": "move-focus", "direction": "up" }
+      ]
+    }
+  }
+}

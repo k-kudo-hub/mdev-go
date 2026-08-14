@@ -1,0 +1,9 @@
+{
+  "tab": "fix-bug",
+  "session": "mdev-go-224042",
+  "claude_session_id": "019ffa99-28ef-7d93-9d02-a606a979e0b7",
+  "updated_at": "2026-08-14T15:06:01+0900",
+  "dir": "/Users/dev/work/repo",
+  "task_type": "bugfix",
+  "agent": "codex"
+}

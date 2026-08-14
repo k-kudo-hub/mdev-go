@@ -21,62 +21,31 @@ type HookHandler struct {
 // HandleNotify は Notification / Stop hook を処理する
 // (現行 pending-notify.sh 相当)。
 //
-// 処理順は現行版に合わせている。レジストリの更新を pending の上書き判定より
-// 先に行うため、Stop が Notification を上書きしない場合でもレジストリは
-// 最新化される。
-//
-// 途中の失敗で処理を打ち切らない。現行版は set -e を使っておらず、レジストリの
-// 更新に失敗しても pending の書き込みへ進むため、失敗経路でもファイル状態が
-// 現行版と一致するよう副作用をすべて実行してからエラーをまとめて返す。
+// 書き込みの中身と順序は codex の notify(CodexNotifier.Notify)と同じなので
+// applyTurnRecord に任せる。この経路に固有なのは、エージェント名が claude へ
+// 落ちること、event が入力の hook_event_name であること、上書き判定が
+// Notification と Waiting の両方を守ることの 3 点である。
 func (h *HookHandler) HandleNotify(raw []byte, env HookEnv) error {
 	in := domain.ParseHookInput(raw)
 	if in.SessionID == "" {
 		return nil
 	}
 
-	session := domain.SessionName(env.ZellijSession)
-	tab := domain.ResolveTabName(env.TaskTabName, in.Cwd)
-	agent := domain.AgentName(env.TaskAgent)
-	now := h.Clock.Now()
-
-	var errs []error
-	if env.IsTaskTab() {
-		entry := domain.RegistryEntry{
-			Tab:             tab,
-			Session:         session,
-			ClaudeSessionID: in.SessionID,
-			UpdatedAt:       now.Format(domain.RegistryUpdatedAtLayout),
-			Dir:             in.Cwd,
-			TaskType:        env.TaskType,
-			Agent:           agent,
-			TranscriptPath:  in.TranscriptPath,
-		}
-		if err := h.Registry.Upsert(entry); err != nil {
-			errs = append(errs, fmt.Errorf("レジストリの更新に失敗しました: %w", err))
-		}
-	}
-
-	existing := h.Pending.Event(session, in.SessionID)
-	if !domain.ShouldOverwritePending(existing, in.HookEventName) {
-		return errors.Join(errs...)
-	}
-
-	pending := domain.Pending{
-		Tab:             tab,
-		Session:         session,
-		ClaudeSessionID: in.SessionID,
-		Message:         in.Message,
-		Event:           in.HookEventName,
-		Time:            now.Format(domain.PendingTimeLayout),
-		Agent:           agent,
-		TranscriptPath:  in.TranscriptPath,
-		Dir:             in.Cwd,
-		TaskType:        env.TaskType,
-	}
-	if err := h.Pending.Save(session, in.SessionID, pending); err != nil {
-		errs = append(errs, fmt.Errorf("pending の書き込みに失敗しました: %w", err))
-	}
-	return errors.Join(errs...)
+	return applyTurnRecord(h.Pending, h.Registry, h.Clock.Now(), turnRecord{
+		Session:        domain.SessionName(env.ZellijSession),
+		SessionID:      in.SessionID,
+		Tab:            domain.ResolveTabName(env.TaskTabName, in.Cwd),
+		Dir:            in.Cwd,
+		TaskType:       env.TaskType,
+		Agent:          domain.AgentName(env.TaskAgent),
+		Message:        in.Message,
+		Event:          in.HookEventName,
+		TranscriptPath: in.TranscriptPath,
+		RegisterTask:   env.IsTaskTab(),
+		Overwrite: func(existing string) bool {
+			return domain.ShouldOverwritePending(existing, in.HookEventName)
+		},
+	})
 }
 
 // HandlePostTool は PostToolUse hook を処理する

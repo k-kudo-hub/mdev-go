@@ -1,0 +1,29 @@
+{
+  "items": [
+    {
+      "title": "GPT-5 Released with Major Improvements",
+      "url": "https://techcrunch.com/gpt5",
+      "description": "OpenAI has released GPT-5 with significant performance gains across all benchmarks."
+    },
+    {
+      "title": "Quotes \"and\" backslash \\ in title",
+      "url": "https://techcrunch.com/quote?a=1&amp;b=2",
+      "description": "Description with \"quotes\", a backslash \\ and a link."
+    },
+    {
+      "title": "Wrapped link",
+      "url": "https://techcrunch.com/wrapped",
+      "description": "The link element is wrapped across lines with indentation."
+    },
+    {
+      "title": "Tabs and newlines",
+      "url": "https://techcrunch.com/tabs",
+      "description": "Description with a tab and a newline inside CDATA."
+    },
+    {
+      "title": "日本語の見出しも壊れないこと",
+      "url": "https://techcrunch.com/ja",
+      "description": "日本語の説明文をとても長く書いて切り詰めの境界を越えさせる。あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん、さらに続けて百二十文字を確実に超えるようにする。ここから先は切り落とされるはず。"
+    }
+  ]
+}

@@ -27,10 +27,7 @@ type HookInput struct {
 // 全項目が既定値になる。session_id が空になるため、呼び出し側の
 // 「session_id が空なら何もしない」判定でそのまま no-op になる。
 func ParseHookInput(raw []byte) HookInput {
-	fields := map[string]json.RawMessage{}
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		fields = nil
-	}
+	fields := jqFields(raw)
 
 	in := HookInput{
 		SessionID:      jqString(fields, "session_id"),
@@ -46,6 +43,19 @@ func ParseHookInput(raw []byte) HookInput {
 		in.HookEventName = EventUnknown
 	}
 	return in
+}
+
+// jqFields は JSON をキーごとの生の値へ割る。
+//
+// 解釈できない入力では nil を返す。現行版は `jq ... 2>/dev/null` で
+// エラーを握り潰し、すべての項目が空文字になっていた。呼び出し側の
+// 「必須の項目が空なら何もしない」判定でそのまま no-op になる。
+func jqFields(raw []byte) map[string]json.RawMessage {
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil
+	}
+	return fields
 }
 
 // jqHasValue は jq の `//` 演算子が「値がある」と見なすかを返す。

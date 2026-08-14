@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>TechCrunch AI</title>
+<item><title><![CDATA[GPT-5 Released with Major Improvements]]></title><link>https://techcrunch.com/gpt5</link><description><![CDATA[OpenAI has released GPT-5 with significant performance gains across all benchmarks.]]></description></item>
+<item><title><![CDATA[Quotes "and" backslash \ in title]]></title><link>https://techcrunch.com/quote?a=1&amp;b=2</link><description><![CDATA[Description with "quotes", a backslash \ and <a href="https://example.com">a link</a>.]]></description></item>
+<item><title><![CDATA[Wrapped link]]></title><link>
+https://techcrunch.com/wrapped
+</link><description><![CDATA[The link element is wrapped across lines with indentation.]]></description></item>
+<item><title><![CDATA[Tabs	and
+newlines]]></title><link>https://techcrunch.com/tabs</link><description><![CDATA[Description with a	tab and
+a newline inside CDATA.]]></description></item>
+<item><title><![CDATA[日本語の見出しも壊れないこと]]></title><link>https://techcrunch.com/ja</link><description><![CDATA[日本語の説明文をとても長く書いて切り詰めの境界を越えさせる。あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん、さらに続けて百二十文字を確実に超えるようにする。ここから先は切り落とされるはず。]]></description></item>
+<item><title><![CDATA[6 件目は捨てられる]]></title><link>https://techcrunch.com/sixth</link><description><![CDATA[only five items are kept]]></description></item>
+</channel>
+</rss>

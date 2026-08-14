@@ -109,16 +109,31 @@ func TestParseRSSItemsEdgeCases(t *testing.T) {
 			want: []domain.NewsItem{},
 		},
 		{
-			// URL には手を入れない。現行版が title / description にしか
-			// 整形をかけていないためである。
+			// URL の CDATA と HTML タグには手を入れない。現行版が
+			// title / description にしか gsub(/<[^>]*>/) をかけていないためである。
 			name: "URL の CDATA の囲みは外さない",
 			rss:  "<channel>" + item("t", "<![CDATA[https://e/2]]>", "d") + "</channel>",
 			want: []domain.NewsItem{{Title: "t", URL: "<![CDATA[https://e/2]]>", Description: "d"}},
 		},
 		{
-			name: "URL の改行は潰さない",
-			rss:  "<channel>" + item("t", "\nhttps://e/3\n", "d") + "</channel>",
-			want: []domain.NewsItem{{Title: "t", URL: "\nhttps://e/3\n", Description: "d"}},
+			// 折り返された <link> は実在のフィードにある。空白へ **置き換える**
+			// と URL の途中に空白が入って開けなくなるため、落として詰める。
+			name: "折り返された URL は改行とインデントを落として詰める",
+			rss:  "<channel>" + item("t", "\n\thttps://e/3  \n", "d") + "</channel>",
+			want: []domain.NewsItem{{Title: "t", URL: "https://e/3", Description: "d"}},
+		},
+		{
+			// 現行版は LC_ALL=C の awk なので [[:space:]] はバイト指向で、
+			// Unicode の空白は空白として扱われずそのまま残る。
+			name: "URL の Unicode 空白は落とさない",
+			rss:  "<channel>" + item("t", "　https://e/3", "d") + "</channel>",
+			want: []domain.NewsItem{{Title: "t", URL: "　https://e/3", Description: "d"}},
+		},
+		{
+			// タブは項目の区切りとして使われるため、現行版は空白に潰す。
+			name: "タイトルと説明のタブは空白にする",
+			rss:  "<channel>" + item("a\tb", "https://e/1", "c\td") + "</channel>",
+			want: []domain.NewsItem{{Title: "a b", URL: "https://e/1", Description: "c d"}},
 		},
 		{
 			name: "説明が無くても項目は残る",
