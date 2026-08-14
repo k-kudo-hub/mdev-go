@@ -13,6 +13,9 @@ ADR-0004 実施フェーズ 3(最難関)。`mdev install/uninstall/init/test` �
 - [ ] codex notify 差し替え: `~/.codex/config.toml` の notify を `["<CONDUCTOR_HOME>/bin/mdev","codex","notify"]` へ。**Codex Computer Use ラッパーの入れ子(`--previous-notify` の JSON 文字列)を解いて差し替える**処理込み(6-2 申し送り 2)。他ツールの notify は現行 install.sh と同じく触らず案内
 - [ ] 移行処理: 既存インストールの `~/.claude-conductor/scripts/` を削除(D5-4。実行前に一覧表示)。`init.zsh` を**シムに置き換え**(下記 B)
 - [ ] `mdev uninstall`: 現 uninstall.sh 相当(hooks 除去・codex notify 除去・CONDUCTOR_HOME 削除の案内と実行、自分自身の削除を含む)
+- [ ] レイアウト移行(裁定 1): 資産配置は「不在時のみ書く」を維持しつつ、既存ファイル内の既知の Shell 参照だけを外科的に書き換える(`/scripts/*-loop.sh` → `bin/mdev pane *`、`/scripts/agent-launch.sh` → `bin/mdev agent launch`。いずれも引用符付き)。書き換えたら install の出力に 1 行報告
+- [ ] `mdev update` を ADR D4-2 の完成形へ(裁定 2): 自己置換の後は **自分自身の `mdev install`(冪等再適用)** で資産を更新する。conductor tarball + bash install.sh のフローは削除。REPO_URL を mdev-go へ切り替えた時点で旧フローは成立しないため同じ PR で行う
+- [ ] VERSION と check-update の単一化(ADR D3-2、裁定 2): `mdev install` が VERSION へ **バイナリ自身の版**を書く。REPO_URL が mdev-go を指す場合、check-update は conductor 行を出さず mdev 1 本の比較に収束させる
 
 ### B. `mdev init zsh` とシム(ADR D6)
 

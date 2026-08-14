@@ -94,11 +94,11 @@ func TestLayoutsPointAtMdev(t *testing.T) {
 		{
 			name: "layouts/multi.kdl",
 			wants: []string{
-				"/bin/mdev pane dashboard",
-				"/bin/mdev pane waiting",
-				"/bin/mdev pane done",
-				"/bin/mdev pane news",
-				"/bin/mdev pane task-create",
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane dashboard`,
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane waiting`,
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane done`,
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane news`,
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane task-create`,
 			},
 		},
 		// パスは引用符で囲む。HOME に空白が入っていると、囲まずに書いた
