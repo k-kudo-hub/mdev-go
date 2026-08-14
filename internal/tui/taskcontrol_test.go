@@ -223,12 +223,12 @@ func TestTaskControlUploadFailureCancelsDeletion(t *testing.T) {
 		t.Fatal("dd でコマンドが出ていない")
 	}
 	next, cmd := m.Update(msg)
-	// **時間で消さない。** 理由を読んで判断してもらうための表示なので、
-	// タイマーは張らない(2 秒で流れると何が起きたのか分からない)。
-	if cmd != nil {
-		t.Error("中止の通知にタイマーが張られている")
+	// 通知と `!` の受付は同じタイマーで解く。無期限に武装したままにすると、
+	// 後から押した `!` が意図せず効く。
+	if cmd == nil {
+		t.Error("期限のタイマーが張られていない")
 	}
-	if got := content(next); !strings.Contains(got, "Upload failed. Deletion cancelled.") {
+	if got := content(next); !strings.Contains(got, "Upload failed") {
 		t.Errorf("中止の表示が出ていない: %q", got)
 	}
 	for _, call := range pane.calls {
@@ -305,9 +305,12 @@ func equalStrings(got, want []string) bool {
 	return true
 }
 
-// TestTaskControlShowsUploadFailureReason は中止の理由を画面へ出すことを
-// 確かめる。Dashboard と同じ扱いにする(両方の経路で同じだけ分かるように)。
-func TestTaskControlShowsUploadFailureReason(t *testing.T) {
+// TestTaskControlNoticeIsSingleLine は中止の通知が 1 行に収まることを
+// 確かめる。
+//
+// **このペインは 1 行しかない。** 複数行にすると操作バーの高さが変わり、
+// タブの中の表示が押し出される。理由の全文は Dashboard 側に出す。
+func TestTaskControlNoticeIsSingleLine(t *testing.T) {
 	t.Parallel()
 
 	const reason = "ログリポジトリへのpushに失敗しました: 認証エラー"
@@ -320,11 +323,18 @@ func TestTaskControlShowsUploadFailureReason(t *testing.T) {
 	next, _ := m.Update(msg)
 
 	got := content(next)
-	if !strings.Contains(got, "Upload failed. Deletion cancelled.") {
+	if lines := strings.Count(strings.TrimRight(got, "\n"), "\n") + 1; lines != 1 {
+		t.Errorf("%d 行になっている: %q", lines, got)
+	}
+	if !strings.Contains(got, "Upload failed") {
 		t.Errorf("中止の表示が出ていない: %q", got)
 	}
-	if !strings.Contains(got, reason) {
-		t.Errorf("理由が出ていない: %q", got)
+	if !strings.Contains(got, "未アップロード削除") {
+		t.Errorf("逃げ道の案内が出ていない: %q", got)
+	}
+	// 理由の全文は載せない(1 行に収めるため)。
+	if strings.Contains(got, reason) {
+		t.Errorf("理由の全文が載っている: %q", got)
 	}
 }
 
@@ -333,8 +343,10 @@ func TestTaskControlShowsUploadFailureReason(t *testing.T) {
 func TestTaskControlForceDeleteAfterCancel(t *testing.T) {
 	t.Parallel()
 
-	const reason = "会話要約の生成に失敗しました: transcript のパスが記録されていません"
-	pane := &stubTaskControl{prep: app.DeletePreparation{Cancelled: true, Reason: reason}}
+	pane := &stubTaskControl{prep: app.DeletePreparation{
+		Cancelled: true,
+		Reason:    "会話要約の生成に失敗しました: transcript のパスが記録されていません",
+	}}
 	m, _ := newTaskControl(t, pane).Update(key('d'))
 	m, msg := pressTC(t, m, 'd')
 	if msg == nil {
@@ -342,11 +354,7 @@ func TestTaskControlForceDeleteAfterCancel(t *testing.T) {
 	}
 	shown, _ := m.Update(msg)
 
-	got := content(shown)
-	if !strings.Contains(got, reason) {
-		t.Errorf("理由が出ていない: %q", got)
-	}
-	if !strings.Contains(got, "アップロードせずに削除") {
+	if got := content(shown); !strings.Contains(got, "未アップロード削除") {
 		t.Errorf("強制削除の案内が出ていない: %q", got)
 	}
 

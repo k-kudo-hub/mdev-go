@@ -62,9 +62,6 @@ type (
 	}
 	// commitDeleteMsg は削除の後半へ進む合図である。
 	commitDeleteMsg struct{ tab string }
-	// forceDeleteMsg はアップロードを飛ばして削除することを表す。
-	// 中止の理由を見せたうえで利用者が選んだときだけ流れる。
-	forceDeleteMsg struct{ tab string }
 	// deleteFinishedMsg は削除の後半が終わったことを表す。
 	deleteFinishedMsg struct{ err error }
 	// noticeExpiredMsg は一時的な通知の表示時間が過ぎたことを表す。
@@ -210,12 +207,6 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return deleteFinishedMsg{err: m.pane.CommitDelete(m.env, tab)}
 		}
 
-	case forceDeleteMsg:
-		tab := msg.tab
-		return m, func() tea.Msg {
-			return deleteFinishedMsg{err: m.pane.ForceDelete(m.env, tab)}
-		}
-
 	case deleteFinishedMsg:
 		if msg.err != nil {
 			// 片付けの途中で失敗した。理由を出してから通常の表示へ戻る。
@@ -229,7 +220,9 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case noticeExpiredMsg:
 		if msg.token == m.token {
-			m.busy, m.notice = false, ""
+			// 強制削除の受付も同時に解く。通知が消えているのに `!` だけが
+			// 効く状態を作らない。
+			m.busy, m.notice, m.forceTab = false, "", ""
 			cmd := m.forceRefreshCmd()
 			return m, cmd
 		}
@@ -248,18 +241,18 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// 中止の直後だけ、強制削除を選べる。他のキーを押せば提示は消え、
-	// 通常の画面へ戻る(選ばなかったことが既定の結果になる)。
-	if m.forceTab != "" {
-		tab := m.forceTab
-		m.forceTab, m.notice = "", ""
-		m.token++
-		if key != forceDeleteKey {
-			return m, m.forceRefreshCmd()
-		}
+	// 中止の直後だけ、強制削除を選べる。
+	if tab, chosen := takeForceOffer(&m.forceTab, &m.notice, &m.token, key); chosen {
 		m.busy = true
-		return m, func() tea.Msg { return forceDeleteMsg{tab: tab} }
+		env := m.env
+		pane := m.pane
+		return m, func() tea.Msg {
+			return deleteFinishedMsg{err: pane.ForceDelete(env, tab)}
+		}
 	}
+	// 選ばれなかったキーは **握り潰さず本来の意味で処理する**。提示だけを
+	// 解いて先へ進む。ここで打ち切ると、やり直しの d+番号 が別の操作に
+	// すり替わる。
 
 	if m.awaiting {
 		// 凍結を解く。削除へ進まない分岐では、止めていた間の変化に表示を
@@ -329,18 +322,16 @@ func (m DashboardModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cm
 	if msg.prep.Cancelled {
 		// アップロードに失敗したので何も消さない。
 		//
-		// **この通知は時間で消さない。** 理由は読んで判断するためのもので、
-		// 2 秒で流れると何が起きたのか分からないまま元の画面へ戻る。次の
-		// キー操作まで残し、そこで強制削除を選べるようにする。
+		// **通知と `!` の受付は同じタイマーで管理する。** 理由を読んで判断
+		// するための時間が要る一方、武装したまま放置すると後から押した `!` が
+		// 意図せず効く。期限が切れたら両方まとめて解ける(forceOfferDuration)。
 		//
-		// **busy はここで解く。** 従来は通知のタイマーが解いていたが、この
-		// 通知は時間で消えないため、そのままだとペインが固まる(キーも
-		// ポーリングも止まる)。削除は既に中止されており、処理中ではない。
+		// **busy はここで解く。** 削除は既に中止されており、処理中ではない。
 		m.busy = false
 		m.notice = uploadFailedNotice(msg.prep.Reason)
 		m.forceTab = msg.tab
 		m.token++
-		return m, nil
+		return m, forceOfferCmd(m.token)
 	}
 
 	if msg.prep.Message == "" {
@@ -377,6 +368,36 @@ func (m DashboardModel) refreshCmd(poll bool) tea.Cmd {
 		snapshot, err := m.pane.Refresh(m.env)
 		return dashboardRefreshedMsg{snapshot: snapshot, err: err, poll: poll}
 	}
+}
+
+// forceOfferCmd は forceOfferDuration 後に中止の通知と強制削除の受付を終える。
+//
+// noticeCmd と同じ noticeExpiredMsg を流す。受け手が通知・busy・受付を
+// まとめて解くので、期限の管理は「どちらのタイマーを張ったか」だけで済む。
+func forceOfferCmd(token int) tea.Cmd {
+	return tea.Tick(forceOfferDuration, func(time.Time) tea.Msg {
+		return noticeExpiredMsg{token: token}
+	})
+}
+
+// takeForceOffer は強制削除の提示を解き、選ばれたかどうかを返す。
+//
+// Dashboard と task-control で同じ判断をするための共通処理である。
+//
+// **選ばれなかったキーは握り潰さない。** 提示だけを解いて false を返し、
+// 呼び出し側はそのキーを本来の意味で処理する。ここで打ち切ると、やり直しの
+// d+番号 が別の操作(ジャンプ)にすり替わる。
+//
+// 世代(token)を進めるのは、張ってあった期限のタイマーを無効にするためで
+// ある。進めないと、次の操作の最中に古い期限切れが届いて表示が消える。
+func takeForceOffer(forceTab, notice *string, token *int, key string) (string, bool) {
+	if *forceTab == "" {
+		return "", false
+	}
+	tab := *forceTab
+	*forceTab, *notice = "", ""
+	*token++
+	return tab, key == forceDeleteKey
 }
 
 // noticeCmd は noticeDuration 後に通知の表示を終える。

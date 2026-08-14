@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
@@ -57,12 +58,19 @@ func (d *TaskDeleter) Prepare(env PaneEnv, tab string) (DeletePreparation, error
 		// 中止そのものは error ではない(呼び出し側は Cancelled で分岐する)
 		// ので、戻り値の形は変えない。
 		//
-		// **画面へ出す前に秘密を伏せる。** 失敗の説明には設定した値がそのまま
-		// 載ることがあり、upload.repo に認証情報付きの URL を書いている場合は
-		// それが画面とスクロールバックに残る。
+		// **画面へ出す前に資格情報を伏せる。** 失敗の説明には設定した値が
+		// そのまま載ることがあり、upload.repo に認証情報付きの URL を
+		// 書いている場合はそれが画面とスクロールバックに残る。
+		//
+		// 作業ログ用の FilterSecrets ではなく表示用の MaskURLCredentials を
+		// 使う。前者の出力は golden テストでバイト単位に固定されており、
+		// 表示のために伏せる範囲を足すとその一致が崩れる。
+		//
+		// 末尾の改行は落とす。1 行として画面へ組み込むためで、他の 2 つの
+		// 呼び出し元(要約の前処理・markdown の組み立て)と同じ扱いである。
 		return DeletePreparation{
 			Cancelled: true,
-			Reason:    domain.FilterSecrets(err.Error()),
+			Reason:    strings.TrimRight(domain.MaskURLCredentials(err.Error()), "\n"),
 		}, nil
 	}
 	return DeletePreparation{Message: output}, nil

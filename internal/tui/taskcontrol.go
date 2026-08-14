@@ -24,6 +24,13 @@ const TaskControlPromptTimeout = 2 * time.Second
 const (
 	taskControlDeletePrompt = "\033[0;31m\033[1mPress d to confirm delete...\033[0m"
 	taskControlUploading    = "\033[2mUploading log...\033[0m"
+	// taskControlUploadFailedNotice は中止と逃げ道を **1 行で** 伝える。
+	//
+	// このペインは 1 行しかないため、理由の全文は載せない(複数行にすると
+	// 操作バーの高さが変わり、タブの中の表示が押し出される)。理由を読みたい
+	// ときは Dashboard 側に出る。
+	taskControlUploadFailedNotice = "\033[0;31m\033[1mUpload failed.\033[0m " +
+		"\033[0;33m" + forceDeleteKey + " で未アップロード削除\033[0m"
 )
 
 // TaskControlService は task-control ペインのユースケースである。
@@ -146,12 +153,6 @@ func (m TaskControlModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case deletePreparedMsg:
 		return m.handlePrepared(msg)
 
-	case forceDeleteMsg:
-		tab := msg.tab
-		return m, func() tea.Msg {
-			return deleteFinishedMsg{err: m.pane.ForceDelete(m.env, tab)}
-		}
-
 	case commitDeleteMsg:
 		tab := msg.tab
 		return m, func() tea.Msg {
@@ -170,7 +171,9 @@ func (m TaskControlModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case noticeExpiredMsg:
 		if msg.token == m.token {
-			m.busy, m.notice = false, ""
+			// 強制削除の受付も同時に解く。通知が消えているのに `!` だけが
+			// 効く状態を作らない。
+			m.busy, m.notice, m.forceTab = false, "", ""
 			cmd := m.forceRefreshCmd()
 			return m, cmd
 		}
@@ -188,16 +191,14 @@ func (m TaskControlModel) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// 中止の直後だけ、強制削除を選べる(Dashboard と同じ契約)。
-	if m.forceTab != "" {
-		tab := m.forceTab
-		m.forceTab, m.notice = "", ""
-		m.token++
-		if key != forceDeleteKey {
-			return m, m.forceRefreshCmd()
-		}
+	// 中止の直後だけ、強制削除を選べる(Dashboard と同じ契約)。選ばれ
+	// なかったキーは握り潰さず、下の通常処理へ進む。
+	if tab, chosen := takeForceOffer(&m.forceTab, &m.notice, &m.token, key); chosen {
 		m.busy = true
-		return m, func() tea.Msg { return forceDeleteMsg{tab: tab} }
+		env, pane := m.env, m.pane
+		return m, func() tea.Msg {
+			return deleteFinishedMsg{err: pane.ForceDelete(env, tab)}
+		}
 	}
 
 	if m.awaiting {
@@ -249,17 +250,16 @@ func (m TaskControlModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.
 		return m, noticeCmd(m.token)
 	}
 	if msg.prep.Cancelled {
-		// 時間で消さない。理由を読んで判断してもらうためである
-		// (Dashboard と同じ扱い)。
+		// **このペインは 1 行しかない。** 理由の全文は Dashboard 側に出し、
+		// ここは何が起きて次に何ができるかだけを 1 行で伝える。複数行にすると
+		// 操作バーの高さが変わり、タブの中の表示が押し出される。
 		//
-		// **busy はここで解く。** 従来は通知のタイマーが解いていたが、この
-		// 通知は時間で消えないため、そのままだとペインが固まる(キーも
-		// ポーリングも止まる)。削除は既に中止されており、処理中ではない。
+		// 通知と `!` の受付は同じタイマーで解く(Dashboard と同じ契約)。
 		m.busy = false
-		m.notice = uploadFailedNotice(msg.prep.Reason)
+		m.notice = taskControlUploadFailedNotice
 		m.forceTab = msg.tab
 		m.token++
-		return m, nil
+		return m, forceOfferCmd(m.token)
 	}
 	if msg.prep.Message == "" {
 		m.notice = ""

@@ -1049,3 +1049,46 @@ func TestDashboardModelForceOfferClearedByOtherKey(t *testing.T) {
 		t.Errorf("提示が残っている: %q", content(cleared))
 	}
 }
+
+// TestDashboardModelDeleteRetryAfterCancel は中止の後のやり直しが削除に
+// なることを確かめる。
+//
+// 提示を解くついでにキーを握り潰していると、やり直しの `d` が捨てられ、
+// 続く番号が **ジャンプ**として解釈される(別のタブへ移動してしまう)。
+func TestDashboardModelDeleteRetryAfterCancel(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}},
+		prep:     app.DeletePreparation{Cancelled: true, Reason: "だめでした"},
+	}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	prompted, _ := loaded.Update(key('d'))
+	after, prepared := run(t, prompted, key('1'))
+	shown, _ := after.Update(prepared)
+
+	// 提示が出ている状態で、もう一度 d+番号 を押す。
+	retry, _ := shown.Update(key('d'))
+	_, cmd := retry.Update(key('1'))
+	if cmd == nil {
+		t.Fatal("やり直しの削除が始まっていない")
+	}
+	cmd()
+
+	for _, call := range service.calls {
+		if strings.HasPrefix(call, "jump") {
+			t.Errorf("削除がジャンプにすり替わった: %v", service.calls)
+		}
+	}
+	prepares := 0
+	for _, call := range service.calls {
+		if call == "prepare alpha" {
+			prepares++
+		}
+	}
+	if prepares != 2 {
+		t.Errorf("削除のやり直しが %d 回, want 2: %v", prepares, service.calls)
+	}
+}
