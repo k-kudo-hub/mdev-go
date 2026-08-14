@@ -162,6 +162,9 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	zellijSessions := zellij.NewSessionController()
 	processes := procscan.NewScanner()
 
+	// ニュースの取得。News ペインの r キーと `mdev news fetch` が同じ実体を使う。
+	newsFetcher := news.NewFetcher(conductorHome)
+
 	panes := tui.Panes{
 		Dashboard: &app.DashboardPane{
 			Pending:     paneStore,
@@ -181,7 +184,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Done:    &app.DonePane{Daily: paneStore, Restorer: taskRestorer, Clock: clock},
 		News: &app.NewsPane{
 			News:    paneStore,
-			Fetcher: news.NewFetcher(conductorHome),
+			Fetcher: newsFetcher,
 			Opener:  shell.NewOpener(),
 			Clock:   clock,
 		},
@@ -250,6 +253,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Sleeper: sleeper,
 			Clock:   clock,
 		},
+		News: &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
 		UpdateCheck: &app.UpdateChecker{
 			Config:      paneStore,
 			State:       updateState,

@@ -79,6 +79,15 @@ func (f *Fetcher) FetchNews(date string) {
 	f.removeExpired()
 }
 
+// HasNews は date のニュースが既にあるかを返す。
+//
+// 中身は見ない。現行版も `[ -f "$NEWS_FILE" ]` としか見ておらず、壊れた
+// ファイルが残っていても取り直さない。取り直したいときは --force がある。
+func (f *Fetcher) HasNews(date string) bool {
+	info, err := os.Stat(filepath.Join(f.root, date+newsSuffix))
+	return err == nil && !info.IsDir()
+}
+
 // fetch はフィードを取得して本文を返す。失敗と空の応答は ok=false になる。
 func (f *Fetcher) fetch() ([]byte, bool) {
 	resp, err := f.client.Get(f.url) //nolint:noctx // Client.Timeout で上限を持つ

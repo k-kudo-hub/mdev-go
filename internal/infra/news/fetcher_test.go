@@ -200,3 +200,50 @@ func TestFetchNewsLeavesNoTempFile(t *testing.T) {
 		t.Errorf("ニュース置き場の中身 = %v, want [2026-08-09.json]", names)
 	}
 }
+
+// TestHasNews は当日ファイルの有無の判定を確かめる。
+//
+// `mdev news fetch`(無印)がここを見て取得を省くため、有るものを無いと
+// 答えれば毎回の起動に通信の待ちが入り、無いものを有ると答えればニュースが
+// 一日出ないままになる。
+func TestHasNews(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	newsDir := filepath.Join(home, "news")
+	if err := os.MkdirAll(filepath.Join(newsDir, "2026-08-15.json"), 0o755); err != nil {
+		t.Fatalf("ディレクトリを作れない: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(newsDir, "2026-08-14.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("ファイルを作れない: %v", err)
+	}
+	fetcher := NewFetcher(home)
+
+	tests := []struct {
+		name string
+		date string
+		want bool
+	}{
+		{name: "ファイルがあれば真", date: "2026-08-14", want: true},
+		{name: "ファイルが無ければ偽", date: "2026-08-13", want: false},
+		{name: "同名のディレクトリは無いものとして扱う", date: "2026-08-15", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := fetcher.HasNews(tt.date); got != tt.want {
+				t.Errorf("HasNews(%q) = %v, want %v", tt.date, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHasNewsWithoutNewsDir は news ディレクトリが無い場合を確かめる。
+// 初回起動はこの状態から始まる。
+func TestHasNewsWithoutNewsDir(t *testing.T) {
+	t.Parallel()
+
+	if NewFetcher(t.TempDir()).HasNews("2026-08-14") {
+		t.Error("news ディレクトリが無いのに有ると答えた")
+	}
+}

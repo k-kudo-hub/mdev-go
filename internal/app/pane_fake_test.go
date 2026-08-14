@@ -186,6 +186,8 @@ type fakeNewsFetcher struct {
 	fetchNewsCalls int
 	// dates は FetchNews に渡された日付。
 	dates []string
+	// hasNews は HasNews が返す値。
+	hasNews bool
 }
 
 func (f *fakeNewsFetcher) FetchNews(date string) {
@@ -195,6 +197,10 @@ func (f *fakeNewsFetcher) FetchNews(date string) {
 		f.journal.add("fetch-news")
 	}
 }
+
+// HasNews は News ペインの経路では参照されない(r キーは常に取り直す)。
+// hasNews を偽のままにしておけば、誤って参照した場合にテストが落ちる。
+func (f *fakeNewsFetcher) HasNews(string) bool { return f.hasNews }
 
 // fakeLogUploader は作業ログのアップロードの代役である。
 //
