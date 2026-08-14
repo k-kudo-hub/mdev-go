@@ -340,6 +340,7 @@ type (
 		Jump(app.PaneEnv, app.DashboardSnapshot, int) error
 		PrepareDelete(app.PaneEnv, string) (app.DeletePreparation, error)
 		CommitDelete(app.PaneEnv, string) error
+		ForceDelete(app.PaneEnv, string) error
 	}
 
 	// WaitingService は Waiting ペインのユースケース。

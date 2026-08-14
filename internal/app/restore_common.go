@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
@@ -43,7 +42,7 @@ func resumeSessionID(paths PathChecker, sessionID, transcriptPath string) string
 	if sessionID == "" || transcriptPath == "" {
 		return ""
 	}
-	if strings.HasPrefix(sessionID, domain.ScreenSessionIDPrefix) {
+	if domain.IsScreenSessionID(sessionID) {
 		return ""
 	}
 	if !paths.IsFile(transcriptPath) {

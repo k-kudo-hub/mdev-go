@@ -369,36 +369,38 @@ func TestUploadLogUsesCrossDayRecord(t *testing.T) {
 	}
 }
 
-// TestUploadLogSkipsScreenPendingWithoutTranscript は会話ゼロの codex タブを
-// 削除できることを確かめる。
+// TestUploadLogFailsForScreenPendingWithoutTranscript は合成 pending で
+// transcript が無くても **失敗させる** ことを確かめる。
 //
-// スクリーン検出は hook を持たないエージェントのために pending を **合成する**。
-// 1 ターンも会話していないタブでは transcript がまだ無く、合成 pending は
-// transcript_path を持たない。これをアップロード対象にすると
-// 「transcript のパスが記録されていません」で hard fail し、タブの削除が
-// 永久にブロックされる。**守るべき会話が無いのに会話を守るための防御が
-// 働く**という設計矛盾で、利用者から見るとタブが消せなくなる。
-func TestUploadLogSkipsScreenPendingWithoutTranscript(t *testing.T) {
+// # transcript_path が空 = 会話ゼロ、ではない
+//
+// 合成 pending の transcript_path は **レジストリからの借用値**である
+// (ScreenDetector が LatestByTabMtime で引いて詰める)。hook や notify が
+// 一度も着弾していない間はレジストリが空なので、この値は常に空になる。
+// つまり「初回ターンの最中に承認待ちが出たタブ」= **会話があるタブ**でも
+// ここは空になる。
+//
+// したがって空を「会話ゼロ」と読んで飛ばすと、会話のあるタブをアップロード
+// 無しで消してしまう。**判定できないときは止める。** 消したい利用者には
+// 明示的な強制削除を用意してある(TaskDeleter.ForceDelete)。
+func TestUploadLogFailsForScreenPendingWithoutTranscript(t *testing.T) {
 	f := newUploadFixture(t)
 	f.pending.byTab[pendingKey("test-session", "demo")] = domain.Pending{
 		Tab:             "demo",
 		ClaudeSessionID: domain.ScreenPendingSessionID("demo"),
 		Agent:           "codex",
-		// transcript_path は無い(1 ターンも会話していない)。
+		// レジストリがまだ空なので借用できていない。会話の有無は分からない。
 	}
 
 	got, err := f.uploader.UploadLog(uploadEnv, "demo")
-	if err != nil {
-		t.Fatalf("UploadLog = %v, want nil(削除を止めてはいけない)", err)
+	if err == nil {
+		t.Fatal("エラーを返すはず(会話があるかもしれないので止める)")
 	}
 	if got != "" {
-		t.Errorf("戻り値 = %q, want 空(飛ばした)", got)
+		t.Errorf("戻り値 = %q, want 空", got)
 	}
 	if f.pusher.calls != 0 {
 		t.Errorf("push = %d 回, want 0", f.pusher.calls)
-	}
-	if f.summarizer.got != "" {
-		t.Errorf("要約を作ろうとした: %q", f.summarizer.got)
 	}
 }
 

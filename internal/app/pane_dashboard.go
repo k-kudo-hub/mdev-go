@@ -185,6 +185,14 @@ func (p *DashboardPane) CommitDelete(env PaneEnv, tab string) error {
 	return p.deleter().Commit(env, tab)
 }
 
+// ForceDelete はアップロードを飛ばしてタブを消す。
+//
+// **作業ログは失われる。** Prepare が中止したときに、その理由を見せたうえで
+// 利用者が明示的に選んだ場合だけ呼ばれる(TaskDeleter.ForceDelete を参照)。
+func (p *DashboardPane) ForceDelete(env PaneEnv, tab string) error {
+	return p.deleter().ForceDelete(env, tab)
+}
+
 // deleter は Dashboard 用の削除フローを組み立てる。
 //
 // CloseActiveOnMissingID を立てないのは、現行 Dashboard が id を引けなければ

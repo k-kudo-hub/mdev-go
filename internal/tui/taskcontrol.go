@@ -33,6 +33,9 @@ type TaskControlService interface {
 	ToggleWaiting(env app.PaneEnv, tab string) error
 	PrepareDelete(env app.PaneEnv, tab string) (app.DeletePreparation, error)
 	CommitDelete(env app.PaneEnv, tab string) error
+	// ForceDelete はアップロードを飛ばして削除する。
+	// 中止の理由を見せたうえで利用者が明示的に選んだときだけ呼ぶ。
+	ForceDelete(env app.PaneEnv, tab string) error
 }
 
 // task-control のメッセージ。
@@ -58,6 +61,9 @@ type TaskControlModel struct {
 
 	// awaiting は d の後の 2 打鍵目を待っている状態。
 	awaiting bool
+	// forceTab は「アップロードせずに削除する」を選べるタブである。
+	// Dashboard と同じ扱いで、中止の直後だけ入る。
+	forceTab string
 	// token はタイマーの世代。古いタイマーの発火を無視するために使う。
 	token int
 	// notice は一時的に出す通知(アップロード結果・失敗)。
@@ -140,6 +146,12 @@ func (m TaskControlModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case deletePreparedMsg:
 		return m.handlePrepared(msg)
 
+	case forceDeleteMsg:
+		tab := msg.tab
+		return m, func() tea.Msg {
+			return deleteFinishedMsg{err: m.pane.ForceDelete(m.env, tab)}
+		}
+
 	case commitDeleteMsg:
 		tab := msg.tab
 		return m, func() tea.Msg {
@@ -174,6 +186,18 @@ func (m TaskControlModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	}
 	if m.busy {
 		return m, nil
+	}
+
+	// 中止の直後だけ、強制削除を選べる(Dashboard と同じ契約)。
+	if m.forceTab != "" {
+		tab := m.forceTab
+		m.forceTab, m.notice = "", ""
+		m.token++
+		if key != forceDeleteKey {
+			return m, m.forceRefreshCmd()
+		}
+		m.busy = true
+		return m, func() tea.Msg { return forceDeleteMsg{tab: tab} }
 	}
 
 	if m.awaiting {
@@ -225,9 +249,17 @@ func (m TaskControlModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.
 		return m, noticeCmd(m.token)
 	}
 	if msg.prep.Cancelled {
+		// 時間で消さない。理由を読んで判断してもらうためである
+		// (Dashboard と同じ扱い)。
+		//
+		// **busy はここで解く。** 従来は通知のタイマーが解いていたが、この
+		// 通知は時間で消えないため、そのままだとペインが固まる(キーも
+		// ポーリングも止まる)。削除は既に中止されており、処理中ではない。
+		m.busy = false
 		m.notice = uploadFailedNotice(msg.prep.Reason)
+		m.forceTab = msg.tab
 		m.token++
-		return m, noticeCmd(m.token)
+		return m, nil
 	}
 	if msg.prep.Message == "" {
 		m.notice = ""

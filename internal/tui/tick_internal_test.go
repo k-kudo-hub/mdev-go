@@ -53,6 +53,8 @@ func (s *tickDashboard) PrepareDelete(app.PaneEnv, string) (app.DeletePreparatio
 
 func (s *tickDashboard) CommitDelete(app.PaneEnv, string) error { return nil }
 
+func (s *tickDashboard) ForceDelete(app.PaneEnv, string) error { return nil }
+
 type tickDone struct {
 	snapshot  app.DoneSnapshot
 	refreshes int

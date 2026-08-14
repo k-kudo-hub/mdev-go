@@ -56,9 +56,36 @@ func (d *TaskDeleter) Prepare(env PaneEnv, tab string) (DeletePreparation, error
 		// 「Upload failed」しか出ず、利用者も調べる側も原因に辿り着けない。
 		// 中止そのものは error ではない(呼び出し側は Cancelled で分岐する)
 		// ので、戻り値の形は変えない。
-		return DeletePreparation{Cancelled: true, Reason: err.Error()}, nil
+		//
+		// **画面へ出す前に秘密を伏せる。** 失敗の説明には設定した値がそのまま
+		// 載ることがあり、upload.repo に認証情報付きの URL を書いている場合は
+		// それが画面とスクロールバックに残る。
+		return DeletePreparation{
+			Cancelled: true,
+			Reason:    domain.FilterSecrets(err.Error()),
+		}, nil
 	}
 	return DeletePreparation{Message: output}, nil
+}
+
+// ForceDelete はアップロードを飛ばしてタブを消す。
+//
+// # なぜ「無言で飛ばす」ではなく明示の操作なのか
+//
+// アップロードすべき会話があるかどうかは、**mdev には判定できない**。
+// スクリーン検出が合成する pending の transcript_path はレジストリからの
+// 借用値で、hook や notify がまだ着弾していない間は会話があっても空になる。
+// つまり「記録が無いから飛ばしてよい」と機械的に決めると、会話のあるタブを
+// 黙って消す経路ができる。
+//
+// 判定できないものは利用者に選ばせる。Prepare が中止したときだけ、その理由を
+// 見せたうえでこの操作を提示する。**作業ログは失われる**が、それを承知の上で
+// 選んだことが操作の形として残る。
+//
+// 作業サマリの記録(daily)は Prepare が済ませているため、ここでは行わない。
+// 中止された時点で記録は残っており、二重に書くと重複する。
+func (d *TaskDeleter) ForceDelete(env PaneEnv, tab string) error {
+	return d.Commit(env, tab)
 }
 
 // Commit は削除フローの後半を行う。

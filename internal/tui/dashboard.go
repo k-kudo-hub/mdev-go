@@ -15,16 +15,30 @@ const (
 	uploadFailed   = "\033[0;31m\033[1mUpload failed. Deletion cancelled.\033[0m"
 )
 
-// uploadFailedNotice は中止の表示に理由を 1 行添える。
+// forceDeleteKey はアップロードを飛ばして削除することを選ぶキーである。
+//
+// 削除の打鍵(d)とは別の文字にする。同じ文字の繰り返しにすると、消えなくて
+// 何度も d を押した利用者が意図せず「アップロードせずに削除」へ進む。
+const forceDeleteKey = "!"
+
+// forceDeleteHint は強制削除の案内である。**失うものを先に書く。**
+const forceDeleteHint = "\033[0;33m" + forceDeleteKey +
+	" : アップロードせずに削除する(作業ログは失われます)\033[0m"
+
+// uploadFailedNotice は中止の表示に理由と逃げ道を添える。
 //
 // 「Upload failed」だけでは、設定の不備なのか transcript が無いのか push が
 // 通らなかったのか分からない。削除が止まった利用者が次に何をすればよいかを
-// 決められるよう、原因の文を続けて出す。理由が無いときは従来どおり 1 行。
+// 決められるよう、原因と選べる操作を続けて出す。
+//
+// 2 行目以降にも字下げを入れるのは、呼び出し側が先頭行にしか付けないため
+// である(付けないと 2 行目だけ左端に寄る)。
 func uploadFailedNotice(reason string) string {
-	if reason == "" {
-		return uploadFailed
+	out := uploadFailed
+	if reason != "" {
+		out += "\n  \033[0;31m" + reason + "\033[0m"
 	}
-	return uploadFailed + "\n\033[0;31m" + reason + "\033[0m"
+	return out + "\n  " + forceDeleteHint
 }
 
 // Dashboard のメッセージ。
@@ -48,6 +62,9 @@ type (
 	}
 	// commitDeleteMsg は削除の後半へ進む合図である。
 	commitDeleteMsg struct{ tab string }
+	// forceDeleteMsg はアップロードを飛ばして削除することを表す。
+	// 中止の理由を見せたうえで利用者が選んだときだけ流れる。
+	forceDeleteMsg struct{ tab string }
 	// deleteFinishedMsg は削除の後半が終わったことを表す。
 	deleteFinishedMsg struct{ err error }
 	// noticeExpiredMsg は一時的な通知の表示時間が過ぎたことを表す。
@@ -74,6 +91,11 @@ type DashboardModel struct {
 
 	// awaiting は d の後の番号入力を待っている状態。
 	awaiting bool
+	// forceTab は「アップロードせずに削除する」を選べるタブである。
+	//
+	// アップロードの失敗で中止した直後だけ入る。**失敗を見た直後にしか
+	// 提示しない**ので、何も知らずに会話のあるタブを消すことはできない。
+	forceTab string
 	// token はタイマーの世代。古いタイマーの発火を無視するために使う。
 	token int
 	// notice は一時的に出す通知(アップロード結果・失敗)。
@@ -188,6 +210,12 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return deleteFinishedMsg{err: m.pane.CommitDelete(m.env, tab)}
 		}
 
+	case forceDeleteMsg:
+		tab := msg.tab
+		return m, func() tea.Msg {
+			return deleteFinishedMsg{err: m.pane.ForceDelete(m.env, tab)}
+		}
+
 	case deleteFinishedMsg:
 		if msg.err != nil {
 			// 片付けの途中で失敗した。理由を出してから通常の表示へ戻る。
@@ -218,6 +246,19 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	// 削除の処理中はキーを受け付けない。
 	if m.busy {
 		return m, nil
+	}
+
+	// 中止の直後だけ、強制削除を選べる。他のキーを押せば提示は消え、
+	// 通常の画面へ戻る(選ばなかったことが既定の結果になる)。
+	if m.forceTab != "" {
+		tab := m.forceTab
+		m.forceTab, m.notice = "", ""
+		m.token++
+		if key != forceDeleteKey {
+			return m, m.forceRefreshCmd()
+		}
+		m.busy = true
+		return m, func() tea.Msg { return forceDeleteMsg{tab: tab} }
 	}
 
 	if m.awaiting {
@@ -286,10 +327,20 @@ func (m DashboardModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cm
 	}
 
 	if msg.prep.Cancelled {
-		// アップロードに失敗したので何も消さない。理由を添えて元に戻る。
+		// アップロードに失敗したので何も消さない。
+		//
+		// **この通知は時間で消さない。** 理由は読んで判断するためのもので、
+		// 2 秒で流れると何が起きたのか分からないまま元の画面へ戻る。次の
+		// キー操作まで残し、そこで強制削除を選べるようにする。
+		//
+		// **busy はここで解く。** 従来は通知のタイマーが解いていたが、この
+		// 通知は時間で消えないため、そのままだとペインが固まる(キーも
+		// ポーリングも止まる)。削除は既に中止されており、処理中ではない。
+		m.busy = false
 		m.notice = uploadFailedNotice(msg.prep.Reason)
+		m.forceTab = msg.tab
 		m.token++
-		return m, noticeCmd(m.token)
+		return m, nil
 	}
 
 	if msg.prep.Message == "" {
