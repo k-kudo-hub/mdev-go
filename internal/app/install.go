@@ -381,6 +381,13 @@ func (i *Installer) removeShellScripts(out io.Writer) error {
 	if len(names) == 0 && !i.Files.Exists(dir) {
 		return nil
 	}
+	// 消す相手は CONDUCTOR_HOME 配下だが、その CONDUCTOR_HOME 自体が
+	// おかしければ `/scripts` のような場所を消しに行く。設置痕跡まで
+	// 含めて先に確かめる(domain.CheckRemovable)。
+	if err := domain.CheckRemovable(i.Paths.ConductorHome, i.Paths.Home, i.Files.Exists); err != nil {
+		_, _ = fmt.Fprintf(out, "  ! Shell スクリプトは撤去しませんでした: %v\n", err)
+		return err
+	}
 	_, _ = fmt.Fprintf(out, "  ✓ Shell スクリプトを撤去します(%s)\n", dir)
 	for _, name := range names {
 		_, _ = fmt.Fprintf(out, "      - %s\n", name)

@@ -52,6 +52,13 @@ func InstallHooks(settings, template []byte) (InstallHooksResult, error) {
 	if !json.Valid(settings) {
 		return InstallHooksResult{}, errors.New("settings.json として解釈できる JSON ではありません")
 	}
+	// **トップレベルがオブジェクトであることを先に確かめる。** null や配列でも
+	// json.Valid は通るが、そこへキーを挿し込む位置は無い。走査は空の位置情報を
+	// 返し、その 0 という値をオフセットとして使うと先頭を書き換えてしまう。
+	if !isJSONObject(settings) {
+		return InstallHooksResult{}, errors.New(
+			"settings.json のトップレベルがオブジェクトではありません")
+	}
 	if !json.Valid(template) {
 		return InstallHooksResult{}, errors.New("同梱の hooks.json が壊れています")
 	}
@@ -142,6 +149,15 @@ func orderedHookEvents(events map[string]json.RawMessage, names []string) map[st
 	return out
 }
 
+// isJSONObject は data のトップレベルが JSON オブジェクトかを返す。
+//
+// 空白とコメント以外の最初の 1 文字が `{` かどうかで判断する。json.Valid を
+// 通った入力にしか使わないので、それで足りる。
+func isJSONObject(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
 // hookObject は `.hooks` の位置と、そこに在るイベント名である。
 type hookObject struct {
 	span objectSpan
@@ -226,19 +242,36 @@ func scanHookObjects(settings []byte) (objectSpan, *hookObject, error) {
 // ここでは **mdev を指すコマンドを持つ要素だけ**を落とす。要素が 1 つも
 // 無くなったイベントはキーごと落とす。
 //
-// 走査と編集は SwitchHookCommands と同じ方式で、触らない箇所は 1 バイトも
-// 動かない。
+// # 書き換え方
+//
+// **`.hooks` のバイト範囲だけを差し替える。** 文書全体を組み直すと、
+// permissions などの触っていないキーまで並び順と体裁が変わる。利用者の
+// settings.json は手で編集するものなので、mdev の都合で整形し直さない
+// (install 側の書き換えと同じ方針)。
+//
+// `.hooks` が空になった場合は `{}` を残す。キーごと落とすには前後のカンマの
+// 処理が要り、そこだけ体裁の保全が崩れる。空のオブジェクトは hook が無いのと
+// 同じ意味なので、残しても害が無い。
 func RemoveHookCommands(settings []byte) ([]byte, int, error) {
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(settings, &doc); err != nil {
+	if !json.Valid(settings) {
 		return nil, 0, errors.New("settings.json として解釈できる JSON ではありません")
 	}
-	raw, ok := doc[hooksKey]
-	if !ok {
+	if !isJSONObject(settings) {
+		return nil, 0, errors.New("settings.json のトップレベルがオブジェクトではありません")
+	}
+
+	_, hooks, err := scanHookObjects(settings)
+	if err != nil {
+		return nil, 0, err
+	}
+	if hooks == nil {
 		return bytes.Clone(settings), 0, nil
 	}
+
+	raw := settings[hooks.span.open : hooks.span.close+1]
 	var events map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &events); err != nil {
+		// `.hooks` がオブジェクトでない。触らずに返す。
 		return bytes.Clone(settings), 0, nil
 	}
 
@@ -255,20 +288,34 @@ func RemoveHookCommands(settings []byte) ([]byte, int, error) {
 		return bytes.Clone(settings), 0, nil
 	}
 
-	if len(kept) == 0 {
-		delete(doc, hooksKey)
-	} else {
-		encoded, err := json.Marshal(kept)
-		if err != nil {
-			return nil, 0, fmt.Errorf("hooks の組み立てに失敗しました: %w", err)
-		}
-		doc[hooksKey] = encoded
-	}
-	out, err := json.MarshalIndent(doc, "", "  ")
+	indent, pretty := objectIndent(settings, hooks.span)
+	replacement, err := encodeHookEvents(kept, indent, pretty)
 	if err != nil {
-		return nil, 0, fmt.Errorf("settings.json の組み立てに失敗しました: %w", err)
+		return nil, 0, err
 	}
-	return append(out, '\n'), removed, nil
+	edit := byteEdit{start: hooks.span.open, end: hooks.span.close + 1, replacement: replacement}
+	return applyEdits(settings, []byteEdit{edit}), removed, nil
+}
+
+// encodeHookEvents は残ったイベントを元の字下げに合わせて書き出す。
+func encodeHookEvents(events map[string]json.RawMessage, indent string, pretty bool) ([]byte, error) {
+	if len(events) == 0 {
+		return []byte("{}"), nil
+	}
+	encoded, err := json.Marshal(events)
+	if err != nil {
+		return nil, fmt.Errorf("hooks の組み立てに失敗しました: %w", err)
+	}
+	if !pretty {
+		return encoded, nil
+	}
+	// 中身の段は `.hooks` の閉じ括弧より 1 段深い。indent はその段である。
+	outer := strings.TrimSuffix(indent, "  ")
+	var out bytes.Buffer
+	if err := json.Indent(&out, encoded, outer, "  "); err != nil {
+		return encoded, nil //nolint:nilerr // 整形できなくても中身は正しい
+	}
+	return out.Bytes(), nil
 }
 
 // dropMdevMatchers はイベント 1 件から mdev を呼ぶ hook を落とす。

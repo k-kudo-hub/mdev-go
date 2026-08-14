@@ -302,3 +302,81 @@ func TestRemoveHookCommandsRejectsBrokenJSON(t *testing.T) {
 		t.Error("エラーを返すはず")
 	}
 }
+
+// TestInstallHooksRejectsNonObjectRoot はトップレベルがオブジェクトでない
+// settings.json を弾くことを確かめる。
+//
+// null や配列でも JSON としては妥当なので、json.Valid だけでは通ってしまう。
+// そこへキーを挿し込む位置は無く、走査が返す空の位置(0)をオフセットとして
+// 使うと**ファイルの先頭を書き換える**。
+func TestInstallHooksRejectsNonObjectRoot(t *testing.T) {
+	t.Parallel()
+
+	template := hooksTemplate(t)
+	for _, settings := range []string{"null", "[]", "[1,2]", `"文字列"`, "42", "true", `  [ ] `} {
+		t.Run(settings, func(t *testing.T) {
+			t.Parallel()
+			if _, err := domain.InstallHooks([]byte(settings), template); err == nil {
+				t.Errorf("InstallHooks(%q) = nil, want エラー", settings)
+			}
+		})
+	}
+}
+
+// TestRemoveHookCommandsRejectsNonObjectRoot は取り除きでも同じく弾くことを
+// 確かめる。
+func TestRemoveHookCommandsRejectsNonObjectRoot(t *testing.T) {
+	t.Parallel()
+
+	for _, settings := range []string{"null", "[]", "[1,2]"} {
+		if _, _, err := domain.RemoveHookCommands([]byte(settings)); err == nil {
+			t.Errorf("RemoveHookCommands(%q) = nil, want エラー", settings)
+		}
+	}
+}
+
+// TestRemoveHookCommandsPreservesOtherKeys は `.hooks` 以外を 1 バイトも
+// 動かさないことを確かめる。
+//
+// 利用者の settings.json は手で編集するものなので、mdev の都合で整形し直さない。
+func TestRemoveHookCommandsPreservesOtherKeys(t *testing.T) {
+	t.Parallel()
+
+	// わざと独特な並びと字下げにしてある。文書を組み直すとここが崩れる。
+	const settings = `{
+	"permissions": { "allow": ["Bash(ls:*)"], "deny": [] },
+	"hooks": {
+		"Stop": [{"matcher": "", "hooks": [
+			{"type": "command", "command": "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify"}
+		]}]
+	},
+	"myOwnKey": {"z": 1, "a": 2}
+}
+`
+	got, removed, err := domain.RemoveHookCommands([]byte(settings))
+	if err != nil {
+		t.Fatalf("RemoveHookCommands = %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("外した数 = %d, want 1", removed)
+	}
+
+	// `.hooks` の前後は元のバイトのままである。
+	hooksAt := strings.Index(settings, `"hooks"`)
+	if hooksAt < 0 {
+		t.Fatal("テストの入力に hooks がない")
+	}
+	head := settings[:hooksAt]
+	if !strings.HasPrefix(string(got), head) {
+		t.Errorf("前半が変わった\n--- got ---\n%s", got)
+	}
+	if !strings.Contains(string(got), `"myOwnKey": {"z": 1, "a": 2}`) {
+		t.Errorf("後半のキー順と体裁が変わった\n%s", got)
+	}
+	if !strings.Contains(string(got), `"permissions": { "allow": ["Bash(ls:*)"], "deny": [] }`) {
+		t.Errorf("触っていないキーが整形し直された\n%s", got)
+	}
+	if !json.Valid(got) {
+		t.Errorf("壊れた JSON になった:\n%s", got)
+	}
+}

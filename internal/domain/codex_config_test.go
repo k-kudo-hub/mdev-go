@@ -203,3 +203,82 @@ func TestRemoveCodexNotifyLeavesForeign(t *testing.T) {
 		t.Errorf("触ってはいけない: removed=%v\n%s", removed, got)
 	}
 }
+
+// TestRewriteCodexNotifyIgnoresTableScopedNotify は table 配下の notify を
+// 見ないことを確かめる。
+//
+// TOML では `[table]` より後ろに書いたキーはその table のものになり、codex は
+// それを読まない。ここを見てしまうと 2 通りに壊れる。別ツールが自分の table で
+// 使っている notify を conductor のものと取り違えて書き換えるか、table 配下に
+// しか notify が無い設定を「他ツールが使っている」と誤判定して、トップレベルへ
+// 足すべきときに何もしないかである。
+func TestRewriteCodexNotifyIgnoresTableScopedNotify(t *testing.T) {
+	t.Parallel()
+
+	t.Run("table 配下の conductor は書き換えない", func(t *testing.T) {
+		t.Parallel()
+		const content = "[some.tool]\n" +
+			`notify = ["bash", "/c/scripts/codex-notify.sh"]` + "\n"
+
+		got, status := domain.RewriteCodexNotify(content, mdevBin)
+
+		// トップレベルには notify が無いので、先頭へ足すのが正しい。
+		if status != domain.CodexNotifyAdded {
+			t.Errorf("status = %v, want Added", status)
+		}
+		if !strings.HasPrefix(got, "notify = [\""+mdevBin+"\"") {
+			t.Errorf("先頭へ足していない:\n%s", got)
+		}
+		// table 配下は 1 バイトも変えない。
+		if !strings.Contains(got, `notify = ["bash", "/c/scripts/codex-notify.sh"]`) {
+			t.Errorf("table 配下を書き換えた:\n%s", got)
+		}
+	})
+
+	t.Run("table 配下の他ツールを Foreign と誤判定しない", func(t *testing.T) {
+		t.Parallel()
+		const content = "[some.tool]\nnotify = [\"/opt/other/notify\"]\n"
+
+		got, status := domain.RewriteCodexNotify(content, mdevBin)
+
+		if status != domain.CodexNotifyAdded {
+			t.Errorf("status = %v, want Added", status)
+		}
+		if !strings.Contains(got, `notify = ["`+mdevBin+`", "codex", "notify"]`) {
+			t.Errorf("トップレベルへ足していない:\n%s", got)
+		}
+		if !strings.Contains(got, `notify = ["/opt/other/notify"]`) {
+			t.Errorf("table 配下を書き換えた:\n%s", got)
+		}
+	})
+
+	t.Run("トップレベルにあれば table 配下があっても書き換える", func(t *testing.T) {
+		t.Parallel()
+		const content = `notify = ["bash", "/c/scripts/codex-notify.sh"]` + "\n\n" +
+			"[some.tool]\nnotify = [\"/opt/other/notify\"]\n"
+
+		got, status := domain.RewriteCodexNotify(content, mdevBin)
+
+		if status != domain.CodexNotifyMigrated {
+			t.Errorf("status = %v, want Migrated", status)
+		}
+		if strings.Contains(got, domain.CodexNotifyMarker) {
+			t.Errorf("トップレベルが書き換わっていない:\n%s", got)
+		}
+		if !strings.Contains(got, `notify = ["/opt/other/notify"]`) {
+			t.Errorf("table 配下を書き換えた:\n%s", got)
+		}
+	})
+}
+
+// TestRemoveCodexNotifyIgnoresTableScoped は取り除きでも table 配下を
+// 見ないことを確かめる。別ツールの設定を壊さない。
+func TestRemoveCodexNotifyIgnoresTableScoped(t *testing.T) {
+	t.Parallel()
+
+	content := "[some.tool]\nnotify = [\"" + mdevBin + "\", \"codex\", \"notify\"]\n"
+	got, removed := domain.RemoveCodexNotify(content, mdevBin)
+	if removed || got != content {
+		t.Errorf("table 配下を消した: removed=%v\n%s", removed, got)
+	}
+}

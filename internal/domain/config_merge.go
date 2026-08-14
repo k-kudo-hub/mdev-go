@@ -70,6 +70,9 @@ func MergeAgentDefaults(config, defaults []byte) ([]byte, []AgentDefaultAddition
 		return bytes.Clone(config), nil, nil
 	}
 
+	if !isJSONObject(config) {
+		return nil, nil, errors.New("config.json のトップレベルがオブジェクトではありません")
+	}
 	layout, err := scanAgentsLayout(config)
 	if err != nil {
 		return nil, nil, err

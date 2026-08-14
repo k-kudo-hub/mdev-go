@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
@@ -321,5 +322,41 @@ func TestInstallContinuesAfterFailure(t *testing.T) {
 	// 依存チェックは通っているので、最後の案内まで出し切る。
 	if !strings.Contains(out.String(), domain.ZshrcSourceLine) {
 		t.Errorf("最後まで進んでいない:\n%s", out.String())
+	}
+}
+
+// TestInstallRefusesToRemoveScriptsFromDangerousHome は CONDUCTOR_HOME が
+// おかしいときに scripts/ を消しに行かないことを確かめる。
+//
+// 消す相手は CONDUCTOR_HOME 配下だが、その CONDUCTOR_HOME 自体がおかしければ
+// `/scripts` のような場所を消しに行く。
+func TestInstallRefusesToRemoveScriptsFromDangerousHome(t *testing.T) {
+	t.Parallel()
+
+	files := newFakeFileStore()
+	paths := testInstallPaths
+	paths.ConductorHome = "/"
+	files.files["/scripts/pending-notify.sh"] = "#!/bin/bash\n"
+
+	var out bytes.Buffer
+	err := (&app.Installer{
+		Paths:    paths,
+		Files:    files,
+		Assets:   testAssets,
+		Commands: fakeCommandChecker{available: allAvailable},
+		Version:  "v1.2.3",
+		GOOS:     "darwin",
+	}).Install(&out)
+
+	if err == nil {
+		t.Fatal("エラーを返すはず")
+	}
+	for _, removed := range files.removed {
+		if removed == "/scripts" {
+			t.Fatal("ルート直下の scripts を消した")
+		}
+	}
+	if _, ok := files.files["/scripts/pending-notify.sh"]; !ok {
+		t.Error("消してはいけないものが消えた")
 	}
 }

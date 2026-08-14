@@ -183,3 +183,22 @@ func TestMergeAgentDefaultsReportsAdditions(t *testing.T) {
 		t.Errorf("補った内容 = %q, want %q", got, want)
 	}
 }
+
+// TestMergeAgentDefaultsRejectsNonObjectRoot はトップレベルがオブジェクトで
+// ない config.json を弾くことを確かめる。
+//
+// null や配列でも JSON としては妥当なので、json.Valid だけでは通ってしまう。
+// そこへキーを挿し込む位置は無い。
+func TestMergeAgentDefaultsRejectsNonObjectRoot(t *testing.T) {
+	t.Parallel()
+
+	defaults := readDefaultConfig(t)
+	for _, config := range []string{"null", "[]", "[1,2]", `"文字列"`, "42"} {
+		t.Run(config, func(t *testing.T) {
+			t.Parallel()
+			if _, _, err := domain.MergeAgentDefaults([]byte(config), defaults); err == nil {
+				t.Errorf("MergeAgentDefaults(%q) = nil, want エラー", config)
+			}
+		})
+	}
+}

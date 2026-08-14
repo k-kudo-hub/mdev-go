@@ -125,3 +125,75 @@ func TestUninstallOnCleanSystem(t *testing.T) {
 		t.Fatalf("Uninstall = %v", err)
 	}
 }
+
+// TestUninstallRefusesDangerousHome は消してはいけない場所を指していたら
+// 消さないことを確かめる。
+//
+// CONDUCTOR_HOME は環境変数で外から与えられる。`/` やホームそのものが
+// 届いたときに os.RemoveAll をそのまま撃つと、取り返しがつかない。
+func TestUninstallRefusesDangerousHome(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		home string
+		want string
+	}{
+		{name: "ルート", home: "/", want: "ルートディレクトリ"},
+		{name: "ホームそのもの", home: "/home/dev", want: "ホームディレクトリそのもの"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			files := newFakeFileStore()
+			// 中身は在るが mdev のものではない、という状況を作る。
+			files.files[tt.home+"/Documents/大事な原稿.txt"] = "x"
+
+			paths := testInstallPaths
+			paths.ConductorHome = tt.home
+			uninstaller := &app.Uninstaller{
+				Paths: paths, Files: files, PendingRoot: pendingRootForTest,
+			}
+
+			var out bytes.Buffer
+			if err := uninstaller.Uninstall(&out, false); err == nil {
+				t.Fatal("エラーを返すはず")
+			}
+			if len(files.removed) != 0 {
+				t.Errorf("消した: %v", files.removed)
+			}
+			if _, ok := files.files[tt.home+"/Documents/大事な原稿.txt"]; !ok {
+				t.Error("利用者のファイルが消えた")
+			}
+			if !strings.Contains(out.String(), tt.want) {
+				t.Errorf("理由が出ていない:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// TestUninstallRefusesHomeWithoutTrace は設置痕跡の無い場所を消さないことを
+// 確かめる。
+//
+// これが本命の防御である。`/` でもホームでもない、しかし mdev と無関係な
+// ディレクトリを CONDUCTOR_HOME に向けている場合が一番危ない。
+func TestUninstallRefusesHomeWithoutTrace(t *testing.T) {
+	t.Parallel()
+
+	files := newFakeFileStore()
+	paths := testInstallPaths
+	paths.ConductorHome = "/home/dev/Documents"
+	files.files["/home/dev/Documents/大事な原稿.txt"] = "x"
+
+	uninstaller := &app.Uninstaller{Paths: paths, Files: files, PendingRoot: pendingRootForTest}
+	var out bytes.Buffer
+	if err := uninstaller.Uninstall(&out, false); err == nil {
+		t.Fatal("エラーを返すはず")
+	}
+	if len(files.removed) != 0 {
+		t.Errorf("消した: %v", files.removed)
+	}
+	if !strings.Contains(out.String(), "痕跡") {
+		t.Errorf("理由が出ていない:\n%s", out.String())
+	}
+}

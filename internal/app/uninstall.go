@@ -88,7 +88,22 @@ func (u *Uninstaller) removeCodexNotify(out io.Writer) error {
 // removeData は CONDUCTOR_HOME と pending を消す。
 //
 // **消す前に何が失われるかを出す。** daily の作業ログはここにしか無い。
+//
+// **消してよい場所かどうかを先に確かめる**(domain.CheckRemovable)。
+// CONDUCTOR_HOME は環境変数で外から与えられるため、`/` やホームそのもの、
+// mdev と無関係なディレクトリが届きうる。満たさなければ理由を出して
+// 消さずに進む(uninstall 全体は止めない。hooks の解除は既に済んでいる)。
 func (u *Uninstaller) removeData(out io.Writer) error {
+	// 設置されていなければ消すものが無い。確かめる前に抜ける
+	// (何も無い環境で「痕跡がありません」と言っても意味が無い)。
+	if u.Files.Exists(u.Paths.ConductorHome) {
+		if err := domain.CheckRemovable(
+			u.Paths.ConductorHome, u.Paths.Home, u.Files.Exists); err != nil {
+			_, _ = fmt.Fprintf(out, "  ! データは消しませんでした: %v\n", err)
+			return err
+		}
+	}
+
 	var errs []error
 	for _, dir := range []string{u.Paths.ConductorHome, u.PendingRoot} {
 		if !u.Files.Exists(dir) {

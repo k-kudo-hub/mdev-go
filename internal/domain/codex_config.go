@@ -35,11 +35,34 @@ const (
 )
 
 // notifyAssignment は `notify = ...` の行を見つける正規表現である。
-//
-// 行頭に置かれた代入だけを見る。TOML では `[table]` より後ろに書いたキーは
-// その table のものになり、codex はそれを読まない(現行 install.sh の注記と
-// 同じ理由でトップレベルに置く必要がある)。
 var notifyAssignment = regexp.MustCompile(`(?m)^[ \t]*notify[ \t]*=[ \t]*`)
+
+// tableHeader は `[table]` / `[[array]]` の見出し行である。
+var tableHeader = regexp.MustCompile(`(?m)^[ \t]*\[`)
+
+// findTopLevelNotify は **トップレベルの** notify の代入を探す。
+//
+// TOML では `[table]` より後ろに書いたキーはその table のものになり、codex は
+// それを読まない(現行 install.sh がわざわざ先頭へ足しているのはこのため)。
+// 探索を最初の見出しより前に限れば、次の 2 つを同時に防げる。
+//
+//   - table 配下の `notify`(別ツールがその table で使っているもの)を
+//     conductor のものと取り違えて書き換える
+//   - table 配下にしか notify が無い設定を「他ツールが使っている」と誤判定し、
+//     トップレベルへ足すべきときに何もしない
+//
+// 見つからなければ ok=false を返す。
+func findTopLevelNotify(content string) (start, end int, ok bool) {
+	limit := len(content)
+	if header := tableHeader.FindStringIndex(content); header != nil {
+		limit = header[0]
+	}
+	loc := notifyAssignment.FindStringIndex(content[:limit])
+	if loc == nil {
+		return 0, 0, false
+	}
+	return loc[0], loc[1], true
+}
 
 // RewriteCodexNotify は codex の設定を mdev の notify へ揃える。
 //
@@ -57,16 +80,16 @@ var notifyAssignment = regexp.MustCompile(`(?m)^[ \t]*notify[ \t]*=[ \t]*`)
 //
 // 既に mdev を指していれば何も変えない(冪等)。
 func RewriteCodexNotify(content, mdevPath string) (string, CodexNotifyStatus) {
-	loc := notifyAssignment.FindStringIndex(content)
-	if loc == nil {
+	_, valueStart, ok := findTopLevelNotify(content)
+	if !ok {
 		return addCodexNotify(content, mdevPath), CodexNotifyAdded
 	}
 
-	span := codexNotifyValueSpan(content, loc[1])
-	value := content[loc[1]:span]
+	span := codexNotifyValueSpan(content, valueStart)
+	value := content[valueStart:span]
 	rewritten, changed := rewriteNotifyValue(value, mdevPath)
 	if changed {
-		return content[:loc[1]] + rewritten + content[span:], CodexNotifyMigrated
+		return content[:valueStart] + rewritten + content[span:], CodexNotifyMigrated
 	}
 	if notifyCallsMdev(value, mdevPath) {
 		return content, CodexNotifyUnchanged
@@ -366,12 +389,12 @@ func encodeTOMLArray(words []string) string {
 // 場合は触らない**。別ツールの設定を壊すよりは、mdev への参照が残るほうが
 // 害が小さい(呼ばれても mdev が消えていれば codex 側が失敗するだけである)。
 func RemoveCodexNotify(content, mdevPath string) (string, bool) {
-	loc := notifyAssignment.FindStringIndex(content)
-	if loc == nil {
+	lineStart, valueStart, ok := findTopLevelNotify(content)
+	if !ok {
 		return content, false
 	}
-	end := codexNotifyValueSpan(content, loc[1])
-	if !strings.Contains(content[loc[0]:end], mdevPath) {
+	end := codexNotifyValueSpan(content, valueStart)
+	if !notifyCallsMdev(content[valueStart:end], mdevPath) {
 		return content, false
 	}
 
@@ -381,7 +404,7 @@ func RemoveCodexNotify(content, mdevPath string) (string, bool) {
 	} else {
 		end = len(content)
 	}
-	out := content[:loc[0]] + content[end:]
+	out := content[:lineStart] + content[end:]
 	// 追記時に入れた空行が残ると、実行のたびに空行が増える。
 	return strings.TrimLeft(out, "\n"), true
 }

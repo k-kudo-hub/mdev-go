@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -40,27 +42,34 @@ type InstallPaths struct {
 
 // MdevBinaryPath は配置される mdev のパスを返す。
 func (p InstallPaths) MdevBinaryPath() string {
-	return p.ConductorHome + "/bin/mdev"
+	return p.ConductorPath("bin/mdev")
 }
 
 // ScriptsDir は撤去対象の Shell スクリプト置き場を返す。
 func (p InstallPaths) ScriptsDir() string {
-	return p.ConductorHome + "/scripts"
+	return p.ConductorPath("scripts")
 }
 
 // InitZshPath は .zshrc から source される入口を返す。
 func (p InstallPaths) InitZshPath() string {
-	return p.ConductorHome + "/init.zsh"
+	return p.ConductorPath("init.zsh")
 }
 
 // FlavorPath は廃止された切り替えフラグの場所を返す(見つけたら消す)。
 func (p InstallPaths) FlavorPath() string {
-	return p.ConductorHome + "/FLAVOR"
+	return p.ConductorPath(flavorFile)
 }
 
+// flavorFile は廃止された切り替えフラグの名前である。
+const flavorFile = "FLAVOR"
+
 // ConductorPath は CONDUCTOR_HOME からの相対パスを絶対パスにする。
+//
+// filepath.Join で正規化する。文字列を継ぐと CONDUCTOR_HOME が `/` の
+// ときに `//scripts` のような表記になり、**同じ場所を指しているのに
+// 削除の安全確認と実際に消す先が食い違う**。
 func (p InstallPaths) ConductorPath(rel string) string {
-	return p.ConductorHome + "/" + rel
+	return filepath.Join(p.ConductorHome, filepath.FromSlash(rel))
 }
 
 // 依存コマンド。
@@ -139,4 +148,57 @@ const ZshrcSourceLine = `source "$HOME/.claude-conductor/init.zsh"`
 // 触る理由が無い。新規の利用者には案内だけ出す。
 func ZshrcConfigured(zshrc string) bool {
 	return strings.Contains(zshrc, ZshrcSourceMarker)
+}
+
+// ErrUnsafeRemoval は消してはいけない場所を指していることを表す。
+var ErrUnsafeRemoval = errors.New("この場所は削除できません")
+
+// installTraces は「mdev が設置した場所」であることの痕跡である。
+//
+// どちらか 1 つでもあれば設置済みと見なす。bin/mdev は配置したバイナリ、
+// VERSION は install が書く状態ファイルで、いずれも mdev 以外は作らない。
+var installTraces = []string{"bin/mdev", versionFile}
+
+// versionFile は install が書く版の記録である。
+const versionFile = "VERSION"
+
+// CheckRemovable は CONDUCTOR_HOME を消してよいかを確かめる。
+//
+// **消す前に必ず通す。** CONDUCTOR_HOME は環境変数で外から与えられるため、
+// 空・相対パス・`/`・ホームそのもの、といった値がそのまま届きうる。
+// os.RemoveAll はそれらを黙って受け取るので、判断はこちらが持つ。
+//
+// 見るのは 4 つである。
+//
+//   - 空でないこと
+//   - 絶対パスであること(相対パスは実行時の作業ディレクトリ次第で行き先が変わる)
+//   - `/` でもホームそのものでもないこと
+//   - **mdev の設置痕跡があること**(bin/mdev か VERSION)
+//
+// 最後の 1 つが本命である。前の 3 つを抜けても、利用者が CONDUCTOR_HOME を
+// 書類ディレクトリなどへ向けていれば中身ごと消えてしまう。mdev が置いた
+// ものが 1 つも無い場所は、mdev が消してよい場所ではない。
+func CheckRemovable(path, home string, exists func(string) bool) error {
+	if path == "" {
+		return fmt.Errorf("%w: 場所が空です", ErrUnsafeRemoval)
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%w: 絶対パスではありません: %s", ErrUnsafeRemoval, path)
+	}
+
+	clean := filepath.Clean(path)
+	if clean == string(filepath.Separator) {
+		return fmt.Errorf("%w: ルートディレクトリです", ErrUnsafeRemoval)
+	}
+	if home != "" && clean == filepath.Clean(home) {
+		return fmt.Errorf("%w: ホームディレクトリそのものです: %s", ErrUnsafeRemoval, clean)
+	}
+
+	for _, trace := range installTraces {
+		if exists(filepath.Join(clean, filepath.FromSlash(trace))) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: mdev が設置した痕跡(%s)がありません: %s",
+		ErrUnsafeRemoval, strings.Join(installTraces, " / "), clean)
 }
