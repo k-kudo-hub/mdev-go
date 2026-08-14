@@ -1,0 +1,7 @@
+{
+  "agents": {
+    "gemini": {
+      "command": "gemini"
+    }
+  }
+}

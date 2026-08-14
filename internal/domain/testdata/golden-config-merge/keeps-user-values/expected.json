@@ -1,0 +1,15 @@
+{
+  "agents": {
+    "codex": {
+      "detection": "hooks",
+      "patterns": {
+        "neutral": [],
+        "blocked": [
+          "^自前のパターン$"
+        ],
+        "working": []
+      },
+      "command": "codex"
+    }
+  }
+}

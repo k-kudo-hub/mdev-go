@@ -1,0 +1,19 @@
+{
+  "agents": {
+    "codex": {
+      "detection": "screen",
+      "patterns": {
+        "neutral": [],
+        "blocked": [
+          "^ *Would you like to run the following command\\? *$",
+          "^ *Would you like to make the following edits\\? *$",
+          "^ *Would you like to grant these permissions\\? *$",
+          "^ *Press enter to confirm or esc to cancel *$"
+        ],
+        "working": [
+          "\\([^)]*• [^)]* to interrupt\\)"
+        ]
+      }
+    }
+  }
+}

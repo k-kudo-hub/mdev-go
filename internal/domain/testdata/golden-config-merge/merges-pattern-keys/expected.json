@@ -1,0 +1,17 @@
+{
+  "agents": {
+    "codex": {
+      "detection": "screen",
+      "patterns": {
+        "neutral": [],
+        "blocked": [
+          "^自前$"
+        ],
+        "working": [
+          "\\([^)]*• [^)]* to interrupt\\)"
+        ]
+      },
+      "command": "codex"
+    }
+  }
+}

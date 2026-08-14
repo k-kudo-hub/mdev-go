@@ -1,0 +1,15 @@
+{
+  "search_dirs": [
+    "~/projects"
+  ],
+  "agents": {
+    "claude": {
+      "command": "claude",
+      "resume_args": "--resume"
+    },
+    "codex": {
+      "command": "codex",
+      "resume_args": "resume"
+    }
+  }
+}
