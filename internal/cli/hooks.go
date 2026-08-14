@@ -26,7 +26,12 @@ const dryRunFlag = "dry-run"
 func newHooksCommand(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hooks",
-		Short: "Claude Code の settings.json の hooks を切り替える",
+		Short: "Claude Code の settings.json の hooks を切り替える(非推奨)",
+		// 切り替えは `mdev install` が内包した(ADR D4)。FLAVOR による
+		// 2 系統の運用が無くなったため、手で行き来する意味も無くなっている。
+		// 6-4 で除去する。それまでは、既に手順へ組み込んでいる利用者のために
+		// 残す(黙って消すと、その手順が「コマンドが無い」で止まる)。
+		Deprecated: "`mdev install` が hooks の設定を行います。このコマンドは次の版で削除します。",
 		Long: "~/.claude/settings.json の hooks に登録されている conductor の\n" +
 			"シェルスクリプト呼び出しを `mdev hook` サブコマンドへ差し替える。\n" +
 			"書き換えは同じディレクトリへバックアップを作ってから原子的に行い、\n" +
