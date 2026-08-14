@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/k-kudo-hub/mdev-go/assets"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
@@ -47,10 +46,8 @@ func ConfigPath(conductorHome string) string {
 
 // LoadConfig は設定を読み込む。
 //
-// どちらのファイルも無い場合は、実行ファイルに埋め込まれた
-// config.default.json を使う。設置の前や、設置物が欠けた状態でも既定の
-// 設定で動けるようにするためである(埋め込みは assets を参照)。
-//
+// どちらのファイルも無い場合はゼロ値の設定を返す(現行版も
+// `jq ... 2>/dev/null` でエラーを握り潰し空として扱っていた)。
 // ファイルはあるが JSON が壊れている場合はエラーを返す。設定の破損は
 // 利用者が直すべき状態であり、黙って既定値で動くと料金計算などが
 // 静かに誤るためである。
@@ -58,12 +55,9 @@ func LoadConfig(conductorHome string) (domain.Config, error) {
 	path := ConfigPath(conductorHome)
 	b, err := os.ReadFile(path) //nolint:gosec // CONDUCTOR_HOME 配下の固定ファイル名
 	if errors.Is(err, fs.ErrNotExist) {
-		embedded, ok := assets.Read(defaultConfigFileName)
-		if !ok {
-			return domain.Config{}, nil
-		}
-		b, path = embedded, "(同梱の "+defaultConfigFileName+")"
-	} else if err != nil {
+		return domain.Config{}, nil
+	}
+	if err != nil {
 		return domain.Config{}, fmt.Errorf("設定ファイル %s の読み取りに失敗しました: %w", path, err)
 	}
 

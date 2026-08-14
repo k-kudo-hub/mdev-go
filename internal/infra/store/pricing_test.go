@@ -79,9 +79,16 @@ func TestLoadPricingFallsBackPerKey(t *testing.T) {
 			baseConfig: `{"pricing":{"only-in-default":{"input":9},"fast_multiplier":6}}`,
 			want:       emptyPricing,
 		},
-		// どちらのファイルからも取れない 2 つの場合(壊れている / 無い)は
-		// 埋め込みへ落ちる。値が入るため、この表では扱わない
-		// (TestLoadPricingFallsBackToEmbedded を参照)。
+		{
+			name:       "どちらも壊れていれば空の単価表",
+			userConfig: `not json`,
+			baseConfig: `not json either`,
+			want:       emptyPricing,
+		},
+		{
+			name: "どちらも無ければ空の単価表",
+			want: emptyPricing,
+		},
 	}
 
 	for _, tt := range tests {
@@ -128,49 +135,5 @@ func TestPricingStoreLoad(t *testing.T) {
 
 	if got := store.NewPricingStore(home).Load().Models["m"].Input; got != 2 {
 		t.Errorf("Load().Models[m].Input = %v, want 2", got)
-	}
-}
-
-// TestLoadPricingFallsBackToEmbedded は設置物から単価表が取れないときに
-// 埋め込みへ落ちることを確かめる。
-//
-// 単価表が空だと料金が 0 円として記録され、後から見て「無料だった」のか
-// 「単価が無かった」のか区別できない。
-func TestLoadPricingFallsBackToEmbedded(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		userConfig string
-		baseConfig string
-	}{
-		{name: "どちらも無い"},
-		{name: "どちらも壊れている", userConfig: `not json`, baseConfig: `not json either`},
-		{
-			name:       "どちらにも pricing が無い",
-			userConfig: `{"search_dirs":["~/projects"]}`,
-			baseConfig: `{"search_dirs":["~/projects"]}`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			home := t.TempDir()
-			if tt.userConfig != "" {
-				writeConfig(t, home, "config.json", tt.userConfig)
-			}
-			if tt.baseConfig != "" {
-				writeConfig(t, home, "config.default.json", tt.baseConfig)
-			}
-
-			got := store.LoadPricing(home)
-			if len(got.Models) == 0 {
-				t.Error("埋め込みの単価表が読めていない")
-			}
-			if !got.HasFastMultiplier {
-				t.Error("埋め込みの fast_multiplier が読めていない")
-			}
-		})
 	}
 }

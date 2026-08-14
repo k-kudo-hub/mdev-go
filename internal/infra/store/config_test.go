@@ -108,12 +108,6 @@ func TestLoadConfigUsesDefaultWhenUserConfigAbsent(t *testing.T) {
 	}
 }
 
-// TestLoadConfigWithoutAnyFile は設置物が無いときに埋め込みへ落ちることを
-// 確かめる。
-//
-// 設置の前や、設置物が欠けた状態でも既定の設定で動けるようにするための
-// 経路である。ここが空の設定に落ちると、単価表もエージェントの指定も無い
-// まま動いてしまい、料金が 0 円として記録される。
 func TestLoadConfigWithoutAnyFile(t *testing.T) {
 	t.Parallel()
 
@@ -121,11 +115,8 @@ func TestLoadConfigWithoutAnyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() = %v", err)
 	}
-	if len(cfg.Pricing.Models) == 0 {
-		t.Error("埋め込みの単価表が読めていない")
-	}
-	if got := cfg.AgentCommand(""); len(got) == 0 {
-		t.Error("埋め込みからエージェントのコマンドが読めていない")
+	if len(cfg.Pricing.Models) != 0 {
+		t.Errorf("Models = %+v, want 空", cfg.Pricing.Models)
 	}
 }
 

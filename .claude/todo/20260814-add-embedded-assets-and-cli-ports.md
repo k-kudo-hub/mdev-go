@@ -25,7 +25,9 @@ ADR-0004 実施フェーズ 2。Go 版環境で load-bearing な残存 Shell 3 �
 
 - [x] conductor から layouts/multi.kdl・layouts/dev.kdl・config.default.json・hooks.json を mdev-go の assets/ へ移設(出所と「conductor 側が正本でなくなる」旨を conductor 側は 6-4 まで現状維持のままにする注記)
 - [x] go:embed のテスト+実装: `mdev assets <name>` または内部 API として、CONDUCTOR_HOME に実ファイルがあれば優先・無ければ embed を返す解決関数(ADR の「カスタマイズの退避路」)
-- [x] config.default.json / pricing の読み込み(store/config.go・pricing.go)を「実ファイル → embed」のフォールバック付きに変更(既存の config.json → config.default.json フォールバックの後段に embed を追加)
+- [x] ~~config.default.json / pricing の読み込み(store/config.go・pricing.go)を「実ファイル → embed」のフォールバック付きに変更~~ → **撤回**。読み込み経路には embed を混ぜず、`mdev assets` で取り出して 6-3 の `mdev install` が実ファイルとして配置する方式に寄せる(ADR D4-4 の「同梱」は配布物の持ち方の話であり、読み込みのフォールバックまでは要求していない)
+  - 理由 1: 設置物が欠けた状態は現行版ではゼロ値の設定として扱われており、埋め込みの既定値を入れると hook 経路の課金記録が黙って変わりうる。6-2 は既存の挙動へ影響を出さない「受け皿」フェーズである
+  - 理由 2: 設置済みの CONDUCTOR_HOME には config.default.json が必ずあるため、本番経路では埋め込みへ落ちる分岐に到達せず、テストだけがそれを保証する形になっていた
 
 ### E. 検証・仕上げ
 
