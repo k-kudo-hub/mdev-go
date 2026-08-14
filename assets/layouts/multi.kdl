@@ -1,0 +1,44 @@
+layout {
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="compact-bar"
+        }
+        children
+    }
+
+    // Main tab: (Dashboard / Waiting) (left) + Done (center) + News (right) + Task Creator (bottom)
+    tab name="Main" focus=true {
+        pane split_direction="horizontal" {
+            pane size="70%" split_direction="vertical" {
+                pane split_direction="horizontal" {
+                    pane {
+                        name "Dashboard"
+                        command "bash"
+                        args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane dashboard"
+                    }
+                    pane {
+                        name "Waiting"
+                        command "bash"
+                        args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane waiting"
+                    }
+                }
+                pane {
+                    name "Done"
+                    command "bash"
+                    args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane done"
+                }
+                pane {
+                    name "News"
+                    command "bash"
+                    args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane news"
+                }
+            }
+            pane size="30%" {
+                name "TaskCreate"
+                focus true
+                command "bash"
+                args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane task-create"
+            }
+        }
+    }
+}

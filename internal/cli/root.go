@@ -52,6 +52,8 @@ type Deps struct {
 	Codex CodexService
 	// Agent は設定されたエージェント CLI を起動するユースケース。
 	Agent AgentService
+	// Assets は同梱資産の解決。
+	Assets AssetService
 	// Version はビルド時に焼き込まれた mdev の版である。
 	//
 	// 焼き込まれていない場合は空になる(参照は VersionOrDev を通す)。
@@ -93,6 +95,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newNewsCommand(deps))
 	cmd.AddCommand(newCodexCommand(deps))
 	cmd.AddCommand(newAgentCommand(deps))
+	cmd.AddCommand(newAssetsCommand(deps))
 	return cmd
 }
 

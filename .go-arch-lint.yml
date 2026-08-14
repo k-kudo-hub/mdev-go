@@ -4,6 +4,7 @@
 #        ├─→ app ─→ domain
 #   tui ─┘    ↑
 #   infra ────┘ (port の実装として)
+#   infra ─→ assets (go:embed した同梱資産)
 #   cmd/mdev ─→ 全パッケージ(組み立てのみ)
 #
 # この YAML の変更は ADR の改訂を伴う PR としてレビューする。
@@ -16,6 +17,7 @@ allow:
 
 components:
   main:   { in: cmd/mdev }
+  assets: { in: assets }
   cli:    { in: internal/cli }
   tui:    { in: internal/tui }
   app:    { in: internal/app }
@@ -45,12 +47,22 @@ deps:
       - app
       - domain
 
-  # infra は app の port を実装し、domain の型を扱う。
+  # infra は app の port を実装し、domain の型を扱う。同梱資産(埋め込み)も
+  # ここから読む。資産の解決は「実ファイル優先・無ければ埋め込み」という
+  # I/O の話であり、置き場所は infra が適する。
   infra:
     mayDependOn:
       - infra
       - app
       - domain
+      - assets
+
+  # assets は go:embed だけを持ち、どこにも依存しない。埋め込みは配布の都合で
+  # あって業務上の概念ではないため、domain がここを参照することは無い
+  # (domain の mayDependOn に assets が無いことで機械的に禁じられる)。
+  assets:
+    mayDependOn:
+      - assets
 
   # domain は他のどの internal パッケージにも依存しない(自分自身のみ)。
   domain:

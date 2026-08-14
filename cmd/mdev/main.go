@@ -264,9 +264,10 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Sleeper: sleeper,
 			Clock:   clock,
 		},
-		News:  &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
-		Codex: codexNotifier,
-		Agent: &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
+		News:   &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
+		Codex:  codexNotifier,
+		Agent:  &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
+		Assets: store.NewAssetStore(conductorHome),
 		UpdateCheck: &app.UpdateChecker{
 			Config:      paneStore,
 			State:       updateState,

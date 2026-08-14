@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/k-kudo-hub/mdev-go/assets"
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
@@ -33,9 +34,17 @@ func (s PricingStore) Load() domain.Pricing {
 //
 // 壊れた config.json は「pricing が取れなかった」として扱われ、
 // config.default.json へフォールバックする。
+// どちらのファイルからも取れなかった場合は、実行ファイルに埋め込まれた
+// config.default.json を最後の手として見る。単価表が空だと料金が 0 円として
+// 記録され、後から見て「無料だった」のか「単価が無かった」のか区別できない。
 func LoadPricing(conductorHome string) domain.Pricing {
 	for _, name := range []string{configFileName, defaultConfigFileName} {
 		if pricing, found := readPricing(filepath.Join(conductorHome, name)); found {
+			return pricing
+		}
+	}
+	if embedded, ok := assets.Read(defaultConfigFileName); ok {
+		if pricing, found := parsePricing(embedded); found {
 			return pricing
 		}
 	}
@@ -55,7 +64,12 @@ func readPricing(path string) (domain.Pricing, bool) {
 	if err != nil {
 		return domain.Pricing{}, false
 	}
+	return parsePricing(b)
+}
 
+// parsePricing は設定の中身から pricing を読む。判定の規則は readPricing と
+// 同じで、埋め込みと実ファイルで扱いを変えないために切り出してある。
+func parsePricing(b []byte) (domain.Pricing, bool) {
 	var config struct {
 		Pricing json.RawMessage `json:"pricing"`
 	}
