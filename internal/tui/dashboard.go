@@ -15,6 +15,18 @@ const (
 	uploadFailed   = "\033[0;31m\033[1mUpload failed. Deletion cancelled.\033[0m"
 )
 
+// uploadFailedNotice は中止の表示に理由を 1 行添える。
+//
+// 「Upload failed」だけでは、設定の不備なのか transcript が無いのか push が
+// 通らなかったのか分からない。削除が止まった利用者が次に何をすればよいかを
+// 決められるよう、原因の文を続けて出す。理由が無いときは従来どおり 1 行。
+func uploadFailedNotice(reason string) string {
+	if reason == "" {
+		return uploadFailed
+	}
+	return uploadFailed + "\n\033[0;31m" + reason + "\033[0m"
+}
+
 // Dashboard のメッセージ。
 type (
 	// dashboardRefreshedMsg は 1 回ぶんの一覧の組み立てが終わったことを表す。
@@ -274,8 +286,8 @@ func (m DashboardModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cm
 	}
 
 	if msg.prep.Cancelled {
-		// アップロードに失敗したので何も消さない。表示だけ出して元に戻る。
-		m.notice = uploadFailed
+		// アップロードに失敗したので何も消さない。理由を添えて元に戻る。
+		m.notice = uploadFailedNotice(msg.prep.Reason)
 		m.token++
 		return m, noticeCmd(m.token)
 	}

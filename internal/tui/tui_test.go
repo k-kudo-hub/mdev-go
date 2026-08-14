@@ -542,6 +542,36 @@ func TestDashboardModelDeleteCancelledOnUploadFailure(t *testing.T) {
 	}
 }
 
+// TestDashboardModelShowsUploadFailureReason は中止の理由を画面へ出すことを
+// 確かめる。
+//
+// 「Upload failed」だけでは、設定の不備なのか transcript が無いのか push が
+// 通らなかったのかが分からない。削除が止まった利用者が次に何をすればよいかを
+// 決められるよう、原因の文を続けて出す。
+func TestDashboardModelShowsUploadFailureReason(t *testing.T) {
+	t.Parallel()
+
+	const reason = "会話要約の生成に失敗しました: transcript のパスが記録されていません"
+	service := &stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}},
+		prep:     app.DeletePreparation{Cancelled: true, Reason: reason},
+	}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	prompted, _ := loaded.Update(key('d'))
+	after, prepared := run(t, prompted, key('1'))
+	shown, _ := after.Update(prepared)
+
+	got := content(shown)
+	if !strings.Contains(got, "Upload failed. Deletion cancelled.") {
+		t.Errorf("中止の表示が出ていない: %q", got)
+	}
+	if !strings.Contains(got, reason) {
+		t.Errorf("理由が出ていない: %q", got)
+	}
+}
+
 func TestDashboardModelDeleteSurfacesPrepareError(t *testing.T) {
 	t.Parallel()
 

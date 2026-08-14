@@ -52,7 +52,11 @@ func (d *TaskDeleter) Prepare(env PaneEnv, tab string) (DeletePreparation, error
 
 	output, err := d.Uploader.UploadLog(env, tab)
 	if err != nil {
-		return DeletePreparation{Cancelled: true}, nil
+		// error は握り潰さず理由として持ち上げる。ここで捨てると、画面には
+		// 「Upload failed」しか出ず、利用者も調べる側も原因に辿り着けない。
+		// 中止そのものは error ではない(呼び出し側は Cancelled で分岐する)
+		// ので、戻り値の形は変えない。
+		return DeletePreparation{Cancelled: true, Reason: err.Error()}, nil
 	}
 	return DeletePreparation{Message: output}, nil
 }

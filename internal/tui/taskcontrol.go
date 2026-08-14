@@ -217,7 +217,7 @@ func (m TaskControlModel) handleKey(key string) (tea.Model, tea.Cmd) {
 // handlePrepared は record と upload-log が終わった後の分岐を決める。
 //
 // Dashboard と同じ契約である。アップロードが失敗したら何も消さず、
-// "Upload failed. Deletion cancelled." を出して元に戻る。
+// "Upload failed. Deletion cancelled." と理由を出して元に戻る。
 func (m TaskControlModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.notice = errorLine(msg.err)
@@ -225,7 +225,7 @@ func (m TaskControlModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.
 		return m, noticeCmd(m.token)
 	}
 	if msg.prep.Cancelled {
-		m.notice = uploadFailed
+		m.notice = uploadFailedNotice(msg.prep.Reason)
 		m.token++
 		return m, noticeCmd(m.token)
 	}

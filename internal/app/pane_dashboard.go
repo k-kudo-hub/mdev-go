@@ -43,11 +43,18 @@ type DashboardSnapshot struct {
 
 // DeletePreparation は削除フローの前半(記録とアップロード)の結果である。
 type DeletePreparation struct {
-	// Cancelled は upload-log.sh が失敗し、削除を中止すべきことを表す。
+	// Cancelled はアップロードが失敗し、削除を中止すべきことを表す。
 	// このとき pending もレジストリもタブも一切触っていない。
 	Cancelled bool
 	// Message はアップロード結果(ログの URL)。空なら表示するものが無い。
 	Message string
+	// Reason は中止の理由である。Cancelled のときだけ入る。
+	//
+	// **画面に理由が出ないと、利用者は詰まった原因に辿り着けない。**
+	// 削除が止まるのはアップロードの失敗経路が複数あるためで、設定の不備・
+	// transcript の欠落・push の失敗のどれなのかは、この一行が無いと
+	// ログを掘るまで分からない(実際に調査 1 回ぶんの時間を要した)。
+	Reason string
 }
 
 // DashboardPane は Dashboard ペインのユースケースである

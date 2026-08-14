@@ -349,6 +349,12 @@ func TestDashboardPanePrepareDeleteCancelsOnUploadFailure(t *testing.T) {
 	if !prep.Cancelled {
 		t.Fatal("upload が失敗したのに中止になっていない")
 	}
+	// 失敗の理由を持ち上げる。握り潰すと画面には「Upload failed」しか
+	// 出ず、設定の不備なのか transcript が無いのか push が通らなかったのかが
+	// 分からない。削除が止まった利用者が次に何をすればよいか決められない。
+	if !strings.Contains(prep.Reason, errUploadFailed.Error()) {
+		t.Errorf("理由 = %q, want %q を含む", prep.Reason, errUploadFailed)
+	}
 
 	for _, entry := range f.journal.entries {
 		switch entry {

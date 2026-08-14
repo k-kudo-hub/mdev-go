@@ -295,3 +295,26 @@ func equalStrings(got, want []string) bool {
 	}
 	return true
 }
+
+// TestTaskControlShowsUploadFailureReason は中止の理由を画面へ出すことを
+// 確かめる。Dashboard と同じ扱いにする(両方の経路で同じだけ分かるように)。
+func TestTaskControlShowsUploadFailureReason(t *testing.T) {
+	t.Parallel()
+
+	const reason = "ログリポジトリへのpushに失敗しました: 認証エラー"
+	pane := &stubTaskControl{prep: app.DeletePreparation{Cancelled: true, Reason: reason}}
+	m, _ := newTaskControl(t, pane).Update(key('d'))
+	m, msg := pressTC(t, m, 'd')
+	if msg == nil {
+		t.Fatal("dd でコマンドが出ていない")
+	}
+	next, _ := m.Update(msg)
+
+	got := content(next)
+	if !strings.Contains(got, "Upload failed. Deletion cancelled.") {
+		t.Errorf("中止の表示が出ていない: %q", got)
+	}
+	if !strings.Contains(got, reason) {
+		t.Errorf("理由が出ていない: %q", got)
+	}
+}
