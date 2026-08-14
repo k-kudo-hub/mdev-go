@@ -31,7 +31,7 @@ CASES_FILE="$GOLDEN_DIR/cases.json"
 # 会話ログのパスに差し込むプレースホルダ。Go 側のゴールデンテストと同じ文字列。
 PLACEHOLDER='{{CODEX_HOME}}'
 
-for required in jq bash; do
+for required in jq python3; do
     command -v "$required" >/dev/null 2>&1 || { echo "$required が必要です" >&2; exit 1; }
 done
 NOTIFY="$CONDUCTOR_SRC/scripts/codex-notify.sh"
@@ -83,6 +83,10 @@ run_case() {
     done < <(printf '%s' "$case_json" | jq -r '(.rollouts // {}) | keys[]')
 
     # 環境変数は case が指定したものだけを渡す(env -i で他は切る)。
+    #
+    # 展開に ${arr[@]+"${arr[@]}"} を使うのは、bash 3.2(macOS 標準)が
+    # set -u のもとで空配列の "${arr[@]}" を「未定義変数」として扱うためである。
+    # env を指定しない case を足した瞬間に落ちる(gen-golden-record.sh と同形)。
     local -a env_args=()
     while IFS= read -r pair; do
         [ -n "$pair" ] || continue
@@ -97,7 +101,7 @@ run_case() {
         HOME="$sandbox/home" \
         CONDUCTOR_HOME="$sandbox/conductor" \
         CODEX_HOME="$sandbox/codex" \
-        "${env_args[@]}" \
+        ${env_args[@]+"${env_args[@]}"} \
         bash "$NOTIFY" "$payload"
 
     # 書き換わった pending とレジストリを保存する。
