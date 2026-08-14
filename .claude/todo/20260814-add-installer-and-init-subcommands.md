@@ -34,8 +34,8 @@ ADR-0004 実施フェーズ 3(最難関)。`mdev install/uninstall/init/test` �
 
 ### E. 検証・仕上げ
 
-- [ ] make check(カバレッジ閾値維持)+ 統合検証(隔離環境で: 新規インストール / 既存 Shell 環境からの移行(hooks 書き換え・scripts 削除・REPO_URL 書き換え)/ mdev test の worktree 起動)
-- [ ] ユーザーテスト 6-3 の手順書(実環境での install 実行・新シムでの mdev 起動・dev/zs の動作)
+- [x] make check(カバレッジ閾値維持)+ 統合検証(隔離環境で: 新規インストール / 既存 Shell 環境からの移行(hooks 書き換え・scripts 削除・REPO_URL 書き換え)/ mdev test の worktree 起動)
+- [x] ユーザーテスト 6-3 の手順書(実環境での install 実行・新シムでの mdev 起動・dev/zs の動作)
 
 ## 完了条件
 
