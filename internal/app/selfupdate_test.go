@@ -203,7 +203,10 @@ func TestUpdateContinuesWhenSelfUpdateUnavailable(t *testing.T) {
 	t.Parallel()
 	skipUnsupportedPlatform(t)
 
-	updater, _, _, installer := newUpdater()
+	updater, state, remote, installer := newUpdater()
+	// 資産の側には新しい版がある、という状況にする。
+	state.version = "v0.1.0"
+	remote.tag = "v0.2.0"
 	self, _, replacer := newSelfUpdater("v0.10.0")
 	replacer.err = fmt.Errorf("%w: 状態コード 404", app.ErrSelfUpdateNotStarted)
 	updater.Self = self

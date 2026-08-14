@@ -345,3 +345,23 @@ func TestSessionClearPending(t *testing.T) {
 		t.Error("何も伝えていない")
 	}
 }
+
+// TestSessionAttachRevivesExited は EXITED のセッションへも attach する
+// ことを確かめる。
+//
+// zellij は EXITED のセッションを attach で復活させる。生きているものだけを
+// attach の対象にすると、入りたくて zs を叩いた利用者に対して同じ名前の空の
+// セッションを新しく作ってしまい、前のタブが行方不明になる(現行版の
+// `zellij attach || zellij --session` はこの場合 attach が成功する)。
+func TestSessionAttachRevivesExited(t *testing.T) {
+	t.Parallel()
+
+	f := newSessionFixture("gone [Created 2h ago] (EXITED - attach to resurrect)\n")
+	if err := f.launcher.Attach("gone"); err != nil {
+		t.Fatalf("Attach = %v", err)
+	}
+	want := []string{"zellij", "attach", "gone"}
+	if len(f.execer.commands) != 1 || !equalStrings(f.execer.commands[0], want) {
+		t.Errorf("起動 = %q, want %q", f.execer.commands, want)
+	}
+}

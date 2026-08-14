@@ -283,7 +283,8 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		HookSettings: hookSettings,
 		Panes:        panes,
 		Update: &app.Updater{
-			State: updateState,
+			State:  updateState,
+			Remote: remoteTags,
 			Self: &app.SelfUpdater{
 				Version:  version,
 				Remote:   remoteTags,

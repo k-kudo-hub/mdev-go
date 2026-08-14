@@ -177,8 +177,12 @@ func (s *SessionLauncher) StartDev(name string) error {
 // Attach は名前を指定して、または一覧から選んで attach する
 // (現行 init.zsh の zs() 相当)。
 //
-// 指定した名前のセッションが無ければその名前で新しく作る。現行版の
-// `zellij attach || zellij --session` と同じ挙動である。
+// 現行版の `zellij attach || zellij --session` と同じ結果になるよう、
+// **一覧に名前があれば EXITED でも attach する。** zellij は EXITED の
+// セッションを attach で復活させるので、あちらの `attach` はその場合も
+// 成功する。生きているものだけを attach の対象にすると、入りたくて zs を
+// 叩いた利用者に対して**同じ名前の空のセッションを新しく作ってしまい**、
+// 前のタブが行方不明になる。
 func (s *SessionLauncher) Attach(name string) error {
 	if name == "" {
 		chosen, err := s.chooseSession()
@@ -196,7 +200,7 @@ func (s *SessionLauncher) Attach(name string) error {
 	if err != nil {
 		return fmt.Errorf("セッションの一覧を取得できません: %w", err)
 	}
-	if domain.ParseSessionState(listing, name) == domain.SessionAlive {
+	if domain.ParseSessionState(listing, name) != domain.SessionAbsent {
 		return s.exec("attach", name)
 	}
 	return s.exec("--session", name)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"io"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
@@ -13,7 +14,8 @@ import (
 // 更新は 2 段で終わる。
 //
 //  1. 新しいバイナリを取得して自分自身を置き換える(SelfUpdater)
-//  2. **新しいバイナリの** `mdev install` が設定を貼り直す
+//  2. **新しいバイナリの** `mdev install` が設定を貼り直す(版が上がって
+//     いるときだけ。既に最新なら何もしない)
 //
 // 2 段目を今のプロセスで続けないのが要点である。今動いているのは置き換える
 // **前**の中身なので、そのまま設定を貼ると古い実装で貼ることになる。置き換え
@@ -28,9 +30,11 @@ import (
 // 資産は既にバイナリへ埋め込んであるので、貼り直しは自分の install で足りる。
 type Updater struct {
 	State UpdateStateStore
+	// Remote はリモートの最新タグを引く。
+	Remote RemoteTagLister
 	// Self は mdev 自身のバイナリを新しくする。
 	//
-	// nil のときは自バイナリの更新を行わない(設定の貼り直しだけを行う)。
+	// nil のときは自バイナリの更新を行わない(版の確認だけを行う)。
 	Self *SelfUpdater
 	// Install は設定を貼り直すユースケースである。
 	Install InstallRunner
@@ -54,13 +58,47 @@ func (u *Updater) Update(out io.Writer) error {
 		}
 		if result.Replaced {
 			// 置き換えた。ここから先は新しいバイナリの仕事である。
+			// 実行し直せば、そちらがこの関数の続き(設定の貼り直し)を行う。
 			return nil
 		}
 	}
 
-	// 自分は最新。設定を貼り直す(冪等なので、変わっていなければ何も書かない)。
-	write(out, domain.RenderUpdateApplying())
-	return u.Install.Install(out)
+	// **最新かどうかを確かめてから貼り直す。** 既に最新なら何もしない。
+	// 毎回 install を通すと、更新のつもりで叩いたコマンドが設置の処理を
+	// 走らせることになり、「何もしなくてよかった」ことが分からない。
+	latest, err := u.latestTag()
+	if err != nil {
+		return err
+	}
+	current := domain.NormalizeVersion(u.State.InstalledVersion())
+	if !domain.VersionGreater(latest, current) {
+		write(out, domain.RenderUpdateUpToDate(current))
+		return nil
+	}
+
+	write(out, domain.RenderUpdateStarting(current, latest))
+	if err := u.Install.Install(out); err != nil {
+		return err
+	}
+	write(out, domain.RenderUpdateDone(latest))
+	return nil
+}
+
+// latestTag はリモートの最新タグを引く。
+//
+// **引けなければエラーにする。** 更新確認(check-update)はセッションの起動前に
+// 走るので黙って諦めるが、こちらは利用者が明示的に叩くコマンドである。黙って
+// 「何もありませんでした」と答えると、更新したつもりで古いまま使い続ける。
+func (u *Updater) latestTag() (string, error) {
+	repoURL := u.State.RepoURL()
+	if repoURL == "" {
+		return "", errors.New("更新元リポジトリが不明です。`mdev install` を実行してください。")
+	}
+	latest, ok := u.Remote.LatestTag(repoURL)
+	if !ok {
+		return "", errors.New("最新バージョンの取得に失敗しました。")
+	}
+	return latest, nil
 }
 
 // write は出力先へ書く。書けない状況で追加の報告先は無いため失敗は無視する。
