@@ -1,11 +1,6 @@
 package app
 
-import (
-	"errors"
-	"fmt"
-
-	"github.com/k-kudo-hub/mdev-go/internal/domain"
-)
+import "github.com/k-kudo-hub/mdev-go/internal/domain"
 
 // CodexTranscriptLocator は codex の会話ログ(rollout)の場所を探す。
 //
@@ -37,61 +32,31 @@ type CodexNotifier struct {
 //
 // raw は codex が **最後の引数** として渡す JSON である(標準入力ではない)。
 //
-// 処理順は現行版に合わせている。レジストリの更新を pending の上書き判定より
-// 先に行うため、Waiting を守って pending を書かない場合でもレジストリは
-// 最新化される(再起動後の復元がタスクを取りこぼさない)。
+// 書き込みの中身と順序は hook 経路(HandleNotify)と同じなので applyTurnRecord
+// に任せる。この経路に固有なのは 3 点だけで、いずれもそこへ渡す値として現れる。
 //
-// 途中の失敗で処理を打ち切らない。現行版は set -e を使っておらず、レジストリの
-// 更新に失敗しても pending の書き込みへ進む。
+//   - エージェント名の既定値が claude ではなく codex
+//   - event は常に Stop(codex にはターン完了しか来ない)
+//   - 上書き判定は Waiting だけを守る
 func (n *CodexNotifier) Notify(raw []byte, env HookEnv) error {
 	in, ok := domain.ParseCodexNotification(raw)
 	if !ok {
 		return nil
 	}
 
-	session := domain.SessionName(env.ZellijSession)
-	tab := domain.ResolveTabName(env.TaskTabName, in.Dir)
-	agent := agentNameForCodex(env.TaskAgent)
-	transcript := n.Transcript.Locate(in.ThreadID)
-	now := n.Clock.Now()
-
-	var errs []error
-	if env.IsTaskTab() {
-		entry := domain.RegistryEntry{
-			Tab:             tab,
-			Session:         session,
-			ClaudeSessionID: in.ThreadID,
-			UpdatedAt:       now.Format(domain.RegistryUpdatedAtLayout),
-			Dir:             in.Dir,
-			TaskType:        env.TaskType,
-			Agent:           agent,
-			TranscriptPath:  transcript,
-		}
-		if err := n.Registry.Upsert(entry); err != nil {
-			errs = append(errs, fmt.Errorf("レジストリの更新に失敗しました: %w", err))
-		}
-	}
-
-	if !domain.ShouldOverwriteCodexPending(n.Pending.Event(session, in.ThreadID)) {
-		return errors.Join(errs...)
-	}
-
-	pending := domain.Pending{
-		Tab:             tab,
-		Session:         session,
-		ClaudeSessionID: in.ThreadID,
-		Message:         in.Message,
-		Event:           domain.EventStop,
-		Time:            now.Format(domain.PendingTimeLayout),
-		Agent:           agent,
-		TranscriptPath:  transcript,
-		Dir:             in.Dir,
-		TaskType:        env.TaskType,
-	}
-	if err := n.Pending.Save(session, in.ThreadID, pending); err != nil {
-		errs = append(errs, fmt.Errorf("pending の書き込みに失敗しました: %w", err))
-	}
-	return errors.Join(errs...)
+	return applyTurnRecord(n.Pending, n.Registry, n.Clock.Now(), turnRecord{
+		Session:        domain.SessionName(env.ZellijSession),
+		SessionID:      in.ThreadID,
+		Tab:            domain.ResolveTabName(env.TaskTabName, in.Dir),
+		Dir:            in.Dir,
+		TaskType:       env.TaskType,
+		Agent:          agentNameForCodex(env.TaskAgent),
+		Message:        in.Message,
+		Event:          domain.EventStop,
+		TranscriptPath: n.Transcript.Locate(in.ThreadID),
+		RegisterTask:   env.IsTaskTab(),
+		Overwrite:      domain.ShouldOverwriteCodexPending,
+	})
 }
 
 // agentNameForCodex は TASK_AGENT が空のときに codex へ落とす
