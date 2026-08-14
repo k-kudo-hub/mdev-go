@@ -1,0 +1,15 @@
+{
+  "my_own_key": {
+    "nested": [
+      1,
+      2,
+      3
+    ]
+  },
+  "agents": {
+    "codex": {
+      "command": "codex",
+      "my_agent_key": "残る"
+    }
+  }
+}

@@ -1,0 +1,72 @@
+[
+  {
+    "name": "adds-detection-and-patterns",
+    "description": "detection も patterns も無い既存設定に、既定から両方を補う",
+    "config": {
+      "search_dirs": ["~/projects"],
+      "agents": {
+        "claude": {"command": "claude", "resume_args": "--resume"},
+        "codex": {"command": "codex", "resume_args": "resume"}
+      }
+    }
+  },
+  {
+    "name": "keeps-user-values",
+    "description": "利用者が設定済みの detection / patterns は書き換えない",
+    "config": {
+      "agents": {
+        "codex": {
+          "command": "codex",
+          "detection": "hooks",
+          "patterns": {"blocked": ["^自前のパターン$"], "working": []}
+        }
+      }
+    }
+  },
+  {
+    "name": "merges-pattern-keys",
+    "description": "patterns が 1 件以上あるなら、既定にあって無いキーだけを補う",
+    "config": {
+      "agents": {
+        "codex": {"command": "codex", "detection": "screen", "patterns": {"blocked": ["^自前$"]}}
+      }
+    }
+  },
+  {
+    "name": "keeps-empty-patterns",
+    "description": "空の patterns は「検出を止める」意思表示なのでそのまま残す",
+    "config": {
+      "agents": {"codex": {"command": "codex", "detection": "screen", "patterns": {}}}
+    }
+  },
+  {
+    "name": "unknown-agent-untouched",
+    "description": "既定に無いエージェントには何も足さない",
+    "config": {
+      "agents": {"gemini": {"command": "gemini"}}
+    }
+  },
+  {
+    "name": "no-agents-key",
+    "description": "agents が無い設定は何も変わらない",
+    "config": {"search_dirs": ["~/projects"], "skip_task_name_input": true}
+  },
+  {
+    "name": "empty-agents",
+    "description": "agents が空オブジェクトなら何も足さない",
+    "config": {"agents": {}}
+  },
+  {
+    "name": "empty-agent-object",
+    "description": "中身が空のエージェントにも既定を補う",
+    "config": {"agents": {"codex": {}}}
+  },
+  {
+    "name": "keeps-unknown-keys",
+    "description": "mdev が知らないキーは触らない",
+    "config": {
+      "my_own_key": {"nested": [1, 2, 3]},
+      "agents": {"codex": {"command": "codex", "my_agent_key": "残る"}}
+    }
+  }
+]

@@ -4,13 +4,73 @@
 
 Zellij 上で複数のコーディングエージェント(Claude Code / Codex CLI)セッションをダッシュボードから統括する。
 
+## インストール
+
+macOS(Apple Silicon / Intel)向け。`curl` と `zellij` が要る。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/k-kudo-hub/mdev-go/main/install.sh | bash
+```
+
+`install.sh` がするのは「最新のバイナリを取得して SHA-256 で照合し、
+`~/.claude-conductor/bin/mdev` へ置いて `mdev install` を呼ぶ」ところまでである。
+設定(hooks・codex の notify・レイアウト・config のマージ)はすべて `mdev install`
+が行う。**何度実行しても同じ状態になり、2 回目はファイルを 1 つも書き換えない。**
+
+最後に案内される 1 行を `.zshrc` へ足すと、`mdev` / `dev` / `zs` が使えるようになる。
+
+```sh
+source "$HOME/.claude-conductor/init.zsh"
+```
+
+### 更新と取り除き
+
+```sh
+mdev update       # 新しい版へ自己置換し、設定を貼り直す
+mdev uninstall    # hooks と codex notify を外し、データも消す
+mdev uninstall --keep-data   # 設定の解除だけ(作業ログは残す)
+```
+
+### バイナリを手で置く場合
+
+**ブラウザからダウンロードしたバイナリは macOS の隔離属性で起動できない。**
+その場合は属性を外す。
+
+```sh
+xattr -d com.apple.quarantine ~/.claude-conductor/bin/mdev
+```
+
+`install.sh` は curl 経由なので隔離属性は付かない(念のため外す処理も入っている)。
+
+### Shell 版へ戻す
+
+Shell 版(claude-conductor)へは、そのリポジトリの最終タグから戻せる。
+
+```sh
+git clone https://github.com/k-kudo-hub/claude-conductor && cd claude-conductor && ./install.sh
+```
+
+## 使い方
+
+```sh
+mdev              # 今いるディレクトリのセッションへ入る(無ければ作る)
+mdev <名前>       # 名前を指定して入る
+mdev --new        # 時刻付きで新しく作る
+dev               # 単一の開発セッション(エージェント + エディタ + git)
+zs                # 既存のセッションを選んで入る
+mdev test <worktree>   # worktree のソースを隔離環境で試す
+```
+
+ダッシュボードでは `n` で新しいタスクを作る。
+
 ## ステータス
 
-設計フェーズ。リライト計画は [docs/adr/](docs/adr/) を参照。
+Shell 版からの移行が最終段階。計画は [docs/adr/](docs/adr/) を参照。
 
 - [ADR-0001: Shell Script 版 mdev を Go でリライトする](docs/adr/0001-rewrite-mdev-in-go.md)
 - [ADR-0002: ports & adapters によるアーキテクチャ設計](docs/adr/0002-ports-and-adapters-architecture.md)
 - [ADR-0003: 内部品質を担保するガードレール](docs/adr/0003-quality-guardrails.md)
+- [ADR-0004: 配布モデルと最終統合](docs/adr/0004-distribution-and-final-integration.md)
 
 ## 開発
 
@@ -54,16 +114,17 @@ make install     # $CONDUCTOR_HOME/bin/mdev(既定 ~/.claude-conductor/bin)へ�
 make clean       # bin/ と cover.out を削除する
 ```
 
-### 実環境で試す
+### worktree を隔離環境で試す
 
-`make install` で配置したうえで、Claude Code の hooks を Go 版へ切り替えられる。
-手順とチェックリストは [docs/user-test-01-hooks.md](docs/user-test-01-hooks.md) を参照。
+`mdev test` は worktree のソースから mdev を組み、その worktree の中の
+`.mdev-test/` をデータの置き場所にしてセッションを新しい端末の窓に開く。
+**設置済みの環境には一切触れない**ため、2 つの worktree を同時に試せる。
 
 ```sh
-make install                   # ~/.claude-conductor/bin/mdev へ配置
-mdev hooks switch --dry-run    # 変更内容の確認のみ
-mdev hooks switch              # バックアップを作って切り替え
-mdev hooks restore             # 最新のバックアップから復元
+mdev test <ブランチ名>        # .worktree/<ブランチ名> から
+mdev test <パス>              # パスを直に指定
+mdev test                     # .worktree/ から選ぶ
+mdev test <名前> --dry-run    # 起動せずに解決した内容だけを出す
 ```
 
 ### 品質基準

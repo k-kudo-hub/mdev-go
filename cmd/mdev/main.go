@@ -7,9 +7,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 	"github.com/k-kudo-hub/mdev-go/internal/cli"
+	"github.com/k-kudo-hub/mdev-go/internal/domain"
 	"github.com/k-kudo-hub/mdev-go/internal/infra"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/codex"
 	"github.com/k-kudo-hub/mdev-go/internal/infra/git"
@@ -173,6 +175,27 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	zellijSessions := zellij.NewSessionController()
 	processes := procscan.NewScanner()
 
+	// 設置と取り除き。触る先が CONDUCTOR_HOME・settings.json・config.toml と
+	// 複数の根に散らばるため、絶対パスを 1 か所にまとめて渡す。
+	installPaths := domain.InstallPaths{
+		Home:          home,
+		ConductorHome: conductorHome,
+		Settings:      store.SettingsPath(home, getenv("MDEV_SETTINGS_FILE")),
+		CodexConfig:   store.CodexConfigPath(getenv("CODEX_HOME"), home),
+		Zshrc:         filepath.Join(home, ".zshrc"),
+	}
+	files := store.NewFileStore()
+	installer := &app.Installer{
+		Paths:    installPaths,
+		Files:    files,
+		Assets:   store.NewAssetStore(conductorHome),
+		Commands: shell.NewCommandChecker(),
+		// hooks の書き換えは利用者の設定ファイルへの破壊的な操作なので、
+		// hooks switch と同じ仕組みで退避してから書く。
+		Backup:  store.NewSettingsStore(installPaths.Settings, clock),
+		Version: version,
+	}
+
 	// ニュースの取得。News ペインの r キーと `mdev news fetch` が同じ実体を使う。
 	newsFetcher := news.NewFetcher(conductorHome)
 
@@ -236,45 +259,84 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	updateState := store.NewUpdateStateStore(conductorHome)
 	remoteTags := git.NewRemoteTags()
 
+	// セッションの掃除と更新確認は、掃除コマンドとセッション起動の両方が使う。
+	sessionCleaner := &app.SessionCleaner{
+		Sessions:  zellijSessions,
+		Clients:   zellijSessions,
+		Remover:   zellijSessions,
+		Processes: processes,
+		Signaler:  processes,
+		Sockets:   zellijSessions,
+		Traces: store.NewSessionTraceStore(
+			store.RegistryRoot(conductorHome), store.PendingRoot(home)),
+		Sleeper: sleeper,
+		Clock:   clock,
+	}
+	updateChecker := &app.UpdateChecker{
+		Config:      paneStore,
+		State:       updateState,
+		Remote:      remoteTags,
+		Clock:       clock,
+		MdevVersion: version,
+	}
+
 	return cli.Deps{
 		Hooks:        hooks,
 		Record:       record,
 		HookSettings: hookSettings,
 		Panes:        panes,
 		Update: &app.Updater{
-			State:     updateState,
-			Remote:    remoteTags,
-			Installer: release.NewInstaller(),
+			State:  updateState,
+			Remote: remoteTags,
 			Self: &app.SelfUpdater{
 				Version:  version,
 				Remote:   remoteTags,
 				Replacer: release.NewSelfReplacer(),
 			},
-			Getenv: getenv,
+			Install: installer,
 		},
-		SessionClean: &app.SessionCleaner{
-			Sessions:  zellijSessions,
-			Clients:   zellijSessions,
-			Remover:   zellijSessions,
-			Processes: processes,
-			Signaler:  processes,
-			Sockets:   zellijSessions,
-			Traces: store.NewSessionTraceStore(
-				store.RegistryRoot(conductorHome), store.PendingRoot(home)),
-			Sleeper: sleeper,
+		SessionClean: sessionCleaner,
+		Session: &app.SessionLauncher{
+			Sessions: zellijSessions,
+			Remover:  zellijSessions,
+			Cleaner:  sessionCleaner,
+			News:     &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
+			Update:   updateChecker,
+			Pending:  pending,
+			Files:    files,
+			Execer:   shell.NewExecer(),
+			// 選択の入力は端末から読み、一覧は標準エラーへ出す。
+			Chooser: shell.NewChooser(os.Stdin, os.Stderr),
+			Paths:   installPaths,
 			Clock:   clock,
 		},
-		News:   &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
-		Codex:  codexNotifier,
-		Agent:  &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
-		Assets: store.NewAssetStore(conductorHome),
-		UpdateCheck: &app.UpdateChecker{
-			Config:      paneStore,
-			State:       updateState,
-			Remote:      remoteTags,
-			Clock:       clock,
-			MdevVersion: version,
+		Getwd: func() string {
+			dir, err := os.Getwd()
+			if err != nil {
+				return "."
+			}
+			return dir
 		},
-		Getenv: getenv,
+		Now: clock.Now,
+		Test: &app.TestSessionRunner{
+			Locator:  shell.NewWorktree(),
+			Builder:  shell.NewGoBuilder(),
+			Terminal: shell.NewTerminal(home),
+			Chooser:  shell.NewChooser(os.Stdin, os.Stderr),
+			Assets:   store.NewAssetStore(conductorHome),
+			Files:    files,
+		},
+		News:    &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
+		Codex:   codexNotifier,
+		Agent:   &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
+		Assets:  store.NewAssetStore(conductorHome),
+		Install: installer,
+		Uninstall: &app.Uninstaller{
+			Paths:       installPaths,
+			Files:       files,
+			PendingRoot: store.PendingRoot(home),
+		},
+		UpdateCheck: updateChecker,
+		Getenv:      getenv,
 	}
 }

@@ -141,7 +141,8 @@ func TestHookRejectsUnknownSubCommandAndArgs(t *testing.T) {
 	}{
 		{name: "未知のサブコマンド", args: []string{"hook", "unknown"}},
 		{name: "余分な引数", args: []string{"hook", "notify", "extra"}},
-		{name: "未知のトップレベルコマンド", args: []string{"unknown"}},
+		// 未知のトップレベル引数はセッション名として扱われる(root の RunE)。
+		// その挙動は TestRootTreatsUnknownArgAsSessionName で固定している。
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

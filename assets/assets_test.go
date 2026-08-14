@@ -2,6 +2,8 @@ package assets_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,6 +20,7 @@ func TestNames(t *testing.T) {
 	want := []string{
 		"config.default.json",
 		"hooks.json",
+		"init.zsh",
 		"layouts/dev.kdl",
 		"layouts/multi.kdl",
 	}
@@ -94,11 +97,11 @@ func TestLayoutsPointAtMdev(t *testing.T) {
 		{
 			name: "layouts/multi.kdl",
 			wants: []string{
-				"/bin/mdev pane dashboard",
-				"/bin/mdev pane waiting",
-				"/bin/mdev pane done",
-				"/bin/mdev pane news",
-				"/bin/mdev pane task-create",
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane dashboard`,
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane waiting`,
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane done`,
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane news`,
+				`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane task-create`,
 			},
 		},
 		// パスは引用符で囲む。HOME に空白が入っていると、囲まずに書いた
@@ -123,5 +126,67 @@ func TestLayoutsPointAtMdev(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestDomainTestdataMatchesAssets は domain のテストが使う写しが本物と
+// 一致することを確かめる。
+//
+// domain は assets を import できない(ADR-0002 の依存方向)ため、hooks の
+// 雛形は testdata へ写してある。写しが古くなると、テストは通るのに配布物は
+// 別物という状態になる。
+func TestDomainTestdataMatchesAssets(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"hooks.json", "config.default.json"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			want, ok := assets.Read(name)
+			if !ok {
+				t.Fatalf("%s が埋め込まれていない", name)
+			}
+			got, err := os.ReadFile(domainTestdataPath(name))
+			if err != nil {
+				t.Fatalf("写しが読めない: %v", err)
+			}
+			if string(got) != string(want) {
+				t.Errorf("写しが本物と違う: %s", domainTestdataPath(name))
+			}
+		})
+	}
+}
+
+// domainTestdataPath は domain のテストが読む写しの場所を返す。
+func domainTestdataPath(name string) string {
+	if name == "config.default.json" {
+		return filepath.Join("..", "internal", "domain", "testdata", "golden-config-merge", name)
+	}
+	return filepath.Join("..", "internal", "domain", "testdata", name)
+}
+
+// TestInitZshIsAShim は入口が中身を持たないことを確かめる。
+//
+// 関数の定義がここに戻ってくると、バイナリを更新しても古い関数が動き続ける
+// (機能を足すたびに入口の書き換えが要る、という元の問題に逆戻りする)。
+func TestInitZshIsAShim(t *testing.T) {
+	t.Parallel()
+
+	b, ok := assets.Read("init.zsh")
+	if !ok {
+		t.Fatal("init.zsh が埋め込まれていない")
+	}
+	body := string(b)
+
+	if !strings.Contains(body, `mdev" init zsh`) {
+		t.Errorf("mdev init zsh を呼んでいない:\n%s", body)
+	}
+	// mdev は PATH 上のバイナリが受ける。同名の関数を定義してはいけない。
+	for _, forbidden := range []string{"mdev()", "dev()", "zs()", "_conductor_session_name"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("入口が %q を定義している:\n%s", forbidden, body)
+		}
+	}
+	if strings.Contains(body, "/scripts/") {
+		t.Errorf("Shell スクリプトを呼んでいる:\n%s", body)
 	}
 }

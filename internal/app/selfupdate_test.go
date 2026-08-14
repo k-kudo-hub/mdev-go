@@ -167,69 +167,6 @@ func TestSelfUpdateReportsReplaceFailure(t *testing.T) {
 	}
 }
 
-// TestUpdateStopsAfterSelfReplace は自バイナリを置き換えたら conductor の
-// 資産更新へ進まないことを確かめる。
-//
-// 今動いているプロセスは置き換える前の中身のままなので、続けると古い実装で
-// 資産を入れ直すことになる。実行し直してもらえば、すべてを新しい mdev が行う。
-func TestUpdateStopsAfterSelfReplace(t *testing.T) {
-	t.Parallel()
-	skipUnsupportedPlatform(t)
-
-	updater, _, _, installer, _ := newUpdater()
-	self, _, _ := newSelfUpdater("v0.10.0")
-	updater.Self = self
-	var out strings.Builder
-
-	if err := updater.Update(&out); err != nil {
-		t.Fatalf("Update() = %v", err)
-	}
-	if installer.calls != 0 {
-		t.Errorf("conductor 資産の更新が %d 回走りました, want 0", installer.calls)
-	}
-	if !strings.Contains(out.String(), "もう一度 `mdev update` を実行") {
-		t.Errorf("実行し直しの案内がありません:\n%s", out.String())
-	}
-}
-
-// TestUpdateContinuesWhenSelfIsCurrent は自バイナリが最新なら従来どおり
-// conductor の資産を更新することを確かめる。
-//
-// **よくある経路の動きを変えない。** 自己更新を足したせいで毎回 2 回
-// 実行させられるようでは使いにくい。
-func TestUpdateContinuesWhenSelfIsCurrent(t *testing.T) {
-	t.Parallel()
-	skipUnsupportedPlatform(t)
-
-	updater, _, _, installer, _ := newUpdater()
-	self, _, _ := newSelfUpdater("v0.11.0") // 配布元と同じ = 最新
-	updater.Self = self
-	var out strings.Builder
-
-	if err := updater.Update(&out); err != nil {
-		t.Fatalf("Update() = %v", err)
-	}
-	if installer.calls != 1 {
-		t.Errorf("conductor 資産の更新 = %d 回, want 1", installer.calls)
-	}
-}
-
-// TestUpdateWithoutSelfUpdater は自己更新を組み込まない構成でも動くことを
-// 確かめる(従来どおりの動き)。
-func TestUpdateWithoutSelfUpdater(t *testing.T) {
-	t.Parallel()
-
-	updater, _, _, installer, _ := newUpdater()
-	updater.Self = nil
-
-	if err := updater.Update(&strings.Builder{}); err != nil {
-		t.Fatalf("Update() = %v", err)
-	}
-	if installer.calls != 1 {
-		t.Errorf("conductor 資産の更新 = %d 回, want 1", installer.calls)
-	}
-}
-
 // TestSelfUpdateContinuesWhenNotStarted は **置き換えに踏み切る前の失敗で
 // 全体を止めない** ことを確かめる(契約)。
 //
@@ -260,13 +197,16 @@ func TestSelfUpdateContinuesWhenNotStarted(t *testing.T) {
 	}
 }
 
-// TestUpdateContinuesWhenSelfUpdateUnavailable は 404 のときに conductor の
-// 資産更新まで進むことを確かめる(契約の全体像)。
+// TestUpdateContinuesWhenSelfUpdateUnavailable は 404 のときに設定の
+// 貼り直しまで進むことを確かめる(契約の全体像)。
 func TestUpdateContinuesWhenSelfUpdateUnavailable(t *testing.T) {
 	t.Parallel()
 	skipUnsupportedPlatform(t)
 
-	updater, _, _, installer, _ := newUpdater()
+	updater, state, remote, installer := newUpdater()
+	// 資産の側には新しい版がある、という状況にする。
+	state.version = "v0.1.0"
+	remote.tag = "v0.2.0"
 	self, _, replacer := newSelfUpdater("v0.10.0")
 	replacer.err = fmt.Errorf("%w: 状態コード 404", app.ErrSelfUpdateNotStarted)
 	updater.Self = self
@@ -276,7 +216,7 @@ func TestUpdateContinuesWhenSelfUpdateUnavailable(t *testing.T) {
 		t.Fatalf("Update() = %v", err)
 	}
 	if installer.calls != 1 {
-		t.Errorf("conductor 資産の更新 = %d 回, want 1", installer.calls)
+		t.Errorf("設定の貼り直し = %d 回, want 1", installer.calls)
 	}
 }
 
@@ -289,7 +229,7 @@ func TestSelfUpdateStopsWhenReplaceFailed(t *testing.T) {
 	t.Parallel()
 	skipUnsupportedPlatform(t)
 
-	updater, _, _, installer, _ := newUpdater()
+	updater, _, _, installer := newUpdater()
 	self, _, replacer := newSelfUpdater("v0.10.0")
 	replacer.err = errors.New("バイナリの置き換えに失敗しました")
 	updater.Self = self
@@ -298,7 +238,7 @@ func TestSelfUpdateStopsWhenReplaceFailed(t *testing.T) {
 		t.Fatal("踏み切った後の失敗で止まりませんでした")
 	}
 	if installer.calls != 0 {
-		t.Errorf("conductor 資産の更新が %d 回走りました, want 0", installer.calls)
+		t.Errorf("設定の貼り直しが %d 回走りました, want 0", installer.calls)
 	}
 }
 

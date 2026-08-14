@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -54,6 +55,18 @@ type Deps struct {
 	Agent AgentService
 	// Assets は同梱資産の解決。
 	Assets AssetService
+	// Install は設置と移行のユースケース。
+	Install InstallService
+	// Uninstall は取り除きのユースケース。
+	Uninstall UninstallService
+	// Session はセッションの起動のユースケース。
+	Session SessionService
+	// Test は worktree を隔離環境で試すユースケース。
+	Test TestService
+	// Getwd は今の作業ディレクトリを返す。テストで差し替える。
+	Getwd func() string
+	// Now は今の時刻を返す。`--new` の時刻に使う。テストで差し替える。
+	Now func() time.Time
 	// Version はビルド時に焼き込まれた mdev の版である。
 	//
 	// 焼き込まれていない場合は空になる(参照は VersionOrDev を通す)。
@@ -77,8 +90,17 @@ func (d Deps) VersionOrDev() string {
 // NewRootCommand は mdev のルートコマンドを組み立てる。
 func NewRootCommand(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mdev",
+		Use:   "mdev [セッション名]",
 		Short: "Zellij 上のコーディングエージェントセッションを統括する",
+		Long: "引数なしで実行すると、今いるディレクトリのセッションへ入る(無ければ作る)。\n" +
+			"同じディレクトリから何度実行しても同じセッションへ戻るため、時刻付きの\n" +
+			"セッションが積み上がらない。--new を付けると時刻付きで新しく作る。",
+		// `mdev <名前>` を受けるため引数を許す。既知の子コマンドは
+		// cobra がそちらへ渡す。
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			return runSession(deps, c, args)
+		},
 		// hook から呼ばれる経路でエラー時に使い方が出力されると、
 		// Claude Code の画面が読みづらくなるため抑止する。
 		SilenceUsage:  true,
@@ -96,6 +118,14 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newCodexCommand(deps))
 	cmd.AddCommand(newAgentCommand(deps))
 	cmd.AddCommand(newAssetsCommand(deps))
+	cmd.AddCommand(newInstallCommand(deps))
+	cmd.AddCommand(newUninstallCommand(deps))
+	cmd.AddCommand(newInitCommand())
+	cmd.AddCommand(newDevCommand(deps))
+	cmd.AddCommand(newAttachCommand(deps))
+	cmd.AddCommand(newPendingCommand(deps))
+	cmd.AddCommand(newTestCommand(deps))
+	cmd.Flags().Bool(newFlag, false, "時刻付きのセッションを新しく作る")
 	return cmd
 }
 

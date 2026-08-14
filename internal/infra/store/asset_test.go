@@ -125,6 +125,7 @@ func TestAssetNames(t *testing.T) {
 	want := []string{
 		"config.default.json",
 		"hooks.json",
+		"init.zsh",
 		"layouts/dev.kdl",
 		"layouts/multi.kdl",
 	}

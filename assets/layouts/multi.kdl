@@ -14,30 +14,30 @@ layout {
                     pane {
                         name "Dashboard"
                         command "bash"
-                        args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane dashboard"
+                        args "-c" "\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane dashboard"
                     }
                     pane {
                         name "Waiting"
                         command "bash"
-                        args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane waiting"
+                        args "-c" "\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane waiting"
                     }
                 }
                 pane {
                     name "Done"
                     command "bash"
-                    args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane done"
+                    args "-c" "\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane done"
                 }
                 pane {
                     name "News"
                     command "bash"
-                    args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane news"
+                    args "-c" "\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane news"
                 }
             }
             pane size="30%" {
                 name "TaskCreate"
                 focus true
                 command "bash"
-                args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev pane task-create"
+                args "-c" "\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" pane task-create"
             }
         }
     }

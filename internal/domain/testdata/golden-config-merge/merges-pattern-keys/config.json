@@ -1,0 +1,13 @@
+{
+  "agents": {
+    "codex": {
+      "command": "codex",
+      "detection": "screen",
+      "patterns": {
+        "blocked": [
+          "^自前$"
+        ]
+      }
+    }
+  }
+}

@@ -2,42 +2,47 @@ package app
 
 import (
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
-// TarballURLEnv は取得元の tarball を差し替える環境変数である。
-// 現行 update.sh と同じく、テストが file:// を指すために使う。
-const TarballURLEnv = "CONDUCTOR_TARBALL_URL"
-
-// ReleaseInstaller は指定した版のソースを取ってきて install を実行する。
+// Updater は `mdev update` の本体である。
 //
-// 取得・展開・install の実行をまとめて 1 つの操作にしているのは、途中の
-// 生成物(一時ディレクトリ)が呼び出し側から見えても使い道が無く、後始末の
-// 責任だけが増えるためである。
-type ReleaseInstaller interface {
-	// Install は tarballURL からソースを取り、その中の install.sh を実行する。
-	//
-	// version と repoURL は install.sh へ環境変数として渡す。tarball には
-	// .git が入っていないため、install.sh が自分で版と更新元を知る手段が
-	// これしかない。
-	Install(tarballURL, version, repoURL string) error
-}
-
-// Updater は `mdev update` の本体である(現行 update.sh 相当)。
+// # ADR D4-2 の完成形
+//
+// 更新は 2 段で終わる。
+//
+//  1. 新しいバイナリを取得して自分自身を置き換える(SelfUpdater)
+//  2. **新しいバイナリの** `mdev install` が設定を貼り直す(版が上がって
+//     いるときだけ。既に最新なら何もしない)
+//
+// 2 段目を今のプロセスで続けないのが要点である。今動いているのは置き換える
+// **前**の中身なので、そのまま設定を貼ると古い実装で貼ることになる。置き換え
+// たらそこで終え、実行し直しを案内する。次の `mdev update` は新しいバイナリが
+// 受け、自分は最新なので 1 段目を飛ばして install だけを行う。
+//
+// # 旧フローの廃止
+//
+// 以前は conductor の tarball を取ってきて中の install.sh を bash で走らせて
+// いた。REPO_URL が mdev-go を指すようになった時点でその tarball には
+// install.sh も scripts/ も無く、フローとして成立しない(ADR D8 の移行)。
+// 資産は既にバイナリへ埋め込んであるので、貼り直しは自分の install で足りる。
 type Updater struct {
-	State     UpdateStateStore
-	Remote    RemoteTagLister
-	Installer ReleaseInstaller
+	State UpdateStateStore
+	// Remote はリモートの最新タグを引く。
+	Remote RemoteTagLister
 	// Self は mdev 自身のバイナリを新しくする。
 	//
-	// nil のときは自バイナリの更新を行わない(conductor 資産の更新だけを
-	// 行う従来の動きになる)。
+	// nil のときは自バイナリの更新を行わない(版の確認だけを行う)。
 	Self *SelfUpdater
-	// Getenv は環境変数を読む(tarball の差し替え用)。
-	Getenv func(string) string
+	// Install は設定を貼り直すユースケースである。
+	Install InstallRunner
+}
+
+// InstallRunner は設置と移行を行う。実体は Installer。
+type InstallRunner interface {
+	Install(out io.Writer) error
 }
 
 // Update は最新版へ更新する。進み具合は out へ書く。
@@ -45,59 +50,55 @@ type Updater struct {
 // 更新確認(UpdateChecker)と違い、こちらは利用者が明示的に叩くコマンドなので
 // 失敗は必ず error として返す。黙って何もしないと、更新したつもりで古いまま
 // 使い続けることになる。
-//
-// 既に最新の場合は「既に最新です」と出して error は返さない。
 func (u *Updater) Update(out io.Writer) error {
-	// **先に自分自身を新しくする。** 古い mdev で conductor の資産を
-	// 入れ直しても、次に mdev を動かした瞬間にまた古い実装が動く。
-	// 置き換えたらそこで終える(SelfUpdateResult.Replaced のコメントを参照)。
 	if u.Self != nil {
 		result, err := u.Self.Run(out)
 		if err != nil {
 			return err
 		}
 		if result.Replaced {
+			// 置き換えた。ここから先は新しいバイナリの仕事である。
+			// 実行し直せば、そちらがこの関数の続き(設定の貼り直し)を行う。
 			return nil
 		}
 	}
 
-	repoURL := u.State.RepoURL()
-	if repoURL == "" {
-		return errors.New("更新元リポジトリが不明です。リポジトリで install.sh を再実行してください。")
+	// **最新かどうかを確かめてから貼り直す。** 既に最新なら何もしない。
+	// 毎回 install を通すと、更新のつもりで叩いたコマンドが設置の処理を
+	// 走らせることになり、「何もしなくてよかった」ことが分からない。
+	latest, err := u.latestTag()
+	if err != nil {
+		return err
 	}
-	slug, ok := domain.RepoSlug(repoURL)
-	if !ok {
-		return fmt.Errorf("リポジトリURLを解釈できません: %s", repoURL)
-	}
-
-	write(out, domain.RenderUpdateChecking())
-	latest, ok := u.Remote.LatestTag(repoURL)
-	if !ok {
-		return errors.New("最新バージョンの取得に失敗しました。")
-	}
-
 	current := domain.NormalizeVersion(u.State.InstalledVersion())
 	if !domain.VersionGreater(latest, current) {
 		write(out, domain.RenderUpdateUpToDate(current))
 		return nil
 	}
-	write(out, domain.RenderUpdateStarting(current, latest))
 
-	if err := u.Installer.Install(u.tarballURL(slug, latest), latest, repoURL); err != nil {
+	write(out, domain.RenderUpdateStarting(current, latest))
+	if err := u.Install.Install(out); err != nil {
 		return err
 	}
 	write(out, domain.RenderUpdateDone(latest))
 	return nil
 }
 
-// tarballURL は取得元の URL を決める。環境変数があればそちらを優先する。
-func (u *Updater) tarballURL(slug, tag string) string {
-	if u.Getenv != nil {
-		if override := u.Getenv(TarballURLEnv); override != "" {
-			return override
-		}
+// latestTag はリモートの最新タグを引く。
+//
+// **引けなければエラーにする。** 更新確認(check-update)はセッションの起動前に
+// 走るので黙って諦めるが、こちらは利用者が明示的に叩くコマンドである。黙って
+// 「何もありませんでした」と答えると、更新したつもりで古いまま使い続ける。
+func (u *Updater) latestTag() (string, error) {
+	repoURL := u.State.RepoURL()
+	if repoURL == "" {
+		return "", errors.New("更新元リポジトリが不明です。`mdev install` を実行してください。")
 	}
-	return domain.TarballURL(slug, tag)
+	latest, ok := u.Remote.LatestTag(repoURL)
+	if !ok {
+		return "", errors.New("最新バージョンの取得に失敗しました。")
+	}
+	return latest, nil
 }
 
 // write は出力先へ書く。書けない状況で追加の報告先は無いため失敗は無視する。

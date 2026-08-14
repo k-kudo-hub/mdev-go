@@ -1,0 +1,9 @@
+{
+  "agents": {
+    "codex": {
+      "detection": "screen",
+      "patterns": {},
+      "command": "codex"
+    }
+  }
+}
