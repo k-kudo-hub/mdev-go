@@ -101,3 +101,36 @@ func (s *PendingStore) FindByTab(session, tab string) (domain.Pending, bool, err
 	}
 	return pending, true, nil
 }
+
+// RemoveSession は session の pending をまとめて消す。
+//
+// 落ちたセッションを作り直すときに使う。そのセッションより前の記録なので、
+// 残すとレジストリが復元したタスクを古い行が覆い隠す。
+func (s *PendingStore) RemoveSession(session string) error {
+	dir := filepath.Join(s.root, session)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("pending %s の削除に失敗しました: %w", dir, err)
+	}
+	return nil
+}
+
+// RemoveAll はすべての pending を消す(`mdev pending clear`)。
+//
+// 置き場所そのものは残す。消してしまうと、次に書く側が作り直すまでの間、
+// 「mdev が管理しているセッション」の判定(SessionTraceStore)が揺れる。
+func (s *PendingStore) RemoveAll() error {
+	entries, err := os.ReadDir(s.root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("pending %s の読み取りに失敗しました: %w", s.root, err)
+	}
+	for _, entry := range entries {
+		path := filepath.Join(s.root, entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("pending %s の削除に失敗しました: %w", path, err)
+		}
+	}
+	return nil
+}

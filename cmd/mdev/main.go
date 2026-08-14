@@ -249,6 +249,27 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	updateState := store.NewUpdateStateStore(conductorHome)
 	remoteTags := git.NewRemoteTags()
 
+	// セッションの掃除と更新確認は、掃除コマンドとセッション起動の両方が使う。
+	sessionCleaner := &app.SessionCleaner{
+		Sessions:  zellijSessions,
+		Clients:   zellijSessions,
+		Remover:   zellijSessions,
+		Processes: processes,
+		Signaler:  processes,
+		Sockets:   zellijSessions,
+		Traces: store.NewSessionTraceStore(
+			store.RegistryRoot(conductorHome), store.PendingRoot(home)),
+		Sleeper: sleeper,
+		Clock:   clock,
+	}
+	updateChecker := &app.UpdateChecker{
+		Config:      paneStore,
+		State:       updateState,
+		Remote:      remoteTags,
+		Clock:       clock,
+		MdevVersion: version,
+	}
+
 	return cli.Deps{
 		Hooks:        hooks,
 		Record:       record,
@@ -265,18 +286,29 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			},
 			Getenv: getenv,
 		},
-		SessionClean: &app.SessionCleaner{
-			Sessions:  zellijSessions,
-			Clients:   zellijSessions,
-			Remover:   zellijSessions,
-			Processes: processes,
-			Signaler:  processes,
-			Sockets:   zellijSessions,
-			Traces: store.NewSessionTraceStore(
-				store.RegistryRoot(conductorHome), store.PendingRoot(home)),
-			Sleeper: sleeper,
+		SessionClean: sessionCleaner,
+		Session: &app.SessionLauncher{
+			Sessions: zellijSessions,
+			Remover:  zellijSessions,
+			Cleaner:  sessionCleaner,
+			News:     &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
+			Update:   updateChecker,
+			Pending:  pending,
+			Files:    files,
+			Execer:   shell.NewExecer(),
+			// 選択の入力は端末から読み、一覧は標準エラーへ出す。
+			Chooser: shell.NewChooser(os.Stdin, os.Stderr),
+			Paths:   installPaths,
 			Clock:   clock,
 		},
+		Getwd: func() string {
+			dir, err := os.Getwd()
+			if err != nil {
+				return "."
+			}
+			return dir
+		},
+		Now:    clock.Now,
 		News:   &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
 		Codex:  codexNotifier,
 		Agent:  &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},
@@ -293,13 +325,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Files:       files,
 			PendingRoot: store.PendingRoot(home),
 		},
-		UpdateCheck: &app.UpdateChecker{
-			Config:      paneStore,
-			State:       updateState,
-			Remote:      remoteTags,
-			Clock:       clock,
-			MdevVersion: version,
-		},
-		Getenv: getenv,
+		UpdateCheck: updateChecker,
+		Getenv:      getenv,
 	}
 }
