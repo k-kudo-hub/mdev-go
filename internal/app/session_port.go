@@ -1,5 +1,7 @@
 package app
 
+import "github.com/k-kudo-hub/mdev-go/internal/domain"
+
 // セッションの掃除(現行の蓄積対策)が必要とする port。
 //
 // zellij の CLI とプロセス操作は、どれも「返らなくなる」ことがある。
@@ -80,4 +82,15 @@ type SessionSocketLocator interface {
 type SessionTraceChecker interface {
 	// HasTrace は mdev がそのセッションを扱った跡があるかを返す。
 	HasTrace(session string) bool
+}
+
+// SelfReplacer は mdev 自身のバイナリを新しいものへ置き換える。
+//
+// 取得したバイナリの SHA-256 を配布元の checksums.txt と照合し、
+// **合わなければ必ず失敗させること。** 素性の分からないものを実行ファイル
+// として置くわけにはいかない。
+//
+// 戻り値は置き換えたバイナリのパスである。
+type SelfReplacer interface {
+	Replace(plan domain.SelfUpdatePlan) (path string, err error)
 }

@@ -17,6 +17,12 @@ const (
 	versionFileName = "VERSION"
 	// updateCacheFileName は 1 日 1 回の更新確認の結果を残すファイル。
 	updateCacheFileName = ".update-check"
+	// mdevUpdateCacheFileName は mdev 本体の更新確認の結果を残すファイル。
+	//
+	// conductor の資産とは版が別々に進むので、キャッシュも分ける。同じ
+	// ファイルに 2 つの版を書くと、現行の 1 行 2 列の形を壊すことになり、
+	// 古い mdev や install.sh が読めなくなる。
+	mdevUpdateCacheFileName = ".update-check-mdev"
 )
 
 // UpdateStateStore は CONDUCTOR_HOME 直下の状態ファイルを読み書きする
@@ -51,7 +57,13 @@ func (s *UpdateStateStore) InstalledVersion() string {
 // 1 行目を空白で 2 つに割る。読めない・形が違う場合は空を返し、
 // 呼び出し側が引き直す。
 func (s *UpdateStateStore) ReadUpdateCache() (string, string) {
-	line := s.readTrimmed(updateCacheFileName)
+	return splitCacheLine(s.readTrimmed(updateCacheFileName))
+}
+
+// splitCacheLine は 1 行目を空白で 2 つに割る。形が違えば空を返し、
+// 呼び出し側が引き直す。
+func splitCacheLine(contents string) (string, string) {
+	line := contents
 	if i := strings.IndexByte(line, '\n'); i >= 0 {
 		line = line[:i]
 	}
@@ -64,11 +76,26 @@ func (s *UpdateStateStore) ReadUpdateCache() (string, string) {
 
 // WriteUpdateCache は .update-check を書き換える。
 func (s *UpdateStateStore) WriteUpdateCache(date, tag string) error {
-	path := filepath.Join(s.conductorHome, updateCacheFileName)
+	return s.writeCache(updateCacheFileName, date, tag)
+}
+
+// writeCache は conductorHome 直下のキャッシュを 1 行で書き換える。
+func (s *UpdateStateStore) writeCache(name, date, tag string) error {
 	if err := os.MkdirAll(s.conductorHome, dirPerm); err != nil {
 		return fmt.Errorf("ディレクトリ %s の作成に失敗しました: %w", s.conductorHome, err)
 	}
-	return writeFileAtomic(path, []byte(date+" "+tag+"\n"))
+	return writeFileAtomic(filepath.Join(s.conductorHome, name), []byte(date+" "+tag+"\n"))
+}
+
+// ReadMdevUpdateCache は mdev 本体の確認結果を (日付, タグ) として返す。
+// 形式は conductor 側と同じ 1 行 2 列である。
+func (s *UpdateStateStore) ReadMdevUpdateCache() (string, string) {
+	return splitCacheLine(s.readTrimmed(mdevUpdateCacheFileName))
+}
+
+// WriteMdevUpdateCache は mdev 本体の確認結果を書き換える。
+func (s *UpdateStateStore) WriteMdevUpdateCache(date, tag string) error {
+	return s.writeCache(mdevUpdateCacheFileName, date, tag)
 }
 
 // readTrimmed は conductorHome 直下のファイルを読んで前後の空白を落とす。

@@ -19,6 +19,18 @@ GO_TEST_COVERAGE := go run github.com/vladopajic/go-test-coverage/v2@$(GO_TEST_C
 COVERAGE_PROFILE := cover.out
 BIN := bin/mdev
 
+# バイナリへ焼き込む版。タグが無い作業ツリーでは `v0.10.0-3-g1a2b3c4` の
+# ような値になり、どのコミットのバイナリかが後から分かる。
+#
+# リリースのビルドは .github/workflows/tag.yml がタグそのものを渡すため、
+# ここの値は使われない。
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
+# -trimpath はビルドしたマシンの絶対パスをバイナリから除く(再現性と、
+# パスに含まれる利用者名を配布物へ載せないため)。-s -w はデバッグ情報を
+# 落としてサイズを減らす。-X で版を焼く先は main パッケージの version 変数。
+GOFLAGS_BUILD := -trimpath -ldflags "-s -w -X main.version=$(VERSION)"
+
 # install の配置先。現行 Shell 版と同じ `${CONDUCTOR_HOME:-$HOME/.claude-conductor}`
 # の規約に合わせる(`?=` なので環境変数の CONDUCTOR_HOME が優先される)。
 # hooks が呼ぶコマンドも同じ規約で書かれているため、CONDUCTOR_HOME を
@@ -63,13 +75,13 @@ cover: test ## カバレッジ閾値を検査する
 
 .PHONY: build
 build: ## バイナリをビルドする
-	go build -o $(BIN) ./cmd/mdev
+	go build $(GOFLAGS_BUILD) -o $(BIN) ./cmd/mdev
 
 .PHONY: install
 install: ## $(CONDUCTOR_HOME)/bin/mdev へビルドして配置する
 	@mkdir -p "$(CONDUCTOR_HOME)/bin"
-	go build -o "$(CONDUCTOR_HOME)/bin/mdev" ./cmd/mdev
-	@echo "installed: $(CONDUCTOR_HOME)/bin/mdev"
+	go build $(GOFLAGS_BUILD) -o "$(CONDUCTOR_HOME)/bin/mdev" ./cmd/mdev
+	@echo "installed: $(CONDUCTOR_HOME)/bin/mdev ($(VERSION))"
 
 .PHONY: check
 check: fmt-check lint arch cover build ## CI と同じ検査を一括実行する

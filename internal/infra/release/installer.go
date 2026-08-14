@@ -71,10 +71,8 @@ var _ app.ReleaseInstaller = (*Installer)(nil)
 // 試せるようにするためである(現行版も CONDUCTOR_TARBALL_URL に file:// を
 // 渡す形でテストしている)。
 func NewInstaller() *Installer {
-	transport := &http.Transport{}
-	transport.RegisterProtocol("file", http.NewFileTransport(http.Dir("/")))
 	return &Installer{
-		client:   &http.Client{Timeout: downloadTimeout, Transport: transport},
+		client:   newHTTPClient(),
 		maxBytes: maxDownloadBytes,
 		run:      runInstallScript,
 	}
@@ -110,29 +108,19 @@ func (i *Installer) Install(tarballURL, version, repoURL string) error {
 
 // download は URL の内容を dest へ保存する。
 func (i *Installer) download(url, dest string) error {
-	resp, err := i.client.Get(url) //nolint:noctx // Client.Timeout で上限を持つ
+	resp, err := getOK(i.client, url)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("状態コード %d", resp.StatusCode)
-	}
 
 	file, err := os.Create(dest) //nolint:gosec // 自分で作った一時ディレクトリ配下
 	if err != nil {
 		return err
 	}
 	defer func() { _ = file.Close() }()
-	// 上限より 1 バイト多く読み、超えたかどうかを書き込み量で判定する。
-	// ちょうど上限で切ると、切り詰めた内容を正常な tarball として
-	// 展開しにかかってしまう。
-	written, err := io.Copy(file, io.LimitReader(resp.Body, i.maxBytes+1))
-	if err != nil {
+	if _, err := copyLimited(file, resp.Body, i.maxBytes); err != nil {
 		return err
-	}
-	if written > i.maxBytes {
-		return fmt.Errorf("受け取った内容が上限 %d バイトを超えました", i.maxBytes)
 	}
 	return file.Close()
 }

@@ -31,6 +31,11 @@ type Updater struct {
 	State     UpdateStateStore
 	Remote    RemoteTagLister
 	Installer ReleaseInstaller
+	// Self は mdev 自身のバイナリを新しくする。
+	//
+	// nil のときは自バイナリの更新を行わない(conductor 資産の更新だけを
+	// 行う従来の動きになる)。
+	Self *SelfUpdater
 	// Getenv は環境変数を読む(tarball の差し替え用)。
 	Getenv func(string) string
 }
@@ -43,6 +48,19 @@ type Updater struct {
 //
 // 既に最新の場合は「既に最新です」と出して error は返さない。
 func (u *Updater) Update(out io.Writer) error {
+	// **先に自分自身を新しくする。** 古い mdev で conductor の資産を
+	// 入れ直しても、次に mdev を動かした瞬間にまた古い実装が動く。
+	// 置き換えたらそこで終える(SelfUpdateResult.Replaced のコメントを参照)。
+	if u.Self != nil {
+		result, err := u.Self.Run(out)
+		if err != nil {
+			return err
+		}
+		if result.Replaced {
+			return nil
+		}
+	}
+
 	repoURL := u.State.RepoURL()
 	if repoURL == "" {
 		return errors.New("更新元リポジトリが不明です。リポジトリで install.sh を再実行してください。")

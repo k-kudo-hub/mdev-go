@@ -46,8 +46,24 @@ type Deps struct {
 	UpdateCheck UpdateCheckService
 	// SessionClean は溜まったセッションと残骸を片付けるユースケース。
 	SessionClean SessionCleanService
+	// Version はビルド時に焼き込まれた mdev の版である。
+	//
+	// 焼き込まれていない場合は空になる(参照は VersionOrDev を通す)。
+	Version string
 	// Getenv は環境変数を読む。テストで差し替える。
 	Getenv func(string) string
+}
+
+// VersionOrDev は焼き込まれた版を返す。空なら DevVersion を返す。
+//
+// 空を「版が無い」ではなく「開発中のビルド」として扱うのは、ldflags を
+// 付け忘れたビルドと `go build` そのままのビルドを区別する意味が無いためで
+// ある。どちらも配布物ではないので、自己更新は行わない。
+func (d Deps) VersionOrDev() string {
+	if d.Version == "" {
+		return DevVersion
+	}
+	return d.Version
 }
 
 // NewRootCommand は mdev のルートコマンドを組み立てる。
@@ -64,6 +80,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newRecordCommand(deps))
 	cmd.AddCommand(newHooksCommand(deps))
 	cmd.AddCommand(newPaneCommand(deps))
+	cmd.AddCommand(newVersionCommand(deps))
 	cmd.AddCommand(newSessionsCommand(deps))
 	cmd.AddCommand(newUpdateCommand(deps))
 	cmd.AddCommand(newCheckUpdateCommand(deps))

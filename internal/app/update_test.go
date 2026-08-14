@@ -3,6 +3,7 @@ package app_test
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
@@ -17,12 +18,26 @@ type fakeUpdateState struct {
 	cacheTag  string
 	writeErr  error
 
+	// mdev 本体ぶんのキャッシュ(conductor とは別枠)。
+	mdevCacheDate string
+	mdevCacheTag  string
+
 	written []string
 }
 
 func (f *fakeUpdateState) RepoURL() string                   { return f.repoURL }
 func (f *fakeUpdateState) InstalledVersion() string          { return f.version }
 func (f *fakeUpdateState) ReadUpdateCache() (string, string) { return f.cacheDate, f.cacheTag }
+
+func (f *fakeUpdateState) ReadMdevUpdateCache() (string, string) {
+	return f.mdevCacheDate, f.mdevCacheTag
+}
+
+func (f *fakeUpdateState) WriteMdevUpdateCache(date, tag string) error {
+	f.written = append(f.written, "mdev "+date+" "+tag)
+	f.mdevCacheDate, f.mdevCacheTag = date, tag
+	return nil
+}
 
 func (f *fakeUpdateState) WriteUpdateCache(date, tag string) error {
 	f.written = append(f.written, date+" "+tag)
@@ -34,7 +49,11 @@ func (f *fakeUpdateState) WriteUpdateCache(date, tag string) error {
 }
 
 // fakeRemoteTags はリモートのタグ引きの代役である。
+//
+// 記録を mutex で守るのは、更新確認が conductor と mdev のタグを **並行して**
+// 引くためである(port の RemoteTagLister のコメントを参照)。
 type fakeRemoteTags struct {
+	mu    sync.Mutex
 	tag   string
 	ok    bool
 	calls int
@@ -42,6 +61,8 @@ type fakeRemoteTags struct {
 }
 
 func (f *fakeRemoteTags) LatestTag(url string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	f.urls = append(f.urls, url)
 	return f.tag, f.ok
@@ -213,5 +234,130 @@ func TestUpdateCheckIgnoresUnreadableConfig(t *testing.T) {
 
 	if got := checker.Check(true); got != wantNotice {
 		t.Errorf("案内 = %q, want %q", got, wantNotice)
+	}
+}
+
+// TestUpdateCheckShowsMdevNotice は mdev 本体の新しい版を conductor とは
+// 別の行で案内することを確かめる。
+//
+// 両者は別々に版が進むため、どちらが古いのかが分からないと
+// `mdev update` で何が変わるのかが読めない。
+func TestUpdateCheckShowsMdevNotice(t *testing.T) {
+	t.Parallel()
+	skipUnsupportedPlatform(t)
+
+	checker, _, state, _ := newUpdateChecker()
+	// conductor は最新、mdev 本体だけが古い(配布元の最新は v0.2.0)。
+	state.version = "v0.2.0"
+	checker.MdevVersion = "v0.1.0"
+
+	got := checker.Check(true)
+	if !strings.Contains(got, "mdev 本体の新しいバージョン v0.2.0") {
+		t.Errorf("mdev の案内がありません:\n%s", got)
+	}
+	if strings.Contains(got, "📦 新しいバージョン") {
+		t.Errorf("conductor は最新なのに案内が出ています:\n%s", got)
+	}
+}
+
+// TestUpdateCheckShowsBothNotices は両方古いときに 2 本とも出すことを
+// 確かめる。
+func TestUpdateCheckShowsBothNotices(t *testing.T) {
+	t.Parallel()
+	skipUnsupportedPlatform(t)
+
+	checker, _, state, _ := newUpdateChecker()
+	state.version = "v0.1.0"
+	checker.MdevVersion = "v0.1.0"
+
+	got := checker.Check(true)
+	if !strings.Contains(got, "📦 新しいバージョン v0.2.0") {
+		t.Errorf("conductor の案内がありません:\n%s", got)
+	}
+	if !strings.Contains(got, "mdev 本体の新しいバージョン v0.2.0") {
+		t.Errorf("mdev の案内がありません:\n%s", got)
+	}
+}
+
+// TestUpdateCheckSkipsMdevNoticeForDevBuild は版を焼き込んでいない
+// ビルドで mdev の案内を出さないことを確かめる。
+//
+// 手元で組んだものを「古い」と言っても意味が無く、自己更新も行わない。
+func TestUpdateCheckSkipsMdevNoticeForDevBuild(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"", "dev"} {
+		checker, _, state, _ := newUpdateChecker()
+		state.version = "v0.2.0"
+		checker.MdevVersion = version
+
+		if got := checker.Check(true); strings.Contains(got, "mdev 本体") {
+			t.Errorf("版 %q で案内が出ています:\n%s", version, got)
+		}
+	}
+}
+
+// TestUpdateCheckUsesSeparateMdevCache は mdev のキャッシュが conductor と
+// 別枠であることを確かめる。
+//
+// 同じファイルに 2 つの版を書くと現行の 1 行 2 列の形が壊れ、古い mdev や
+// install.sh が読めなくなる。
+func TestUpdateCheckUsesSeparateMdevCache(t *testing.T) {
+	t.Parallel()
+	skipUnsupportedPlatform(t)
+
+	checker, _, state, remote := newUpdateChecker()
+	checker.MdevVersion = "v0.10.0"
+	// 今日ぶんの mdev のキャッシュだけがある。
+	state.mdevCacheDate, state.mdevCacheTag = "2026-08-08", "v0.9.0"
+	state.cacheDate, state.cacheTag = "2026-08-08", "v0.2.0"
+
+	got := checker.Check(false)
+	if remote.calls != 0 {
+		t.Errorf("キャッシュがあるのに %d 回引きました", remote.calls)
+	}
+	// mdev はキャッシュの v0.9.0 と比べるので案内は出ない(v0.10.0 が新しい)。
+	if strings.Contains(got, "mdev 本体") {
+		t.Errorf("mdev のキャッシュが使われていません:\n%s", got)
+	}
+	// conductor 側はキャッシュの v0.2.0 で案内が出る。
+	if !strings.Contains(got, "📦 新しいバージョン v0.2.0") {
+		t.Errorf("conductor の案内がありません:\n%s", got)
+	}
+}
+
+// TestUpdateCheckSkipsEverythingWithoutRepoURL は更新元が未設定なら
+// **一切ネットワークへ出ない** ことを確かめる。
+//
+// この確認はセッションの起動前に走る。設定していない利用者に、mdev 本体の
+// 都合でネットワークを使わせない(現行版からの約束)。
+func TestUpdateCheckSkipsEverythingWithoutRepoURL(t *testing.T) {
+	t.Parallel()
+
+	checker, _, state, remote := newUpdateChecker()
+	state.repoURL = ""
+	checker.MdevVersion = "v0.1.0"
+
+	if got := checker.Check(true); got != "" {
+		t.Errorf("案内 = %q, want 空", got)
+	}
+	if remote.calls != 0 {
+		t.Errorf("配布元へ %d 回問い合わせました, want 0", remote.calls)
+	}
+}
+
+// TestUpdateCheckSkipsMdevNoticeForDescribeBuild は git describe 形式の
+// ビルドで mdev の案内を出さないことを確かめる。
+//
+// これは手元で組んだバイナリであり、自己更新の対象でもない。
+func TestUpdateCheckSkipsMdevNoticeForDescribeBuild(t *testing.T) {
+	t.Parallel()
+
+	checker, _, state, _ := newUpdateChecker()
+	state.version = "v0.2.0"
+	checker.MdevVersion = "v0.1.0-3-gabc1234"
+
+	if got := checker.Check(true); strings.Contains(got, "mdev 本体") {
+		t.Errorf("案内が出ています:\n%s", got)
 	}
 }

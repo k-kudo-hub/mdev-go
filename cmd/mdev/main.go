@@ -21,6 +21,13 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/tui"
 )
 
+// version はビルド時に焼き込む mdev の版である。
+//
+// リリースのビルドは `-ldflags "-X main.version=<タグ>"` で埋める
+// (.github/workflows/tag.yml と Makefile)。手元の `go build` では既定の
+// まま残り、自己更新はそれを見て何もしない。
+var version = "dev"
+
 func main() {
 	// pending は CONDUCTOR_HOME に依存せずホーム直下に固定する。hook は
 	// conductor の外にある Claude Code セッションでも発火するためである。
@@ -30,7 +37,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	os.Exit(cli.Execute(buildDeps(home, os.Getenv, infra.SystemClock{}, infra.SystemClock{})))
+	deps := buildDeps(home, os.Getenv, infra.SystemClock{}, infra.SystemClock{})
+	deps.Version = version
+	os.Exit(cli.Execute(deps))
 }
 
 // buildDeps は実行時の依存一式を組み立てる(ADR-0002 の DI はここだけ)。
@@ -222,7 +231,12 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			State:     updateState,
 			Remote:    remoteTags,
 			Installer: release.NewInstaller(),
-			Getenv:    getenv,
+			Self: &app.SelfUpdater{
+				Version:  version,
+				Remote:   remoteTags,
+				Replacer: release.NewSelfReplacer(),
+			},
+			Getenv: getenv,
 		},
 		SessionClean: &app.SessionCleaner{
 			Sessions:  zellijSessions,
@@ -237,10 +251,11 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			Clock:   clock,
 		},
 		UpdateCheck: &app.UpdateChecker{
-			Config: paneStore,
-			State:  updateState,
-			Remote: remoteTags,
-			Clock:  clock,
+			Config:      paneStore,
+			State:       updateState,
+			Remote:      remoteTags,
+			Clock:       clock,
+			MdevVersion: version,
 		},
 		Getenv: getenv,
 	}
