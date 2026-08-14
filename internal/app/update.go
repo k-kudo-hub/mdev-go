@@ -1,6 +1,8 @@
 package app
 
 import (
+	"sync"
+
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
 
@@ -61,29 +63,82 @@ func (c *UpdateChecker) Check(force bool) string {
 	if config.UpdateCheck.Disabled {
 		return ""
 	}
-	today := c.Clock.Now().Format(domain.DailyFileDateLayout)
-
-	// conductor の資産と mdev 本体は別々に版が進む。どちらが古いのかが
-	// 分からないと、`mdev update` で何が変わるのかが読めない。
-	return c.conductorNotice(today, force) + c.mdevNotice(today, force)
-}
-
-// conductorNotice は conductor 資産の新しい版があれば案内を返す。
-func (c *UpdateChecker) conductorNotice(today string, force bool) string {
+	// **更新元が分からなければ何も確かめない。** ここで外へ出ないことは
+	// 現行版からの約束である(セッションの起動前に走るため)。mdev 本体の
+	// 確認も同じ扱いにする。設定していない利用者に、こちらの都合で
+	// ネットワークを使わせない。
 	repoURL := c.State.RepoURL()
 	if repoURL == "" {
 		return ""
 	}
 
-	latest := c.cachedTag(today, force)
+	today := c.Clock.Now().Format(domain.DailyFileDateLayout)
+	conductorTag, mdevTag := c.latestTags(today, force, repoURL)
+
+	// conductor の資産と mdev 本体は別々に版が進む。どちらが古いのかが
+	// 分からないと、`mdev update` で何が変わるのかが読めない。
+	return c.conductorNotice(today, conductorTag) + c.mdevNotice(today, mdevTag)
+}
+
+// latestTags は必要な最新タグを引く。
+//
+// **2 つの問い合わせを同時に出す。** どちらも ls-remote で、届かない相手には
+// 数秒待つ。順に撃つとその待ちが 2 回ぶん積み上がり、セッションの起動が
+// そのぶん遅れる。キャッシュが使える側は撃たない。
+//
+// 引けなかった場合は空文字を返し、その側の案内は出ない。
+func (c *UpdateChecker) latestTags(today string, force bool, repoURL string) (string, string) {
+	conductor := c.cachedTag(c.State.ReadUpdateCache, today, force)
+	mdev := ""
+	if c.mdevSupported() {
+		mdev = c.cachedTag(c.State.ReadMdevUpdateCache, today, force)
+	}
+
+	var wg sync.WaitGroup
+	if conductor == "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if tag, ok := c.Remote.LatestTag(repoURL); ok {
+				conductor = tag
+			}
+		}()
+	}
+	// mdev 本体は配布物のある環境でだけ確かめる。
+	if mdev == "" && c.mdevSupported() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if tag, ok := c.Remote.LatestTag(mdevRepoURL()); ok {
+				mdev = tag
+			}
+		}()
+	}
+	wg.Wait()
+	return conductor, mdev
+}
+
+// mdevSupported は mdev 本体の更新を扱える状況かを返す。
+//
+// 版を焼き込んでいないビルドでは何もしない。手元で組んだものを「古い」と
+// 言っても意味が無く、自己更新も行わない。配布物の無い環境も同じである。
+func (c *UpdateChecker) mdevSupported() bool {
+	if domain.IsDevBuild(c.MdevVersion) {
+		return false
+	}
+	_, supported := domain.CurrentAssetName()
+	return supported
+}
+
+// conductorNotice は conductor 資産の新しい版があれば案内を返す。
+// 引き直したタグはここで書き戻す(キャッシュの書き込みは 1 か所に集める)。
+func (c *UpdateChecker) conductorNotice(today, latest string) string {
 	if latest == "" {
-		tag, ok := c.Remote.LatestTag(repoURL)
-		if !ok {
-			return ""
-		}
+		return ""
+	}
+	if date, tag := c.State.ReadUpdateCache(); date != today || tag != latest {
 		// 書き込みに失敗しても案内は出す(次回また引き直すだけ)。
-		_ = c.State.WriteUpdateCache(today, tag)
-		latest = tag
+		_ = c.State.WriteUpdateCache(today, latest)
 	}
 
 	current := domain.NormalizeVersion(c.State.InstalledVersion())
@@ -94,52 +149,29 @@ func (c *UpdateChecker) conductorNotice(today string, force bool) string {
 }
 
 // mdevNotice は mdev 本体の新しい版があれば案内を返す。
-//
-// 版を焼き込んでいないビルドでは何も出さない。手元で組んだものを
-// 「古い」と言っても意味が無く、自己更新も行わないためである。
-func (c *UpdateChecker) mdevNotice(today string, force bool) string {
-	if domain.DecideSelfUpdate(c.MdevVersion, "v0.0.0") == domain.SelfUpdateSkipDev {
+func (c *UpdateChecker) mdevNotice(today, latest string) string {
+	if latest == "" || !c.mdevSupported() {
 		return ""
 	}
-	if _, supported := domain.CurrentAssetName(); !supported {
-		// 配布物が無い環境では更新できないので案内もしない。
-		return ""
-	}
-
-	latest := c.cachedMdevTag(today, force)
-	if latest == "" {
-		tag, ok := c.Remote.LatestTag(mdevRepoURL())
-		if !ok {
-			return ""
-		}
-		_ = c.State.WriteMdevUpdateCache(today, tag)
-		latest = tag
+	if date, tag := c.State.ReadMdevUpdateCache(); date != today || tag != latest {
+		_ = c.State.WriteMdevUpdateCache(today, latest)
 	}
 
 	if domain.DecideSelfUpdate(c.MdevVersion, latest) != domain.SelfUpdateNeeded {
 		return ""
 	}
-	return domain.RenderMdevUpdateNotice(latest, domain.NormalizeVersion(c.MdevVersion))
-}
-
-// cachedMdevTag は今日ぶんの mdev のキャッシュがあればそのタグを返す。
-func (c *UpdateChecker) cachedMdevTag(today string, force bool) string {
-	if force {
-		return ""
-	}
-	date, tag := c.State.ReadMdevUpdateCache()
-	if date != today {
-		return ""
-	}
-	return tag
+	return domain.RenderMdevUpdateNotice(latest, c.MdevVersion)
 }
 
 // cachedTag は今日ぶんのキャッシュがあればそのタグを返す。
-func (c *UpdateChecker) cachedTag(today string, force bool) string {
+//
+// read には conductor 用と mdev 用のどちらかを渡す。両者は別のファイルを
+// 読むだけで、判断の仕方は同じである。
+func (c *UpdateChecker) cachedTag(read func() (string, string), today string, force bool) string {
 	if force {
 		return ""
 	}
-	date, tag := c.State.ReadUpdateCache()
+	date, tag := read()
 	if date != today {
 		return ""
 	}

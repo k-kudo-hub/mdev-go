@@ -1,11 +1,24 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
+
+// DevVersion はビルド時に版を焼き込まなかった場合の値である。
+// cli は app にしか依存できない(ADR-0002)ため、境界に出す名前は app が持つ。
+const DevVersion = domain.DevVersion
+
+// ErrSelfUpdateNotStarted は **置き換えに踏み切る前** に失敗したことを表す。
+//
+// 取得できなかった・照合が合わなかった、といった失敗がこれに当たる。
+// この時点では実行ファイルに一切触れていないので、呼び出し側は警告を出して
+// 先(conductor 資産の更新)へ進んでよい。自分を新しくできないことと、
+// 資産を新しくできることは別の話である。
+var ErrSelfUpdateNotStarted = errors.New("自バイナリの置き換えは開始していません")
 
 // SelfUpdater は mdev 自身のバイナリを新しくする。
 //
@@ -42,6 +55,13 @@ type SelfUpdateResult struct {
 //
 // 進み具合は out へ書く。
 func (u *SelfUpdater) Run(out io.Writer) (SelfUpdateResult, error) {
+	// **配布元へ問い合わせる前に**、そもそも更新してよいビルドかを見る。
+	// 手元で組んだバイナリのために ls-remote を撃つ意味は無い。
+	if domain.IsDevBuild(u.Version) {
+		write(out, domain.RenderSelfUpdateSkipped(u.Version))
+		return SelfUpdateResult{}, nil
+	}
+
 	assetName, supported := domain.CurrentAssetName()
 	if !supported {
 		// 配布しているのは darwin の 2 種類だけである。
@@ -53,20 +73,21 @@ func (u *SelfUpdater) Run(out io.Writer) (SelfUpdateResult, error) {
 		// 配布元へ届かないだけなので黙って飛ばす。
 		return SelfUpdateResult{}, nil
 	}
-
-	switch domain.DecideSelfUpdate(u.Version, latest) {
-	case domain.SelfUpdateSkipDev:
-		write(out, domain.RenderSelfUpdateSkipped(u.Version))
+	if domain.DecideSelfUpdate(u.Version, latest) != domain.SelfUpdateNeeded {
 		return SelfUpdateResult{}, nil
-	case domain.SelfUpdateUpToDate:
-		return SelfUpdateResult{}, nil
-	case domain.SelfUpdateNeeded:
 	}
 
 	write(out, domain.RenderSelfUpdateStarting(u.Version, latest))
 	plan := domain.BuildSelfUpdatePlan(domain.MdevRepoSlug, u.Version, latest, assetName)
 	path, err := u.Replacer.Replace(plan)
 	if err != nil {
+		// **踏み切る前の失敗は止めない。** 取得できなかっただけで実行ファイルは
+		// 無傷なので、続けて conductor の資産を更新してよい。踏み切った後
+		// (置き換えの最中)の失敗だけを error にする。
+		if errors.Is(err, ErrSelfUpdateNotStarted) {
+			write(out, domain.RenderSelfUpdateUnavailable(err))
+			return SelfUpdateResult{}, nil
+		}
 		return SelfUpdateResult{}, fmt.Errorf("mdev 自身の更新に失敗しました: %w", err)
 	}
 	write(out, domain.RenderSelfUpdateReplaced(latest, path))

@@ -13,8 +13,26 @@ import (
 const MdevRepoSlug = "k-kudo-hub/mdev-go"
 
 // DevVersion はビルド時に版を焼き込まなかった場合の値である。
-// cli 側にも同じ値の定数があるが、domain は他層へ依存できないため持つ。
 const DevVersion = "dev"
+
+// IsDevBuild は自己更新の対象にしてはいけないビルドかを返す。
+//
+// **厳密な semver タグ(vX.Y.Z)で無いものはすべて対象外にする。**
+// リリースのバイナリだけが `v0.11.0` のような値を名乗る。それ以外は
+// 手元で組んだものである。
+//
+//	dev                      … ldflags 無しの go build
+//	v0.10.0-3-gabc1234       … make build(git describe)
+//	v0.10.0-3-gabc1234-dirty … 未コミットの変更を含むビルド
+//	abc1234                  … タグの無いリポジトリでの git describe
+//
+// 以前は「読めない版は v0.0.0 として扱う」正規化に任せていたため、
+// git describe 形式が v0.0.0 に潰れて **常に更新対象**になっていた。
+// 検証中のローカルビルドが黙って配布物へ置き換わることになる。
+func IsDevBuild(version string) bool {
+	_, ok := ParseVersion(version)
+	return !ok
+}
 
 // ChecksumsAssetName はリリースに添付される SHA-256 の一覧である。
 const ChecksumsAssetName = "checksums.txt"
@@ -53,13 +71,13 @@ const (
 //
 // 配布元の版が読めない場合も何もしない(比較できないため)。
 func DecideSelfUpdate(current, latest string) SelfUpdateDecision {
-	if strings.TrimSpace(current) == "" || strings.TrimSpace(current) == DevVersion {
+	if IsDevBuild(current) {
 		return SelfUpdateSkipDev
 	}
 	if _, ok := ParseVersion(latest); !ok {
 		return SelfUpdateUpToDate
 	}
-	if VersionGreater(latest, NormalizeVersion(current)) {
+	if VersionGreater(latest, current) {
 		return SelfUpdateNeeded
 	}
 	return SelfUpdateUpToDate
@@ -132,6 +150,17 @@ const sha256HexLength = 64
 func RenderSelfUpdateSkipped(current string) string {
 	return ansiYellow + "警告: mdev 自身は更新しません(版が焼き込まれていないビルドです: " +
 		current + ")" + ansiReset + "\n"
+}
+
+// RenderSelfUpdateUnavailable は自バイナリを更新できなかったときの断りを返す。
+//
+// 実行ファイルには触れていないので、これは失敗ではなく「今回は見送った」で
+// ある。続けて conductor の資産は更新される。黙って飛ばすと、更新されたと
+// 思い込まれる。
+func RenderSelfUpdateUnavailable(err error) string {
+	return ansiYellow + "警告: mdev 自身は更新できませんでした(" + err.Error() + ")" +
+		ansiReset + "\n" +
+		"   バイナリはそのままです。conductor の資産の更新は続けます。\n"
 }
 
 // RenderSelfUpdateStarting は自バイナリの更新に取りかかるときの 1 行を返す。

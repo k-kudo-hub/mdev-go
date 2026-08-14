@@ -4,14 +4,15 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/k-kudo-hub/mdev-go/internal/app"
 )
 
 // DevVersion はビルド時に版を焼き込まなかった場合の値である。
 //
-// `go build` をそのまま実行した開発中のバイナリがこれになる。自己更新は
-// この値のとき何もしない(比較する土台が無く、手元のビルドを配布物で
-// 上書きしてしまうため)。
-const DevVersion = "dev"
+// 値の出どころは domain で、app が境界へ出している。ここで別に定義すると
+// 3 か所で同じ文字列を持つことになり、片方だけ変えても気づけない。
+const DevVersion = app.DevVersion
 
 // newVersionCommand は `mdev version` を組み立てる。
 //

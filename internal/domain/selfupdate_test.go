@@ -31,9 +31,23 @@ func TestDecideSelfUpdate(t *testing.T) {
 		{name: "配布元の版が読めない", current: "v0.10.0", latest: "", want: domain.SelfUpdateUpToDate},
 		{name: "配布元の版が壊れている", current: "v0.10.0", latest: "latest", want: domain.SelfUpdateUpToDate},
 		{
-			// git describe が付ける形。数値の比較は先頭 3 つで行われる。
-			name: "作業ツリーのビルドでも比較はできる", current: "v0.10.1-1-gabc-dirty", latest: "v0.11.0",
-			want: domain.SelfUpdateNeeded,
+			// **git describe の形は手元のビルドである。** 以前は「読めない版は
+			// v0.0.0」の正規化に任せていたため、常に更新対象になり、検証中の
+			// ローカルビルドが黙って配布物へ置き換わっていた。
+			name: "make build のビルドは対象外", current: "v0.10.1-1-gabc1234", latest: "v0.11.0",
+			want: domain.SelfUpdateSkipDev,
+		},
+		{
+			name: "未コミットの変更を含むビルドも対象外", current: "v0.10.1-1-gabc1234-dirty", latest: "v0.11.0",
+			want: domain.SelfUpdateSkipDev,
+		},
+		{
+			name: "タグの無いリポジトリのビルドも対象外", current: "abc1234", latest: "v0.11.0",
+			want: domain.SelfUpdateSkipDev,
+		},
+		{
+			name: "プレリリースも対象外", current: "v0.11.0-rc1", latest: "v0.12.0",
+			want: domain.SelfUpdateSkipDev,
 		},
 	}
 
@@ -134,6 +148,41 @@ func TestFindChecksumRejectsMalformed(t *testing.T) {
 			t.Parallel()
 			if _, ok := domain.FindChecksum(tt.contents, "mdev_darwin_arm64"); ok {
 				t.Error("壊れた行を拾いました")
+			}
+		})
+	}
+}
+
+// TestIsDevBuild は自己更新の対象にしてよいビルドの見分け方を固定する。
+//
+// **リリースのバイナリだけが厳密な semver タグを名乗る。** ここを緩めると、
+// 手元で組んだバイナリが配布物で上書きされ、検証中の変更が黙って消える。
+func TestIsDevBuild(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		// リリースのバイナリ(自己更新の対象)。
+		{version: "v0.11.0", want: false},
+		{version: "v1.2.3", want: false},
+		{version: "0.11.0", want: false},
+		// 手元のビルド(対象外)。
+		{version: "dev", want: true},
+		{version: "", want: true},
+		{version: "v0.10.1-1-gabc1234", want: true},
+		{version: "v0.10.1-1-gabc1234-dirty", want: true},
+		{version: "abc1234", want: true},
+		{version: "v0.11.0-rc1", want: true},
+		{version: "v0.11", want: true},
+		{version: "latest", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			t.Parallel()
+			if got := domain.IsDevBuild(tt.version); got != tt.want {
+				t.Errorf("IsDevBuild(%q) = %v, want %v", tt.version, got, tt.want)
 			}
 		})
 	}

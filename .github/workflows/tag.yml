@@ -60,8 +60,11 @@ jobs:
             go.mod
             Makefile
 
-      - name: Create and push tag
-        id: tag
+      # **タグを作る前にバイナリを組む。** ここで失敗したらタグ自体が
+      # 作られないので、「タグはあるがリリースが無い」状態が残らない。
+      # 版はこれから打つタグを先に計算して焼き込む。
+      - name: Build release binaries
+        id: build
         if: steps.bump.outputs.skip != 'true'
         env:
           LEVEL: ${{ steps.bump.outputs.level }}
@@ -69,21 +72,12 @@ jobs:
           current=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           next=$(bash scripts/bump-version.sh "$LEVEL" "$current")
           echo "Bumping $current -> $next ($LEVEL)"
-          git tag "$next"
-          git push origin "$next"
           echo "next=$next" >> "$GITHUB_OUTPUT"
 
-      # `mdev update` はここで添付したバイナリを取って自分を置き換える。
-      # 版はタグそのものを焼き込む(mdev version が名乗る値になる)。
-      - name: Build release binaries
-        if: steps.bump.outputs.skip != 'true'
-        env:
-          NEXT: ${{ steps.tag.outputs.next }}
-        run: |
           mkdir -p dist
           for arch in arm64 amd64; do
             CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
-              go build -trimpath -ldflags "-s -w -X main.version=$NEXT" \
+              go build -trimpath -ldflags "-s -w -X main.version=$next" \
               -o "dist/mdev_darwin_$arch" ./cmd/mdev
           done
           # 自己更新は取得したバイナリをこの一覧と突き合わせてから置き換える。
@@ -91,15 +85,21 @@ jobs:
           (cd dist && shasum -a 256 mdev_darwin_* > checksums.txt)
           ls -l dist
 
-      # **リリースの作成とアセットの添付を 1 コマンドで行う**(ADR-0004 D2)。
-      # 分けると、リリースはあるがバイナリがまだ無い時間帯ができ、その間に
-      # `mdev update` が走ると取得に失敗する。
+      # タグを打った直後にリリースを作る。**作成と添付は 1 コマンド**で行う
+      # (ADR-0004 D2)。分けると「リリースはあるがバイナリがまだ無い」時間帯が
+      # でき、その間に走った update が失敗する。
+      #
+      # タグの push からリリース作成までの数秒だけは「タグはあるがリリースが
+      # 無い」状態になるが、update はリリースを見に行くので取りこぼしにはならず、
+      # 次に叩けば拾える。
       - name: Create release with binaries
         if: steps.bump.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          NEXT: ${{ steps.tag.outputs.next }}
+          NEXT: ${{ steps.build.outputs.next }}
         run: |
+          git tag "$NEXT"
+          git push origin "$NEXT"
           gh release create "$NEXT" --generate-notes --title "$NEXT" dist/*
 
       # 添付が欠けたまま緑になると、次の `mdev update` が失敗して初めて
@@ -108,7 +108,7 @@ jobs:
         if: steps.bump.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          NEXT: ${{ steps.tag.outputs.next }}
+          NEXT: ${{ steps.build.outputs.next }}
         run: |
           assets=$(gh release view "$NEXT" --json assets --jq '[.assets[].name] | sort | join(",")')
           echo "assets: $assets"

@@ -3,6 +3,7 @@ package app_test
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
@@ -48,7 +49,11 @@ func (f *fakeUpdateState) WriteUpdateCache(date, tag string) error {
 }
 
 // fakeRemoteTags はリモートのタグ引きの代役である。
+//
+// 記録を mutex で守るのは、更新確認が conductor と mdev のタグを **並行して**
+// 引くためである(port の RemoteTagLister のコメントを参照)。
 type fakeRemoteTags struct {
+	mu    sync.Mutex
 	tag   string
 	ok    bool
 	calls int
@@ -56,6 +61,8 @@ type fakeRemoteTags struct {
 }
 
 func (f *fakeRemoteTags) LatestTag(url string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	f.urls = append(f.urls, url)
 	return f.tag, f.ok
@@ -316,5 +323,41 @@ func TestUpdateCheckUsesSeparateMdevCache(t *testing.T) {
 	// conductor 側はキャッシュの v0.2.0 で案内が出る。
 	if !strings.Contains(got, "📦 新しいバージョン v0.2.0") {
 		t.Errorf("conductor の案内がありません:\n%s", got)
+	}
+}
+
+// TestUpdateCheckSkipsEverythingWithoutRepoURL は更新元が未設定なら
+// **一切ネットワークへ出ない** ことを確かめる。
+//
+// この確認はセッションの起動前に走る。設定していない利用者に、mdev 本体の
+// 都合でネットワークを使わせない(現行版からの約束)。
+func TestUpdateCheckSkipsEverythingWithoutRepoURL(t *testing.T) {
+	t.Parallel()
+
+	checker, _, state, remote := newUpdateChecker()
+	state.repoURL = ""
+	checker.MdevVersion = "v0.1.0"
+
+	if got := checker.Check(true); got != "" {
+		t.Errorf("案内 = %q, want 空", got)
+	}
+	if remote.calls != 0 {
+		t.Errorf("配布元へ %d 回問い合わせました, want 0", remote.calls)
+	}
+}
+
+// TestUpdateCheckSkipsMdevNoticeForDescribeBuild は git describe 形式の
+// ビルドで mdev の案内を出さないことを確かめる。
+//
+// これは手元で組んだバイナリであり、自己更新の対象でもない。
+func TestUpdateCheckSkipsMdevNoticeForDescribeBuild(t *testing.T) {
+	t.Parallel()
+
+	checker, _, state, _ := newUpdateChecker()
+	state.version = "v0.2.0"
+	checker.MdevVersion = "v0.1.0-3-gabc1234"
+
+	if got := checker.Check(true); strings.Contains(got, "mdev 本体") {
+		t.Errorf("案内が出ています:\n%s", got)
 	}
 }
