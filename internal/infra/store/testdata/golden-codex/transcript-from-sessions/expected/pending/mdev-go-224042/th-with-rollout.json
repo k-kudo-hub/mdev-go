@@ -4,7 +4,7 @@
   "claude_session_id": "th-with-rollout",
   "message": "終わりました",
   "event": "Stop",
-  "time": "14:48:35",
+  "time": "15:06:03",
   "agent": "codex",
   "transcript_path": "{{CODEX_HOME}}/sessions/2026/08/14/rollout-2026-08-14T10-00-00-th-with-rollout.jsonl",
   "dir": "/Users/dev/work/repo"

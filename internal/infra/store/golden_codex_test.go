@@ -38,6 +38,14 @@ const goldenCodexDir = "testdata/golden-codex"
 // scripts/gen-golden-codex.sh と同じ文字列を使う。
 const codexHomePlaceholder = "{{CODEX_HOME}}"
 
+// codexManifestName は現行版が書いたファイルの一覧である。
+//
+// これが fixture の存在確認を兼ねる。現行版が 1 つもファイルを書かない case では
+// expected/ が空になり、git は空ディレクトリを追跡しないため、fixture が手元に
+// しか無い状態のまま「期待値がある」と誤認しうる(実際、この一覧を置く前は
+// 手元で通って CI だけが落ちた)。空の一覧も 1 つのファイルなので git に載る。
+const codexManifestName = "files.txt"
+
 // goldenCodexCase は 1 件の入力定義。cases.json の 1 要素に対応する。
 type goldenCodexCase struct {
 	Name        string            `json:"name"`
@@ -75,9 +83,7 @@ func TestGoldenCodexNotifyCompatibilityWithShellVersion(t *testing.T) {
 			t.Parallel()
 
 			expected := filepath.Join(goldenCodexDir, tc.Name, "expected")
-			if _, err := os.Stat(filepath.Dir(expected)); err != nil {
-				t.Fatalf("fixture が無い(scripts/gen-golden-codex.sh で生成する): %v", err)
-			}
+			manifest := readCodexManifest(t, expected)
 
 			root := t.TempDir()
 			pendingRoot := filepath.Join(root, "pending")
@@ -113,6 +119,9 @@ func TestGoldenCodexNotifyCompatibilityWithShellVersion(t *testing.T) {
 			compareCodexTree(t, filepath.Join(expected, "pending"), pendingRoot, codexHome)
 			compareCodexTree(t,
 				filepath.Join(expected, "registry"), store.RegistryRoot(conductorHome), codexHome)
+			// 一覧と fixture の実体が食い違っていないかも見る。生成のし直しで
+			// ファイルが減ったのに一覧だけ残る、という取りこぼしを防ぐ。
+			checkCodexManifest(t, expected, manifest)
 		})
 	}
 }
@@ -290,4 +299,41 @@ func jsonKeyOrder(t *testing.T, body string) []string {
 		}
 	}
 	return keys
+}
+
+// readCodexManifest は現行版が書いたファイルの一覧を読む。
+//
+// 一覧そのものが fixture の存在確認である。無ければ生成されていない。
+func readCodexManifest(t *testing.T, expected string) []string {
+	t.Helper()
+
+	b, err := os.ReadFile(filepath.Join(expected, codexManifestName))
+	if err != nil {
+		t.Fatalf("fixture が無い(scripts/gen-golden-codex.sh で生成する): %v", err)
+	}
+	var names []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// checkCodexManifest は一覧と fixture の実体が一致することを確かめる。
+func checkCodexManifest(t *testing.T, expected string, manifest []string) {
+	t.Helper()
+
+	var found []string
+	for _, dir := range []string{"pending", "registry"} {
+		for rel := range readCodexTree(t, filepath.Join(expected, dir)) {
+			found = append(found, filepath.ToSlash(filepath.Join(dir, rel)))
+		}
+	}
+	sort.Strings(found)
+	if !reflect.DeepEqual(found, manifest) {
+		t.Errorf("fixture の実体と %s が食い違う\n  実体: %v\n  一覧: %v",
+			codexManifestName, found, manifest)
+	}
 }

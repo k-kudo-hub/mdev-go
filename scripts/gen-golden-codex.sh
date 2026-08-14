@@ -16,6 +16,11 @@
 #
 # 会話ログの絶対パスは実行のたびに変わるので、保存時に {{CODEX_HOME}} へ
 # 置き換える(Go 側も同じ置換を行う)。
+#
+# 各 case には必ず expected/files.txt を書く。現行版が 1 つもファイルを書かない
+# case(ターン完了以外の通知など)では expected/ が空になり、git は空ディレクトリを
+# 追跡しないため、fixture が手元にしか存在しない状態になる。空の一覧という
+# 「何も書かなかった」を表すファイルを置くことで、その期待値も git に載る。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -105,6 +110,10 @@ run_case() {
             replace_in_file "$f" "$sandbox/codex" "$PLACEHOLDER"
         done < <(find "$out_dir/$name" -type f -print0)
     done
+
+    # 書かれたファイルの一覧。何も書かれなかった case では空になる。
+    (cd "$out_dir" && find . -type f -not -name files.txt \
+        | sed 's|^\./||' | LC_ALL=C sort) > "$out_dir/files.txt"
 }
 
 count=0
