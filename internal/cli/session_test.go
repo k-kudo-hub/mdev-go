@@ -175,3 +175,72 @@ func TestInitZshCommand(t *testing.T) {
 		t.Errorf("mdev を定義している:\n%s", stdout)
 	}
 }
+
+// TestRootRejectsCommandTypo は既知のコマンドと 1 文字違いの引数を
+// 差し戻すことを確かめる。
+//
+// 未知の引数をセッション名として扱う以上、`mdev instal` が黙って
+// 「instal というセッションを開く」に化ける。
+func TestRootRejectsCommandTypo(t *testing.T) {
+	t.Parallel()
+
+	for _, typo := range []string{"instal", "uninstal", "nws", "tes", "updat"} {
+		t.Run(typo, func(t *testing.T) {
+			t.Parallel()
+			svc := &fakeSessionService{}
+			code, _, stderr := runCLIWithOut(t, sessionDeps(svc), typo)
+
+			if code != exitError {
+				t.Errorf("終了コード = %d, want %d", code, exitError)
+			}
+			if len(svc.requests) != 0 {
+				t.Errorf("セッションを開いた: %+v", svc.requests)
+			}
+			// 本当にその名前で開きたい場合の逃げ道を案内する。
+			if !strings.Contains(stderr, "mdev attach "+typo) {
+				t.Errorf("逃げ道が案内されていない: %q", stderr)
+			}
+		})
+	}
+}
+
+// TestRootOpensIntentionalNames は打ち間違いでない名前をそのまま開くことを
+// 確かめる。
+//
+// **差し戻しを広げすぎないことが要点である。** 承認済みの「未知引数 =
+// セッション名」が使えなくなっては本末転倒になる。
+func TestRootOpensIntentionalNames(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"my-project", "api-server", "fix-bug", "レビュー", "newsroom"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc := &fakeSessionService{}
+			code, stdout, stderr := runCLIWithOut(t, sessionDeps(svc), name)
+
+			if code != exitOK {
+				t.Errorf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
+			}
+			if len(svc.requests) != 1 || svc.requests[0].Name != name {
+				t.Fatalf("指定 = %+v", svc.requests)
+			}
+			// 開く直前に名前を出す。差し戻しをすり抜けた打ち間違いでも
+			// 画面に出ていれば気づける。
+			if !strings.Contains(stdout, name) {
+				t.Errorf("開く名前を出していない: %q", stdout)
+			}
+		})
+	}
+}
+
+// TestRootWithoutArgsSaysNothing は引数なしのときに余計な行を出さないことを
+// 確かめる。一番よく使う経路なので静かにする。
+func TestRootWithoutArgsSaysNothing(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeSessionService{}
+	_, stdout, _ := runCLIWithOut(t, sessionDeps(svc))
+	if stdout != "" {
+		t.Errorf("標準出力 = %q, want 空", stdout)
+	}
+}

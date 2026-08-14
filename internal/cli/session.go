@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"io"
 
 	"github.com/spf13/cobra"
@@ -29,6 +30,13 @@ const newFlag = "new"
 // `mdev install` のような既知の名前はそちらへ渡る。**その結果、子コマンドと
 // 同じ名前のセッションは名前で開けない**(`mdev news` は News の取得になる)。
 // 起動の入口を 1 語で保つほうの利益が上回ると判断した。
+//
+// ただし、既知のコマンド名と 1 文字しか違わない引数は差し戻す。`mdev instal`
+// が黙って「instal というセッションを開く」に化けるのを防ぐためで、本当に
+// その名前で開きたい場合の逃げ道(`mdev attach <名前>`)も一緒に案内する。
+//
+// 開く直前には名前を 1 行出す。差し戻しをすり抜けた打ち間違いでも、画面に
+// 出ていれば気づける。
 func runSession(deps Deps, cmd *cobra.Command, args []string) error {
 	force, err := cmd.Flags().GetBool(newFlag)
 	if err != nil {
@@ -37,11 +45,29 @@ func runSession(deps Deps, cmd *cobra.Command, args []string) error {
 	req := app.SessionRequest{Dir: deps.Getwd()}
 	if len(args) > 0 {
 		req.Name = args[0]
+		if nearest, ok := app.NearestCommand(req.Name, commandNames(cmd)); ok {
+			return errors.New(app.RenderCommandTypo(req.Name, nearest))
+		}
+		// 出力先へ書けない状況で追加の報告先は無いため失敗は無視する。
+		_, _ = io.WriteString(cmd.OutOrStdout(), app.RenderOpeningSession(req.Name))
 	}
 	if force {
 		req.Stamp = deps.Now().Format(app.NewSessionTimeLayout)
 	}
 	return deps.Session.Start(cmd.OutOrStdout(), req)
+}
+
+// commandNames はルートが持つ子コマンドの名前を返す。
+//
+// 一覧を手で持たないのは、コマンドを足したときに差し戻しの対象が自動で
+// 増えるようにするためである。手書きの表は必ず古くなる。
+func commandNames(cmd *cobra.Command) []string {
+	children := cmd.Commands()
+	names := make([]string, 0, len(children))
+	for _, child := range children {
+		names = append(names, child.Name())
+	}
+	return names
 }
 
 // newDevCommand は `mdev dev` を組み立てる(エイリアス dev)。

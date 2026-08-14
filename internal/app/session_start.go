@@ -82,6 +82,24 @@ type SessionRequest struct {
 	Stamp string
 }
 
+// NearestCommand は name に最も近い既知のコマンド名を返す。
+//
+// 打ち間違いの差し戻しに使う。cli は domain へ依存できないため、境界として
+// ここを通す(ADR-0002)。
+func NearestCommand(name string, commands []string) (string, bool) {
+	return domain.NearestCommand(name, commands)
+}
+
+// RenderCommandTypo は打ち間違いと思われる引数への案内を返す。
+func RenderCommandTypo(name, nearest string) string {
+	return domain.RenderCommandTypo(name, nearest)
+}
+
+// RenderOpeningSession はセッションを開くことを伝える 1 行を返す。
+func RenderOpeningSession(name string) string {
+	return domain.RenderOpeningSession(name)
+}
+
 // InitZshScript はシェルへ読み込ませる定義である(`mdev init zsh` の出力)。
 const InitZshScript = domain.InitZshScript
 
