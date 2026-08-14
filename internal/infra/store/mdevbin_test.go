@@ -80,13 +80,23 @@ func TestMdevBinaryStore(t *testing.T) {
 	}
 }
 
+// TestMdevBinaryStoreTaskControlCommand は操作バーの起動コマンドを確かめる。
+//
+// 起動するのは **今動いているバイナリ**である(ADR D7-2)。ここでは実際に
+// テストの実行ファイルの場所が入るため、値そのものではなく形を見る。
+// 差し替えたときの中身は taskcontrol_test.go が固定している。
 func TestMdevBinaryStoreTaskControlCommand(t *testing.T) {
 	t.Parallel()
 
-	// タブ名の手前に `--` を置く。`-` で始まる名前をフラグと解釈させないため。
 	s := store.NewMdevBinaryStore("/ch")
-	want := []string{filepath.Join("/ch", "bin", "mdev"), "pane", "task-control", "--", "-wip"}
-	if got := s.TaskControlCommand("-wip"); !reflect.DeepEqual(got, want) {
-		t.Errorf("TaskControlCommand() = %v, want %v", got, want)
+	got := s.TaskControlCommand("-wip")
+
+	// タブ名の手前に `--` を置く。`-` で始まる名前をフラグと解釈させないため。
+	want := []string{"pane", "task-control", "--", "-wip"}
+	if !reflect.DeepEqual(got[1:], want) {
+		t.Errorf("TaskControlCommand() = %v, want [<バイナリ> %v]", got, want)
+	}
+	if got[0] == "" {
+		t.Error("バイナリのパスが空")
 	}
 }

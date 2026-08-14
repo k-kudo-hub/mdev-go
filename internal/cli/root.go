@@ -61,6 +61,8 @@ type Deps struct {
 	Uninstall UninstallService
 	// Session はセッションの起動のユースケース。
 	Session SessionService
+	// Test は worktree を隔離環境で試すユースケース。
+	Test TestService
 	// Getwd は今の作業ディレクトリを返す。テストで差し替える。
 	Getwd func() string
 	// Now は今の時刻を返す。`--new` の時刻に使う。テストで差し替える。
@@ -122,6 +124,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cmd.AddCommand(newDevCommand(deps))
 	cmd.AddCommand(newAttachCommand(deps))
 	cmd.AddCommand(newPendingCommand(deps))
+	cmd.AddCommand(newTestCommand(deps))
 	cmd.Flags().Bool(newFlag, false, "時刻付きのセッションを新しく作る")
 	return cmd
 }

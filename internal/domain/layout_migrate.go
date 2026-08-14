@@ -46,6 +46,10 @@ var layoutPanePattern = regexp.MustCompile(
 var layoutBareMdev = regexp.MustCompile(
 	`([^\\"'\s]` + layoutPathChars + `)/bin/mdev ((?:pane [a-z-]+|agent launch))`)
 
+// conductorBinPattern は CONDUCTOR_HOME 経由の mdev 呼び出しを捉える。
+// テスト用のレイアウトで絶対パスへ差し替えるために使う。
+var conductorBinPattern = regexp.MustCompile(`(?:\\")?\$\{CONDUCTOR_HOME:-[^}]*\}/bin/mdev(?:\\")?`)
+
 // LayoutChange は書き換えた呼び出し 1 件である。表示用に使う。
 type LayoutChange struct {
 	Before string

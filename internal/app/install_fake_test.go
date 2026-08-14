@@ -131,9 +131,11 @@ var testAssets = fakeAssetReader{files: map[string]string{
 	"config.default.json": `{"agents":{"codex":{"command":"codex","detection":"screen","patterns":{"blocked":["^b$"]}}}}` + "\n",
 	"hooks.json": `{"Stop":[{"matcher":"","hooks":[{"type":"command",` +
 		`"command":"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh"}]}]}` + "\n",
-	"init.zsh":          "eval \"$(\"$CONDUCTOR_HOME/bin/mdev\" init zsh)\"\n",
-	"layouts/multi.kdl": "layout { pane { args \"-c\" \"\\\"$CH/bin/mdev\\\" pane dashboard\" } }\n",
-	"layouts/dev.kdl":   "layout { pane { args \"-c\" \"\\\"$CH/bin/mdev\\\" agent launch\" } }\n",
+	"init.zsh": "eval \"$(\"$CONDUCTOR_HOME/bin/mdev\" init zsh)\"\n",
+	// 本物と同じ形にする。テスト用のレイアウトは CONDUCTOR_HOME 経由の
+	// 呼び出しを絶対パスへ差し替えるので、その形でなければ経路を通らない。
+	"layouts/multi.kdl": "layout { pane { args \"-c\" \"\\\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\\\" pane dashboard\" } }\n",
+	"layouts/dev.kdl":   "layout { pane { args \"-c\" \"\\\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\\\" agent launch\" } }\n",
 }}
 
 // testInstallPaths はテストで使う設置先である。

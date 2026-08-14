@@ -308,7 +308,15 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 			}
 			return dir
 		},
-		Now:    clock.Now,
+		Now: clock.Now,
+		Test: &app.TestSessionRunner{
+			Locator:  shell.NewWorktree(),
+			Builder:  shell.NewGoBuilder(),
+			Terminal: shell.NewTerminal(home),
+			Chooser:  shell.NewChooser(os.Stdin, os.Stderr),
+			Assets:   store.NewAssetStore(conductorHome),
+			Files:    files,
+		},
 		News:   &app.NewsRefresher{Fetcher: newsFetcher, Clock: clock},
 		Codex:  codexNotifier,
 		Agent:  &app.AgentLauncher{Config: paneStore, Execer: shell.NewExecer()},

@@ -23,12 +23,14 @@ const (
 // 「切り替えたのにダッシュボードが無反応」という一番起きやすい取り違えを拾える。
 type MdevBinaryStore struct {
 	conductorHome string
+	// executable は今動いているバイナリの場所を返す。テストで差し替える。
+	executable func() (string, error)
 }
 
 // NewMdevBinaryStore は conductorHome 配下を見る MdevBinaryStore を返す。
 // conductorHome には ConductorHome の戻り値を渡す。
 func NewMdevBinaryStore(conductorHome string) *MdevBinaryStore {
-	return &MdevBinaryStore{conductorHome: conductorHome}
+	return &MdevBinaryStore{conductorHome: conductorHome, executable: osExecutable}
 }
 
 // MdevBinary は hooks が呼ぶ mdev のパスと、それが実在するかを返す。
