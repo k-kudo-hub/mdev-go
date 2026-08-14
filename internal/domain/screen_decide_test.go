@@ -666,3 +666,33 @@ func TestDecideScreenConfirmsIdleWhenClockGoesBackwards(t *testing.T) {
 		t.Errorf("副作用 = %q, want %q", got, want)
 	}
 }
+
+// TestIsScreenSessionID は合成 ID の判定を確かめる。
+//
+// ScreenPendingSessionID の対になる判定である。ここがずれると、合成 pending を
+// 実セッションと取り違えて daily の置換キーに使ったり(履歴が消える)、
+// 会話ゼロのタブで削除が止まったりする。
+func TestIsScreenSessionID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		sessionID string
+		want      bool
+	}{
+		{name: "生成側と対になる", sessionID: domain.ScreenPendingSessionID("demo"), want: true},
+		{name: "前置きだけ", sessionID: "screen-", want: true},
+		{name: "実セッション ID", sessionID: "019ffa99-28ef-7d93-9d02-a606a979e0b7", want: false},
+		{name: "空", sessionID: "", want: false},
+		{name: "途中に現れるだけ", sessionID: "x-screen-demo", want: false},
+		{name: "似た前置き", sessionID: "screening-demo", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := domain.IsScreenSessionID(tt.sessionID); got != tt.want {
+				t.Errorf("IsScreenSessionID(%q) = %v, want %v", tt.sessionID, got, tt.want)
+			}
+		})
+	}
+}

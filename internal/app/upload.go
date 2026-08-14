@@ -69,6 +69,18 @@ func (u *LogUploader) UploadLog(env PaneEnv, tab string) (string, error) {
 		return "", nil
 	}
 
+	// **合成 pending は「会話の記録が無い」ことを自ら示している。**
+	// スクリーン検出は hook を持たないエージェントのために pending を合成する。
+	// 1 ターンも会話していないタブでは transcript がまだ無く、その pending は
+	// transcript_path を持たない。ここを従来どおり失敗させると、守るべき会話が
+	// 無いのに「会話を失わないための防御」が働いてタブの削除が永久に止まる。
+	//
+	// 飛ばすのはこの組み合わせだけである。実セッションの pending や
+	// transcript を持つ合成 pending は従来どおり失敗させる(会話を失わない)。
+	if domain.IsScreenSessionID(pending.ClaudeSessionID) && pending.TranscriptPath == "" {
+		return "", nil
+	}
+
 	summary, err := u.summarize(pending.TranscriptPath)
 	if err != nil {
 		return "", err
