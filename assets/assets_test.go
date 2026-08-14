@@ -2,6 +2,8 @@ package assets_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -124,4 +126,39 @@ func TestLayoutsPointAtMdev(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDomainTestdataMatchesAssets は domain のテストが使う写しが本物と
+// 一致することを確かめる。
+//
+// domain は assets を import できない(ADR-0002 の依存方向)ため、hooks の
+// 雛形は testdata へ写してある。写しが古くなると、テストは通るのに配布物は
+// 別物という状態になる。
+func TestDomainTestdataMatchesAssets(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"hooks.json", "config.default.json"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			want, ok := assets.Read(name)
+			if !ok {
+				t.Fatalf("%s が埋め込まれていない", name)
+			}
+			got, err := os.ReadFile(domainTestdataPath(name))
+			if err != nil {
+				t.Fatalf("写しが読めない: %v", err)
+			}
+			if string(got) != string(want) {
+				t.Errorf("写しが本物と違う: %s", domainTestdataPath(name))
+			}
+		})
+	}
+}
+
+// domainTestdataPath は domain のテストが読む写しの場所を返す。
+func domainTestdataPath(name string) string {
+	if name == "config.default.json" {
+		return filepath.Join("..", "internal", "domain", "testdata", "golden-config-merge", name)
+	}
+	return filepath.Join("..", "internal", "domain", "testdata", name)
 }
