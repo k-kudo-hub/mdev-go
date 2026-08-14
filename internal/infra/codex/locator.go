@@ -162,7 +162,11 @@ func (l *Locator) fromSessionsDir(threadID string) string {
 		if err != nil {
 			return nil //nolint:nilerr // 読めない枝は飛ばして探索を続ける
 		}
-		if !d.IsDir() && strings.HasSuffix(d.Name(), threadID+rolloutSuffix) {
+		// 通常ファイルだけを採る。現行版の `find -type f` に合わせている
+		// (find は既定で symlink を辿らないため、symlink は -type f に
+		// 当たらない)。DirEntry.Type は readdir が返す種別そのままで
+		// lstat と同じ意味を持つので、余分な syscall は要らない。
+		if d.Type().IsRegular() && strings.HasSuffix(d.Name(), threadID+rolloutSuffix) {
 			matches = append(matches, path)
 		}
 		return nil

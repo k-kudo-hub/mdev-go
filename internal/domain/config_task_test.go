@@ -383,3 +383,61 @@ func TestConfigKeepsGoodTaskTypesBesideABrokenOne(t *testing.T) {
 		t.Errorf("壊れたエントリの description = %q, want 空", cfg.TaskTypes[1].Description)
 	}
 }
+
+// TestAgentCommandSplitsLikeBash は語分割が bash の既定 IFS に従うことを
+// 確かめる。
+//
+// 期待値は現行 agent-launch.sh の `read -r -a cmd <<< "$(agent_command)"` に
+// 同じ文字列を流して確認した。Unicode の空白は IFS に含まれないため、bash は
+// これを区切りとして扱わない。ここが食い違うと、設定に全角空白が混ざった
+// ときに mdev だけがコマンドを 2 語に割ってしまう。
+func TestAgentCommandSplitsLikeBash(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+		want    []string
+	}{
+		{name: "空白で割る", command: "codex --model gpt-5", want: []string{"codex", "--model", "gpt-5"}},
+		{name: "連続する空白は 1 つの区切り", command: "codex   --model", want: []string{"codex", "--model"}},
+		{name: "タブでも割る", command: "codex\t--model", want: []string{"codex", "--model"}},
+		{name: "前後の空白は落とす", command: "  codex  ", want: []string{"codex"}},
+		{
+			// bash の既定 IFS に全角空白は含まれない。
+			name:    "全角空白では割らない",
+			command: "codex　--model",
+			want:    []string{"codex　--model"},
+		},
+		{
+			name:    "NBSP でも割らない",
+			command: "codex --model",
+			want:    []string{"codex --model"},
+		},
+		{
+			// read は 1 行しか読まない。
+			name:    "2 行目以降は捨てる",
+			command: "codex\nrm -rf /",
+			want:    []string{"codex"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			raw, err := json.Marshal(map[string]any{
+				"agent": map[string]any{"command": tt.command},
+			})
+			if err != nil {
+				t.Fatalf("設定を組み立てられない: %v", err)
+			}
+			var config domain.Config
+			if err := json.Unmarshal(raw, &config); err != nil {
+				t.Fatalf("設定の解釈に失敗: %v", err)
+			}
+			if got := config.AgentCommand(""); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("AgentCommand(\"\") = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

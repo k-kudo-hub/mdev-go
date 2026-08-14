@@ -171,3 +171,35 @@ func TestSelectRolloutPathQuotesThreadID(t *testing.T) {
 		t.Errorf("selectRolloutPath = %q, want %q", got, want)
 	}
 }
+
+// TestLocateIgnoresNonRegularFiles は通常ファイル以外を採らないことを
+// 確かめる。
+//
+// 現行版の `find -type f` に合わせている(find は既定で symlink を辿らない
+// ため、symlink は -type f に当たらない)。リンク切れの symlink を採ると、
+// 実体の無いパスを transcript_path として記録してしまう。
+func TestLocateIgnoresNonRegularFiles(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	sessions := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessions, 0o755); err != nil {
+		t.Fatalf("ディレクトリを作れない: %v", err)
+	}
+	// リンク切れの symlink。名前は探索の条件に当てはまる。
+	link := filepath.Join(sessions, "rollout-2026-08-14T10-00-00-th-1.jsonl")
+	if err := os.Symlink(filepath.Join(home, "gone.jsonl"), link); err != nil {
+		t.Fatalf("symlink を作れない: %v", err)
+	}
+	// 同じ条件に当てはまるディレクトリ。
+	if err := os.Mkdir(filepath.Join(sessions, "dir-th-1.jsonl"), 0o755); err != nil {
+		t.Fatalf("ディレクトリを作れない: %v", err)
+	}
+
+	locator := NewLocator(home, "")
+	locator.runSQLite = func(string, string) (string, error) { return "", nil }
+
+	if got := locator.Locate("th-1"); got != "" {
+		t.Errorf("Locate = %q, want 空", got)
+	}
+}

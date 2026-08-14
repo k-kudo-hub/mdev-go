@@ -247,3 +247,33 @@ func TestHasNewsWithoutNewsDir(t *testing.T) {
 		t.Error("news ディレクトリが無いのに有ると答えた")
 	}
 }
+
+// TestFetchNewsRemovesExpiredEvenWhenSaveFails は保存に失敗しても保持期間の
+// 削除を行うことを確かめる。
+//
+// 現行版は書き込みの成否に関わらず最後に find -delete を走らせる。ここで
+// 打ち切ると、書き込みが失敗し続ける環境で古いファイルだけが溜まり続ける。
+func TestFetchNewsRemovesExpiredEvenWhenSaveFails(t *testing.T) {
+	f, root := newTestFetcher(t, http.StatusOK, rssFeed)
+
+	// 保存先と同じ名前のディレクトリを置くと、書き込みは失敗する。
+	if err := os.MkdirAll(filepath.Join(root, "2026-08-09.json"), 0o755); err != nil {
+		t.Fatalf("ディレクトリを作れない: %v", err)
+	}
+	// 保持期間を過ぎた古いファイル。
+	expired := filepath.Join(root, "2026-01-01.json")
+	if err := os.WriteFile(expired, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("ファイルを作れない: %v", err)
+	}
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(expired, old, old); err != nil {
+		t.Fatalf("更新時刻を変えられない: %v", err)
+	}
+	f.now = func() time.Time { return time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC) }
+
+	f.FetchNews("2026-08-09")
+
+	if _, err := os.Stat(expired); !os.IsNotExist(err) {
+		t.Errorf("保存に失敗しても古いファイルは消すはず: %v", err)
+	}
+}

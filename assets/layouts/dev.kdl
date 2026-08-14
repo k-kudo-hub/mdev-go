@@ -11,7 +11,7 @@ layout {
             pane {
                 name "Agent"
                 command "bash"
-                args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev agent launch"
+                args "-c" "\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" agent launch"
                 size "50%"
             }
             pane split_direction="horizontal" size="50%" {

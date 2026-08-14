@@ -78,17 +78,43 @@ func TestReadAssetUnknownName(t *testing.T) {
 // 返すことを確かめる。
 //
 // 埋め込みで埋めてしまうと、利用者が置いたはずの内容と食い違ったまま動く。
+// リンク切れの symlink がその典型で、読み取りは「無い」と同じエラーを返すが、
+// そこに在るのは未設置ではなく壊れた設置である。
 func TestReadAssetReportsUnreadableFile(t *testing.T) {
 	t.Parallel()
 
-	home := t.TempDir()
-	// ディレクトリを同じ名前で置くと、読み取りは「無い」ではなく失敗になる。
-	if err := os.Mkdir(filepath.Join(home, "hooks.json"), 0o755); err != nil {
-		t.Fatalf("ディレクトリを作れない: %v", err)
+	tests := []struct {
+		name string
+		// place は CONDUCTOR_HOME 配下に読めないものを置く。
+		place func(t *testing.T, path string)
+	}{
+		{
+			name: "同名のディレクトリ",
+			place: func(t *testing.T, path string) {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatalf("ディレクトリを作れない: %v", err)
+				}
+			},
+		},
+		{
+			name: "リンク切れの symlink",
+			place: func(t *testing.T, path string) {
+				if err := os.Symlink(filepath.Join(t.TempDir(), "gone"), path); err != nil {
+					t.Fatalf("symlink を作れない: %v", err)
+				}
+			},
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			tt.place(t, filepath.Join(home, "hooks.json"))
 
-	if _, err := store.ReadAsset(home, "hooks.json"); err == nil {
-		t.Error("失敗を返すはず")
+			if _, err := store.ReadAsset(home, "hooks.json"); err == nil {
+				t.Error("失敗を返すはず")
+			}
+		})
 	}
 }
 

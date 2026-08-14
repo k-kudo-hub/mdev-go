@@ -68,14 +68,15 @@ func NewFetcher(conductorHome string) *Fetcher {
 // 取得できた場合は、項目が 0 件でもファイルを書く。フィードの形が変わって
 // 何も取れなくなったとき、古い内容が残り続けるより空だと分かるほうがよい
 // (現行版も awk が空の items を出して jq の検証を通す)。
+// 保持期間を過ぎたファイルの削除は、**保存に失敗しても行う**。現行版も
+// 書き込みの成否に関わらず最後に find -delete を走らせており、書き込みが
+// 失敗し続ける環境で古いファイルだけが溜まり続けることを防ぐ。
 func (f *Fetcher) FetchNews(date string) {
 	body, ok := f.fetch()
 	if !ok {
 		return
 	}
-	if err := f.save(date, domain.BuildNewsFile(domain.ParseRSSItems(body))); err != nil {
-		return
-	}
+	_ = f.save(date, domain.BuildNewsFile(domain.ParseRSSItems(body)))
 	f.removeExpired()
 }
 

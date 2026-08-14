@@ -101,7 +101,10 @@ func TestLayoutsPointAtMdev(t *testing.T) {
 				"/bin/mdev pane task-create",
 			},
 		},
-		{name: "layouts/dev.kdl", wants: []string{"/bin/mdev agent launch"}},
+		// パスは引用符で囲む。HOME に空白が入っていると、囲まずに書いた
+		// 場合に bash が語分割してコマンドが見つからなくなる(現行版の
+		// dev.kdl も `bash "..."` と囲んでいる)。
+		{name: "layouts/dev.kdl", wants: []string{`\"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev\" agent launch`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

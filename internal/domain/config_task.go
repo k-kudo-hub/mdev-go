@@ -127,15 +127,24 @@ func fallback(value, def string) string {
 	return value
 }
 
+// bashIFS は bash の既定の IFS(空白・タブ・改行)である。
+//
+// strings.Fields を使わないのは、あちらが Unicode の空白すべてで切るためで
+// ある。全角空白や NBSP を含むコマンド指定は、bash では 1 語のままなのに
+// こちらだけが 2 語に割れてしまう。
+const bashIFS = " \t\n"
+
 // splitWords は bash の `read -r -a` と同じ語分割を行う。
 //
-// クォートは解釈せず、空白・タブで区切る。`read` は 1 行しか読まないため、
+// クォートは解釈せず、既定の IFS で区切る。`read` は 1 行しか読まないため、
 // 最初の改行以降は捨てる。
 func splitWords(s string) []string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
-	return strings.Fields(s)
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return strings.ContainsRune(bashIFS, r)
+	})
 }
 
 // unmarshalTaskKeys は Config のタスク作成向けフィールドを埋める。

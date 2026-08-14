@@ -44,6 +44,11 @@ func AssetNames() []string { return assets.Names() }
 //
 // 実ファイルがあるが読めない場合はエラーを返す。権限や壊れた設置を黙って
 // 埋め込みで埋めると、利用者が置いたはずの内容と食い違ったまま動く。
+//
+// **有無の判定は Lstat で先に行う。** 読み取りの失敗をそのまま「無い」と
+// 見なすと、リンク切れの symlink が置かれている場合に埋め込みへ落ちてしまう。
+// そこに在るのは「利用者が置いた壊れた設置」であって「未設置」ではないので、
+// 黙って別の内容を返さず、直すべき状態として報告する。
 func ReadAsset(conductorHome, name string) ([]byte, error) {
 	embedded, known := assets.Read(name)
 	if !known {
@@ -51,13 +56,16 @@ func ReadAsset(conductorHome, name string) ([]byte, error) {
 	}
 
 	path := filepath.Join(conductorHome, filepath.FromSlash(name))
+	if _, err := os.Lstat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return embedded, nil
+		}
+		return nil, fmt.Errorf("資産 %s の確認に失敗しました: %w", path, err)
+	}
+
 	b, err := os.ReadFile(path) //nolint:gosec // 埋め込み済みの名前に限る
-	switch {
-	case err == nil:
-		return b, nil
-	case errors.Is(err, fs.ErrNotExist):
-		return embedded, nil
-	default:
+	if err != nil {
 		return nil, fmt.Errorf("資産 %s の読み取りに失敗しました: %w", path, err)
 	}
+	return b, nil
 }
