@@ -1,0 +1,19 @@
+# 現行 init.zsh の _conductor_session_name の出力を写したもの。
+# scripts/gen-golden-session-name.sh が生成する。手で編集しないこと。
+# 列: name<TAB>hash_src<TAB>期待するセッション名
+my-project		my-project
+a		a
+abcdefghij-abcdefghij-ab		abcdefghij-abcdefghij-ab
+abcdefghij-abcdefghij-abc		abcdefghij-abcdefgh-5491
+this-is-a-very-long-session-name		this-is-a-very-long-3787
+this-is-a-very-long-session-name	/path/alpha	this-is-a-very-long-4265
+this-is-a-very-long-session-name	/path/beta	this-is-a-very-long-5812
+abcdefghijklmnopqr-stuvwxyz		abcdefghijklmnopqr-6287
+aaaaaaaaaaaaaaaaaaa-bbbbbbbb		aaaaaaaaaaaaaaaaaaa-1939
+test-add-embedded-assets-and-cli-ports	/Users/dev/projects/mdev-go/.worktree/add-embedded-assets-and-cli-ports	test-add-embedded-a-1499
+test-add-installer-and-init-subcommands	/Users/dev/projects/mdev-go/.worktree/add-installer-and-init-subcommands	test-add-installer-9937
+mdev-go-224042-long-enough-name		mdev-go-224042-long-3941
+日本語のとても長いセッション名前を付けてみたときの挙動		日本語のとても長いセッション名前を付け-7295
+プロジェクト-abcdefghijklmnopqrstu		プロジェクト-abcdefghijkl-1451
+name-with-trailing-dash----------------		name-with-trailing-1046
+		
