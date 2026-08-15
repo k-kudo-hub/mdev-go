@@ -225,7 +225,7 @@ cd ~/projects/claude-conductor && git checkout <最終タグ> && ./install.sh
 
 ```sh
 make build && scripts/verify-install-isolated.sh bin/mdev
-# 期待: 27 件成功 / 0 件失敗
+# 期待: 28 件成功 / 0 件失敗
 ```
 
 **実環境には触れない。** HOME・CONDUCTOR_HOME・CODEX_HOME に加えて **TMPDIR も隔離する**のが要点で、zellij のソケット置き場が `$TMPDIR/zellij-<uid>` で決まるためである。ここを実環境のままにすると、検証で作ったセッションが利用者の一覧に並び、掃除の対象にもなる。スクリプトは TMPDIR が一時ディレクトリの根そのものを指していたら起動を拒否する。
