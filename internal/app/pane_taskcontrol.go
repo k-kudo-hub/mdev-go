@@ -101,3 +101,11 @@ func (p *TaskControlPane) PrepareDelete(env PaneEnv, tab string) (DeletePreparat
 func (p *TaskControlPane) CommitDelete(env PaneEnv, tab string) error {
 	return p.Deleter.Commit(env, tab)
 }
+
+// ForceDelete はアップロードを飛ばしてタブを消す。
+//
+// **作業ログは失われる。** Prepare が中止したときに、その理由を見せたうえで
+// 利用者が明示的に選んだ場合だけ呼ばれる(TaskDeleter.ForceDelete を参照)。
+func (p *TaskControlPane) ForceDelete(env PaneEnv, tab string) error {
+	return p.Deleter.ForceDelete(env, tab)
+}

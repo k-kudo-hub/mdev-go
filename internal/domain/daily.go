@@ -2,7 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-	"strings"
 )
 
 // DailyCompletedAtLayout は daily レコードの completed_at の書式。
@@ -67,7 +66,7 @@ const ScreenSessionIDPrefix = "screen-"
 // 消してはいけない履歴を消すからである。キーが無い場合は置換せず追記する
 // (記録が重複することはあっても、過去の記録は失われない)。
 func (r DailyRecord) HasDedupeKey() bool {
-	return r.ClaudeSessionID != "" && !strings.HasPrefix(r.ClaudeSessionID, ScreenSessionIDPrefix)
+	return r.ClaudeSessionID != "" && !IsScreenSessionID(r.ClaudeSessionID)
 }
 
 // DailyMarkers はタスク中に何をしたかの目印である。

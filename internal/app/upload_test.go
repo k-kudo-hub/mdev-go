@@ -368,3 +368,89 @@ func TestUploadLogUsesCrossDayRecord(t *testing.T) {
 		t.Errorf("読んだセッション = %v, want [test-session]", got)
 	}
 }
+
+// TestUploadLogFailsForScreenPendingWithoutTranscript は合成 pending で
+// transcript が無くても **失敗させる** ことを確かめる。
+//
+// # transcript_path が空 = 会話ゼロ、ではない
+//
+// 合成 pending の transcript_path は **レジストリからの借用値**である
+// (ScreenDetector が LatestByTabMtime で引いて詰める)。hook や notify が
+// 一度も着弾していない間はレジストリが空なので、この値は常に空になる。
+// つまり「初回ターンの最中に承認待ちが出たタブ」= **会話があるタブ**でも
+// ここは空になる。
+//
+// したがって空を「会話ゼロ」と読んで飛ばすと、会話のあるタブをアップロード
+// 無しで消してしまう。**判定できないときは止める。** 消したい利用者には
+// 明示的な強制削除を用意してある(TaskDeleter.ForceDelete)。
+func TestUploadLogFailsForScreenPendingWithoutTranscript(t *testing.T) {
+	f := newUploadFixture(t)
+	f.pending.byTab[pendingKey("test-session", "demo")] = domain.Pending{
+		Tab:             "demo",
+		ClaudeSessionID: domain.ScreenPendingSessionID("demo"),
+		Agent:           "codex",
+		// レジストリがまだ空なので借用できていない。会話の有無は分からない。
+	}
+
+	got, err := f.uploader.UploadLog(uploadEnv, "demo")
+	if err == nil {
+		t.Fatal("エラーを返すはず(会話があるかもしれないので止める)")
+	}
+	if got != "" {
+		t.Errorf("戻り値 = %q, want 空", got)
+	}
+	if f.pusher.calls != 0 {
+		t.Errorf("push = %d 回, want 0", f.pusher.calls)
+	}
+}
+
+// TestUploadLogUploadsScreenPendingWithTranscript は合成 pending でも
+// transcript があれば従来どおりアップロードすることを確かめる。
+//
+// 会話が始まった後のタブは、スクリーン検出が所有していても記録すべき中身を
+// 持っている。飛ばしてよいのは「会話の記録が無い」ことを自ら示している
+// 場合だけである。
+func TestUploadLogUploadsScreenPendingWithTranscript(t *testing.T) {
+	f := newUploadFixture(t)
+	f.pending.byTab[pendingKey("test-session", "demo")] = domain.Pending{
+		Tab:             "demo",
+		ClaudeSessionID: domain.ScreenPendingSessionID("demo"),
+		Agent:           "codex",
+		TranscriptPath:  "/t/demo.jsonl",
+	}
+
+	got, err := f.uploader.UploadLog(uploadEnv, "demo")
+	if err != nil {
+		t.Fatalf("UploadLog が失敗しました: %v", err)
+	}
+	if want := "アップロードしました -> https://example/log.md"; got != want {
+		t.Errorf("戻り値 = %q, want %q", got, want)
+	}
+	if f.pusher.calls != 1 {
+		t.Errorf("push = %d 回, want 1", f.pusher.calls)
+	}
+}
+
+// TestUploadLogFailsForRealSessionWithoutTranscript は実セッションの
+// pending では従来どおり失敗することを確かめる。
+//
+// **飛ばしてよい範囲を広げてはならない。** hook が書いた pending に
+// transcript が無いのは異常であり、そのまま削除を通すと会話が失われる。
+func TestUploadLogFailsForRealSessionWithoutTranscript(t *testing.T) {
+	f := newUploadFixture(t)
+	f.pending.byTab[pendingKey("test-session", "demo")] = domain.Pending{
+		Tab:             "demo",
+		ClaudeSessionID: "019ffa99-28ef-7d93-9d02-a606a979e0b7",
+	}
+
+	got, err := f.uploader.UploadLog(uploadEnv, "demo")
+	if err == nil {
+		t.Fatal("エラーを返すはず(削除を止めなければ会話が失われる)")
+	}
+	if got != "" {
+		t.Errorf("戻り値 = %q, want 空", got)
+	}
+	if f.pusher.calls != 0 {
+		t.Errorf("push = %d 回, want 0", f.pusher.calls)
+	}
+}

@@ -40,6 +40,8 @@ type stubDashboard struct {
 	calls []string
 	// warnings は Startup が返す起動時復元の説明。
 	warnings []string
+	// forceErr は ForceDelete が返すエラー。
+	forceErr error
 }
 
 var _ tui.DashboardService = (*stubDashboard)(nil)
@@ -73,6 +75,13 @@ func (s *stubDashboard) PrepareDelete(_ app.PaneEnv, tab string) (app.DeletePrep
 func (s *stubDashboard) CommitDelete(_ app.PaneEnv, tab string) error {
 	s.calls = append(s.calls, "commit "+tab)
 	return nil
+}
+
+// ForceDelete は通常の削除と **別の呼び出しとして記録する**。同じ扱いに
+// すると、強制削除を選んでいないのに通ってしまう回帰を捕まえられない。
+func (s *stubDashboard) ForceDelete(_ app.PaneEnv, tab string) error {
+	s.calls = append(s.calls, "force "+tab)
+	return s.forceErr
 }
 
 // ---- Waiting / Done / News のスタブ ---------------------------------------
@@ -542,6 +551,36 @@ func TestDashboardModelDeleteCancelledOnUploadFailure(t *testing.T) {
 	}
 }
 
+// TestDashboardModelShowsUploadFailureReason は中止の理由を画面へ出すことを
+// 確かめる。
+//
+// 「Upload failed」だけでは、設定の不備なのか transcript が無いのか push が
+// 通らなかったのかが分からない。削除が止まった利用者が次に何をすればよいかを
+// 決められるよう、原因の文を続けて出す。
+func TestDashboardModelShowsUploadFailureReason(t *testing.T) {
+	t.Parallel()
+
+	const reason = "会話要約の生成に失敗しました: transcript のパスが記録されていません"
+	service := &stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}},
+		prep:     app.DeletePreparation{Cancelled: true, Reason: reason},
+	}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	prompted, _ := loaded.Update(key('d'))
+	after, prepared := run(t, prompted, key('1'))
+	shown, _ := after.Update(prepared)
+
+	got := content(shown)
+	if !strings.Contains(got, "Upload failed. Deletion cancelled.") {
+		t.Errorf("中止の表示が出ていない: %q", got)
+	}
+	if !strings.Contains(got, reason) {
+		t.Errorf("理由が出ていない: %q", got)
+	}
+}
+
 func TestDashboardModelDeleteSurfacesPrepareError(t *testing.T) {
 	t.Parallel()
 
@@ -920,5 +959,136 @@ func TestDoneModelShowsNothingOnQuietRestore(t *testing.T) {
 
 	if content(shown) != "完了画面" {
 		t.Errorf("余計な行が出ている: %q", content(restored))
+	}
+}
+
+// TestDashboardModelForceDeleteAfterCancel は中止の後に強制削除を選べることを
+// 確かめる。
+//
+// **会話ゼロのタブが消せない**という症状への逃げ道である。会話があるかどうかは
+// mdev には判定できない(合成 pending の transcript_path はレジストリからの
+// 借用値で、着弾前は会話があっても空)。判定できないものは利用者に選ばせる。
+func TestDashboardModelForceDeleteAfterCancel(t *testing.T) {
+	t.Parallel()
+
+	const reason = "会話要約の生成に失敗しました: transcript のパスが記録されていません"
+	service := &stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}},
+		prep:     app.DeletePreparation{Cancelled: true, Reason: reason},
+	}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	prompted, _ := loaded.Update(key('d'))
+	after, prepared := run(t, prompted, key('1'))
+	shown, _ := after.Update(prepared)
+
+	// 中止の時点では何も消していない。
+	if contains(service.calls, "commit alpha") || contains(service.calls, "force alpha") {
+		t.Fatalf("中止したのに削除している: %v", service.calls)
+	}
+	// 理由と逃げ道が画面に出ている。
+	got := content(shown)
+	if !strings.Contains(got, reason) {
+		t.Errorf("理由が出ていない: %q", got)
+	}
+	if !strings.Contains(got, "アップロードせずに削除") {
+		t.Errorf("強制削除の案内が出ていない: %q", got)
+	}
+
+	// `!` で強制削除へ進む。
+	forced, cmd := shown.Update(key('!'))
+	if cmd == nil {
+		t.Fatal("強制削除のコマンドが出ていない")
+	}
+	// 強制削除のコマンドを実行する(ここで初めて ForceDelete が呼ばれる)。
+	forced, run := forced.Update(cmd())
+	if run == nil {
+		t.Fatal("削除の実行コマンドが出ていない")
+	}
+	forced.Update(run())
+
+	if !contains(service.calls, "force alpha") {
+		t.Errorf("強制削除が呼ばれていない: %v", service.calls)
+	}
+	// 通常の削除経路は通らない(アップロードを飛ばしたことが記録に残る)。
+	if contains(service.calls, "commit alpha") {
+		t.Errorf("通常の削除も呼ばれた: %v", service.calls)
+	}
+}
+
+// TestDashboardModelForceOfferClearedByOtherKey は他のキーで提示が消えることを
+// 確かめる。
+//
+// **提示を残し続けると、後から押した `!` が意図せず効く。** 選ばなかったことが
+// 既定の結果になるようにする。
+func TestDashboardModelForceOfferClearedByOtherKey(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}},
+		prep:     app.DeletePreparation{Cancelled: true, Reason: "だめでした"},
+	}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	prompted, _ := loaded.Update(key('d'))
+	after, prepared := run(t, prompted, key('1'))
+	shown, _ := after.Update(prepared)
+
+	// 別のキーで提示を解く。
+	cleared, _ := shown.Update(key('r'))
+	// その後の `!` は何も起こさない。
+	forced, _ := cleared.Update(key('!'))
+	_ = forced
+
+	if contains(service.calls, "force alpha") {
+		t.Errorf("提示が消えた後に強制削除が走った: %v", service.calls)
+	}
+	if strings.Contains(content(cleared), "アップロードせずに削除") {
+		t.Errorf("提示が残っている: %q", content(cleared))
+	}
+}
+
+// TestDashboardModelDeleteRetryAfterCancel は中止の後のやり直しが削除に
+// なることを確かめる。
+//
+// 提示を解くついでにキーを握り潰していると、やり直しの `d` が捨てられ、
+// 続く番号が **ジャンプ**として解釈される(別のタブへ移動してしまう)。
+func TestDashboardModelDeleteRetryAfterCancel(t *testing.T) {
+	t.Parallel()
+
+	service := &stubDashboard{
+		snapshot: app.DashboardSnapshot{Text: "画面", Tabs: []string{"alpha"}},
+		prep:     app.DeletePreparation{Cancelled: true, Reason: "だめでした"},
+	}
+	m := tui.NewDashboardModel(service, testEnv)
+	loaded := load(t, m)
+
+	prompted, _ := loaded.Update(key('d'))
+	after, prepared := run(t, prompted, key('1'))
+	shown, _ := after.Update(prepared)
+
+	// 提示が出ている状態で、もう一度 d+番号 を押す。
+	retry, _ := shown.Update(key('d'))
+	_, cmd := retry.Update(key('1'))
+	if cmd == nil {
+		t.Fatal("やり直しの削除が始まっていない")
+	}
+	cmd()
+
+	for _, call := range service.calls {
+		if strings.HasPrefix(call, "jump") {
+			t.Errorf("削除がジャンプにすり替わった: %v", service.calls)
+		}
+	}
+	prepares := 0
+	for _, call := range service.calls {
+		if call == "prepare alpha" {
+			prepares++
+		}
+	}
+	if prepares != 2 {
+		t.Errorf("削除のやり直しが %d 回, want 2: %v", prepares, service.calls)
 	}
 }

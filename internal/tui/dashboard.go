@@ -15,6 +15,32 @@ const (
 	uploadFailed   = "\033[0;31m\033[1mUpload failed. Deletion cancelled.\033[0m"
 )
 
+// forceDeleteKey はアップロードを飛ばして削除することを選ぶキーである。
+//
+// 削除の打鍵(d)とは別の文字にする。同じ文字の繰り返しにすると、消えなくて
+// 何度も d を押した利用者が意図せず「アップロードせずに削除」へ進む。
+const forceDeleteKey = "!"
+
+// forceDeleteHint は強制削除の案内である。**失うものを先に書く。**
+const forceDeleteHint = "\033[0;33m" + forceDeleteKey +
+	" : アップロードせずに削除する(作業ログは失われます)\033[0m"
+
+// uploadFailedNotice は中止の表示に理由と逃げ道を添える。
+//
+// 「Upload failed」だけでは、設定の不備なのか transcript が無いのか push が
+// 通らなかったのか分からない。削除が止まった利用者が次に何をすればよいかを
+// 決められるよう、原因と選べる操作を続けて出す。
+//
+// 2 行目以降にも字下げを入れるのは、呼び出し側が先頭行にしか付けないため
+// である(付けないと 2 行目だけ左端に寄る)。
+func uploadFailedNotice(reason string) string {
+	out := uploadFailed
+	if reason != "" {
+		out += "\n  \033[0;31m" + reason + "\033[0m"
+	}
+	return out + "\n  " + forceDeleteHint
+}
+
 // Dashboard のメッセージ。
 type (
 	// dashboardRefreshedMsg は 1 回ぶんの一覧の組み立てが終わったことを表す。
@@ -62,6 +88,11 @@ type DashboardModel struct {
 
 	// awaiting は d の後の番号入力を待っている状態。
 	awaiting bool
+	// forceTab は「アップロードせずに削除する」を選べるタブである。
+	//
+	// アップロードの失敗で中止した直後だけ入る。**失敗を見た直後にしか
+	// 提示しない**ので、何も知らずに会話のあるタブを消すことはできない。
+	forceTab string
 	// token はタイマーの世代。古いタイマーの発火を無視するために使う。
 	token int
 	// notice は一時的に出す通知(アップロード結果・失敗)。
@@ -189,7 +220,9 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case noticeExpiredMsg:
 		if msg.token == m.token {
-			m.busy, m.notice = false, ""
+			// 強制削除の受付も同時に解く。通知が消えているのに `!` だけが
+			// 効く状態を作らない。
+			m.busy, m.notice, m.forceTab = false, "", ""
 			cmd := m.forceRefreshCmd()
 			return m, cmd
 		}
@@ -207,6 +240,19 @@ func (m DashboardModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	if m.busy {
 		return m, nil
 	}
+
+	// 中止の直後だけ、強制削除を選べる。
+	if tab, chosen := takeForceOffer(&m.forceTab, &m.notice, &m.token, key); chosen {
+		m.busy = true
+		env := m.env
+		pane := m.pane
+		return m, func() tea.Msg {
+			return deleteFinishedMsg{err: pane.ForceDelete(env, tab)}
+		}
+	}
+	// 選ばれなかったキーは **握り潰さず本来の意味で処理する**。提示だけを
+	// 解いて先へ進む。ここで打ち切ると、やり直しの d+番号 が別の操作に
+	// すり替わる。
 
 	if m.awaiting {
 		// 凍結を解く。削除へ進まない分岐では、止めていた間の変化に表示を
@@ -274,10 +320,18 @@ func (m DashboardModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cm
 	}
 
 	if msg.prep.Cancelled {
-		// アップロードに失敗したので何も消さない。表示だけ出して元に戻る。
-		m.notice = uploadFailed
+		// アップロードに失敗したので何も消さない。
+		//
+		// **通知と `!` の受付は同じタイマーで管理する。** 理由を読んで判断
+		// するための時間が要る一方、武装したまま放置すると後から押した `!` が
+		// 意図せず効く。期限が切れたら両方まとめて解ける(forceOfferDuration)。
+		//
+		// **busy はここで解く。** 削除は既に中止されており、処理中ではない。
+		m.busy = false
+		m.notice = uploadFailedNotice(msg.prep.Reason)
+		m.forceTab = msg.tab
 		m.token++
-		return m, noticeCmd(m.token)
+		return m, forceOfferCmd(m.token)
 	}
 
 	if msg.prep.Message == "" {
@@ -314,6 +368,36 @@ func (m DashboardModel) refreshCmd(poll bool) tea.Cmd {
 		snapshot, err := m.pane.Refresh(m.env)
 		return dashboardRefreshedMsg{snapshot: snapshot, err: err, poll: poll}
 	}
+}
+
+// forceOfferCmd は forceOfferDuration 後に中止の通知と強制削除の受付を終える。
+//
+// noticeCmd と同じ noticeExpiredMsg を流す。受け手が通知・busy・受付を
+// まとめて解くので、期限の管理は「どちらのタイマーを張ったか」だけで済む。
+func forceOfferCmd(token int) tea.Cmd {
+	return tea.Tick(forceOfferDuration, func(time.Time) tea.Msg {
+		return noticeExpiredMsg{token: token}
+	})
+}
+
+// takeForceOffer は強制削除の提示を解き、選ばれたかどうかを返す。
+//
+// Dashboard と task-control で同じ判断をするための共通処理である。
+//
+// **選ばれなかったキーは握り潰さない。** 提示だけを解いて false を返し、
+// 呼び出し側はそのキーを本来の意味で処理する。ここで打ち切ると、やり直しの
+// d+番号 が別の操作(ジャンプ)にすり替わる。
+//
+// 世代(token)を進めるのは、張ってあった期限のタイマーを無効にするためで
+// ある。進めないと、次の操作の最中に古い期限切れが届いて表示が消える。
+func takeForceOffer(forceTab, notice *string, token *int, key string) (string, bool) {
+	if *forceTab == "" {
+		return "", false
+	}
+	tab := *forceTab
+	*forceTab, *notice = "", ""
+	*token++
+	return tab, key == forceDeleteKey
 }
 
 // noticeCmd は noticeDuration 後に通知の表示を終える。

@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/k-kudo-hub/mdev-go/internal/domain"
 )
@@ -52,9 +53,47 @@ func (d *TaskDeleter) Prepare(env PaneEnv, tab string) (DeletePreparation, error
 
 	output, err := d.Uploader.UploadLog(env, tab)
 	if err != nil {
-		return DeletePreparation{Cancelled: true}, nil
+		// error は握り潰さず理由として持ち上げる。ここで捨てると、画面には
+		// 「Upload failed」しか出ず、利用者も調べる側も原因に辿り着けない。
+		// 中止そのものは error ではない(呼び出し側は Cancelled で分岐する)
+		// ので、戻り値の形は変えない。
+		//
+		// **画面へ出す前に資格情報を伏せる。** 失敗の説明には設定した値が
+		// そのまま載ることがあり、upload.repo に認証情報付きの URL を
+		// 書いている場合はそれが画面とスクロールバックに残る。
+		//
+		// 作業ログ用の FilterSecrets ではなく表示用の MaskURLCredentials を
+		// 使う。前者の出力は golden テストでバイト単位に固定されており、
+		// 表示のために伏せる範囲を足すとその一致が崩れる。
+		//
+		// 末尾の改行は落とす。1 行として画面へ組み込むためで、他の 2 つの
+		// 呼び出し元(要約の前処理・markdown の組み立て)と同じ扱いである。
+		return DeletePreparation{
+			Cancelled: true,
+			Reason:    strings.TrimRight(domain.MaskURLCredentials(err.Error()), "\n"),
+		}, nil
 	}
 	return DeletePreparation{Message: output}, nil
+}
+
+// ForceDelete はアップロードを飛ばしてタブを消す。
+//
+// # なぜ「無言で飛ばす」ではなく明示の操作なのか
+//
+// アップロードすべき会話があるかどうかは、**mdev には判定できない**。
+// スクリーン検出が合成する pending の transcript_path はレジストリからの
+// 借用値で、hook や notify がまだ着弾していない間は会話があっても空になる。
+// つまり「記録が無いから飛ばしてよい」と機械的に決めると、会話のあるタブを
+// 黙って消す経路ができる。
+//
+// 判定できないものは利用者に選ばせる。Prepare が中止したときだけ、その理由を
+// 見せたうえでこの操作を提示する。**作業ログは失われる**が、それを承知の上で
+// 選んだことが操作の形として残る。
+//
+// 作業サマリの記録(daily)は Prepare が済ませているため、ここでは行わない。
+// 中止された時点で記録は残っており、二重に書くと重複する。
+func (d *TaskDeleter) ForceDelete(env PaneEnv, tab string) error {
+	return d.Commit(env, tab)
 }
 
 // Commit は削除フローの後半を行う。

@@ -540,3 +540,5 @@ func (tickTaskControl) PrepareDelete(app.PaneEnv, string) (app.DeletePreparation
 	return app.DeletePreparation{}, nil
 }
 func (tickTaskControl) CommitDelete(app.PaneEnv, string) error { return nil }
+
+func (tickTaskControl) ForceDelete(app.PaneEnv, string) error { return nil }

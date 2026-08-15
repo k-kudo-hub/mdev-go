@@ -24,6 +24,13 @@ const TaskControlPromptTimeout = 2 * time.Second
 const (
 	taskControlDeletePrompt = "\033[0;31m\033[1mPress d to confirm delete...\033[0m"
 	taskControlUploading    = "\033[2mUploading log...\033[0m"
+	// taskControlUploadFailedNotice は中止と逃げ道を **1 行で** 伝える。
+	//
+	// このペインは 1 行しかないため、理由の全文は載せない(複数行にすると
+	// 操作バーの高さが変わり、タブの中の表示が押し出される)。理由を読みたい
+	// ときは Dashboard 側に出る。
+	taskControlUploadFailedNotice = "\033[0;31m\033[1mUpload failed.\033[0m " +
+		"\033[0;33m" + forceDeleteKey + " で未アップロード削除\033[0m"
 )
 
 // TaskControlService は task-control ペインのユースケースである。
@@ -33,6 +40,9 @@ type TaskControlService interface {
 	ToggleWaiting(env app.PaneEnv, tab string) error
 	PrepareDelete(env app.PaneEnv, tab string) (app.DeletePreparation, error)
 	CommitDelete(env app.PaneEnv, tab string) error
+	// ForceDelete はアップロードを飛ばして削除する。
+	// 中止の理由を見せたうえで利用者が明示的に選んだときだけ呼ぶ。
+	ForceDelete(env app.PaneEnv, tab string) error
 }
 
 // task-control のメッセージ。
@@ -58,6 +68,9 @@ type TaskControlModel struct {
 
 	// awaiting は d の後の 2 打鍵目を待っている状態。
 	awaiting bool
+	// forceTab は「アップロードせずに削除する」を選べるタブである。
+	// Dashboard と同じ扱いで、中止の直後だけ入る。
+	forceTab string
 	// token はタイマーの世代。古いタイマーの発火を無視するために使う。
 	token int
 	// notice は一時的に出す通知(アップロード結果・失敗)。
@@ -158,7 +171,9 @@ func (m TaskControlModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case noticeExpiredMsg:
 		if msg.token == m.token {
-			m.busy, m.notice = false, ""
+			// 強制削除の受付も同時に解く。通知が消えているのに `!` だけが
+			// 効く状態を作らない。
+			m.busy, m.notice, m.forceTab = false, "", ""
 			cmd := m.forceRefreshCmd()
 			return m, cmd
 		}
@@ -174,6 +189,16 @@ func (m TaskControlModel) handleKey(key string) (tea.Model, tea.Cmd) {
 	}
 	if m.busy {
 		return m, nil
+	}
+
+	// 中止の直後だけ、強制削除を選べる(Dashboard と同じ契約)。選ばれ
+	// なかったキーは握り潰さず、下の通常処理へ進む。
+	if tab, chosen := takeForceOffer(&m.forceTab, &m.notice, &m.token, key); chosen {
+		m.busy = true
+		env, pane := m.env, m.pane
+		return m, func() tea.Msg {
+			return deleteFinishedMsg{err: pane.ForceDelete(env, tab)}
+		}
 	}
 
 	if m.awaiting {
@@ -217,7 +242,7 @@ func (m TaskControlModel) handleKey(key string) (tea.Model, tea.Cmd) {
 // handlePrepared は record と upload-log が終わった後の分岐を決める。
 //
 // Dashboard と同じ契約である。アップロードが失敗したら何も消さず、
-// "Upload failed. Deletion cancelled." を出して元に戻る。
+// "Upload failed. Deletion cancelled." と理由を出して元に戻る。
 func (m TaskControlModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.notice = errorLine(msg.err)
@@ -225,9 +250,16 @@ func (m TaskControlModel) handlePrepared(msg deletePreparedMsg) (tea.Model, tea.
 		return m, noticeCmd(m.token)
 	}
 	if msg.prep.Cancelled {
-		m.notice = uploadFailed
+		// **このペインは 1 行しかない。** 理由の全文は Dashboard 側に出し、
+		// ここは何が起きて次に何ができるかだけを 1 行で伝える。複数行にすると
+		// 操作バーの高さが変わり、タブの中の表示が押し出される。
+		//
+		// 通知と `!` の受付は同じタイマーで解く(Dashboard と同じ契約)。
+		m.busy = false
+		m.notice = taskControlUploadFailedNotice
+		m.forceTab = msg.tab
 		m.token++
-		return m, noticeCmd(m.token)
+		return m, forceOfferCmd(m.token)
 	}
 	if msg.prep.Message == "" {
 		m.notice = ""

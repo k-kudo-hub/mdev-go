@@ -349,6 +349,12 @@ func TestDashboardPanePrepareDeleteCancelsOnUploadFailure(t *testing.T) {
 	if !prep.Cancelled {
 		t.Fatal("upload が失敗したのに中止になっていない")
 	}
+	// 失敗の理由を持ち上げる。握り潰すと画面には「Upload failed」しか
+	// 出ず、設定の不備なのか transcript が無いのか push が通らなかったのかが
+	// 分からない。削除が止まった利用者が次に何をすればよいか決められない。
+	if !strings.Contains(prep.Reason, errUploadFailed.Error()) {
+		t.Errorf("理由 = %q, want %q を含む", prep.Reason, errUploadFailed)
+	}
 
 	for _, entry := range f.journal.entries {
 		switch entry {
@@ -435,5 +441,34 @@ func TestDashboardPaneStartupReturnsWarnings(t *testing.T) {
 	got := f.pane.Startup(dashboardEnv)
 	if want := []string{"タスク alpha を復元できませんでした"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Startup() = %v, want %v", got, want)
+	}
+}
+
+// TestPrepareDeleteMasksSecretsInReason は画面へ出す理由から秘密を伏せる
+// ことを確かめる。
+//
+// 失敗の説明には設定した値がそのまま載ることがある。upload.repo に認証情報
+// 付きの URL を書いている利用者では、それが画面とスクロールバックに残る。
+func TestPrepareDeleteMasksSecretsInReason(t *testing.T) {
+	t.Parallel()
+
+	f := newDashboardFixture(nil, "ID POS NAME\n1 x alpha\n")
+	f.uploader.err = errors.New(
+		"ログリポジトリへのpushに失敗しました: https://x-access-token:" +
+			"ghp_0123456789abcdefghijklmnopqrstuvwxyz@github.com/o/r.git")
+
+	prep, err := f.pane.PrepareDelete(dashboardEnv, "alpha")
+	if err != nil {
+		t.Fatalf("PrepareDelete() = %v", err)
+	}
+	if !prep.Cancelled {
+		t.Fatal("中止になっていない")
+	}
+	if strings.Contains(prep.Reason, "ghp_0123456789abcdefghijklmnopqrstuvwxyz") {
+		t.Errorf("秘密がそのまま載っている: %q", prep.Reason)
+	}
+	// 何が失敗したのかは分かるままにする(伏せすぎると診断に使えない)。
+	if !strings.Contains(prep.Reason, "ログリポジトリへのpushに失敗しました") {
+		t.Errorf("説明が失われた: %q", prep.Reason)
 	}
 }

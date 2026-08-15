@@ -29,6 +29,18 @@ const PromptTimeout = 3 * time.Second
 // 現行版の `sleep 2` に対応する。
 const noticeDuration = 2 * time.Second
 
+// forceOfferDuration は「アップロードせずに削除する」を選べる時間である。
+//
+// 通知(noticeDuration = 2 秒)より長くする。あちらは結果を知らせるだけで
+// 読み流してよいが、こちらは **失敗の理由を読んで判断する** ための時間で、
+// 2 秒では理由の 1 行すら読み切れない。一方で無期限にはしない。武装したまま
+// 放置されると、後から押した `!` が意図せず効く。
+//
+// 10 秒は「理由を読んで決める」には足り、「席を外して戻る」には足りない
+// 長さとして選んだ。読み切れなかった場合は削除をやり直せばよく、失うのは
+// 数打鍵である。
+const forceOfferDuration = 10 * time.Second
+
 // quitKeys はペインを終了させるキー。
 //
 // 現行の Shell 版ペインは終了キーを持たず、zellij がペインごと落とすまで
@@ -340,6 +352,7 @@ type (
 		Jump(app.PaneEnv, app.DashboardSnapshot, int) error
 		PrepareDelete(app.PaneEnv, string) (app.DeletePreparation, error)
 		CommitDelete(app.PaneEnv, string) error
+		ForceDelete(app.PaneEnv, string) error
 	}
 
 	// WaitingService は Waiting ペインのユースケース。

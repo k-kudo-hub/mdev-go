@@ -1,6 +1,9 @@
 package domain
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // スクリーン検出が書く pending の文言。
 const (
@@ -24,6 +27,16 @@ const screenPendingSuffix = ".json"
 // TaskRestorer のコメントを参照)。
 func ScreenPendingSessionID(tab string) string {
 	return ScreenSessionIDPrefix + ScreenTabSlug(tab)
+}
+
+// IsScreenSessionID は sessionID がスクリーン検出の合成したものかを返す。
+//
+// ScreenPendingSessionID の対になる判定である。**合成 ID は「エージェントが
+// 発行した本物のセッション ID が無い」ことを自ら示している。** 復元に使えない
+// (TaskRestorer)、daily の置換キーにできない(DailyRecord.HasDedupeKey)、
+// といった判断はすべてこの性質から来る。
+func IsScreenSessionID(sessionID string) bool {
+	return strings.HasPrefix(sessionID, ScreenSessionIDPrefix)
 }
 
 // ScreenPendingName はスクリーン検出が所有する pending のファイル名を返す。

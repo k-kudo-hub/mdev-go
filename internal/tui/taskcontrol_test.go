@@ -57,6 +57,13 @@ func (s *stubTaskControl) CommitDelete(_ app.PaneEnv, tab string) error {
 	return s.commitErr
 }
 
+// ForceDelete は通常の削除と **別の呼び出しとして記録する**。同じ扱いに
+// すると、強制削除を選んでいないのに通ってしまう回帰を捕まえられない。
+func (s *stubTaskControl) ForceDelete(_ app.PaneEnv, tab string) error {
+	s.calls = append(s.calls, "force "+tab)
+	return s.commitErr
+}
+
 // newTaskControl はモデルとスタブを組み立てる。
 func newTaskControl(t *testing.T, pane *stubTaskControl) tui.TaskControlModel {
 	t.Helper()
@@ -216,10 +223,12 @@ func TestTaskControlUploadFailureCancelsDeletion(t *testing.T) {
 		t.Fatal("dd でコマンドが出ていない")
 	}
 	next, cmd := m.Update(msg)
+	// 通知と `!` の受付は同じタイマーで解く。無期限に武装したままにすると、
+	// 後から押した `!` が意図せず効く。
 	if cmd == nil {
-		t.Fatal("通知のタイマーが張られていない")
+		t.Error("期限のタイマーが張られていない")
 	}
-	if got := content(next); !strings.Contains(got, "Upload failed. Deletion cancelled.") {
+	if got := content(next); !strings.Contains(got, "Upload failed") {
 		t.Errorf("中止の表示が出ていない: %q", got)
 	}
 	for _, call := range pane.calls {
@@ -294,4 +303,125 @@ func equalStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// TestTaskControlNoticeIsSingleLine は中止の通知が 1 行に収まることを
+// 確かめる。
+//
+// **このペインは 1 行しかない。** 複数行にすると操作バーの高さが変わり、
+// タブの中の表示が押し出される。理由の全文は Dashboard 側に出す。
+func TestTaskControlNoticeIsSingleLine(t *testing.T) {
+	t.Parallel()
+
+	const reason = "ログリポジトリへのpushに失敗しました: 認証エラー"
+	pane := &stubTaskControl{prep: app.DeletePreparation{Cancelled: true, Reason: reason}}
+	m, _ := newTaskControl(t, pane).Update(key('d'))
+	m, msg := pressTC(t, m, 'd')
+	if msg == nil {
+		t.Fatal("dd でコマンドが出ていない")
+	}
+	next, _ := m.Update(msg)
+
+	got := content(next)
+	if lines := strings.Count(strings.TrimRight(got, "\n"), "\n") + 1; lines != 1 {
+		t.Errorf("%d 行になっている: %q", lines, got)
+	}
+	if !strings.Contains(got, "Upload failed") {
+		t.Errorf("中止の表示が出ていない: %q", got)
+	}
+	if !strings.Contains(got, "未アップロード削除") {
+		t.Errorf("逃げ道の案内が出ていない: %q", got)
+	}
+	// 理由の全文は載せない(1 行に収めるため)。
+	if strings.Contains(got, reason) {
+		t.Errorf("理由の全文が載っている: %q", got)
+	}
+}
+
+// TestTaskControlForceDeleteAfterCancel は中止の後に強制削除を選べることを
+// 確かめる(Dashboard と同じ契約)。
+func TestTaskControlForceDeleteAfterCancel(t *testing.T) {
+	t.Parallel()
+
+	pane := &stubTaskControl{prep: app.DeletePreparation{
+		Cancelled: true,
+		Reason:    "会話要約の生成に失敗しました: transcript のパスが記録されていません",
+	}}
+	m, _ := newTaskControl(t, pane).Update(key('d'))
+	m, msg := pressTC(t, m, 'd')
+	if msg == nil {
+		t.Fatal("dd でコマンドが出ていない")
+	}
+	shown, _ := m.Update(msg)
+
+	if got := content(shown); !strings.Contains(got, "未アップロード削除") {
+		t.Errorf("強制削除の案内が出ていない: %q", got)
+	}
+
+	forced, cmd := shown.Update(key('!'))
+	if cmd == nil {
+		t.Fatal("強制削除のコマンドが出ていない")
+	}
+	forced, run := forced.Update(cmd())
+	if run == nil {
+		t.Fatal("削除の実行コマンドが出ていない")
+	}
+	forced.Update(run())
+
+	var forcedCall, commitCall bool
+	for _, call := range pane.calls {
+		switch {
+		case strings.HasPrefix(call, "force "):
+			forcedCall = true
+		case strings.HasPrefix(call, "commit "):
+			commitCall = true
+		}
+	}
+	if !forcedCall {
+		t.Errorf("強制削除が呼ばれていない: %v", pane.calls)
+	}
+	if commitCall {
+		t.Errorf("通常の削除も呼ばれた: %v", pane.calls)
+	}
+}
+
+// TestTaskControlForceOfferClearedByOtherKey は他のキーで提示が消えることを
+// 確かめる。
+func TestTaskControlForceOfferClearedByOtherKey(t *testing.T) {
+	t.Parallel()
+
+	pane := &stubTaskControl{prep: app.DeletePreparation{Cancelled: true, Reason: "だめでした"}}
+	m, _ := newTaskControl(t, pane).Update(key('d'))
+	m, msg := pressTC(t, m, 'd')
+	shown, _ := m.Update(msg)
+
+	cleared, _ := shown.Update(key('m'))
+	forced, _ := cleared.Update(key('!'))
+	_ = forced
+
+	for _, call := range pane.calls {
+		if strings.HasPrefix(call, "force") {
+			t.Errorf("提示が消えた後に強制削除が走った: %v", pane.calls)
+		}
+	}
+}
+
+// TestUploadFailedNoticeIndentsContinuationLines は 2 行目以降にも字下げが
+// 入ることを確かめる。
+//
+// 呼び出し側は先頭行にしか字下げを付けないため、ここで入れないと 2 行目
+// だけが左端に寄って読みにくくなる。
+func TestUploadFailedNoticeIndentsContinuationLines(t *testing.T) {
+	t.Parallel()
+
+	pane := &stubTaskControl{prep: app.DeletePreparation{Cancelled: true, Reason: "理由の行"}}
+	m, _ := newTaskControl(t, pane).Update(key('d'))
+	m, msg := pressTC(t, m, 'd')
+	shown, _ := m.Update(msg)
+
+	for i, line := range strings.Split(strings.TrimRight(content(shown), "\n"), "\n") {
+		if !strings.HasPrefix(line, "  ") {
+			t.Errorf("%d 行目に字下げが無い: %q", i+1, line)
+		}
+	}
 }
