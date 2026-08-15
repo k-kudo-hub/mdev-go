@@ -96,6 +96,7 @@ func (i *Installer) Install(out io.Writer) error {
 		i.writeState,
 		i.configureHooks,
 		i.configureCodex,
+		i.removeCodexHooksCopy,
 		i.migrateLayouts,
 		i.removeShellScripts,
 		i.removeFlavor,
@@ -366,6 +367,63 @@ func (i *Installer) configureCodex(out io.Writer) error {
 			return err
 		}
 		_, _ = fmt.Fprintf(out, "  ✓ codex の notify を mdev へ向けました(%s)\n", i.Paths.CodexConfig)
+	}
+	return nil
+}
+
+// removeCodexHooksCopy は codex へ写された hooks のコピーを撤去する。
+//
+// # 何が起きたか
+//
+// codex 0.147 は Claude Code 互換の hooks エンジンを内蔵しており、Codex アプリの
+// external-agent import が settings.json の hooks を CODEX_HOME/hooks.json へ
+// **コピーする**。移行でこのコピーを見落としたまま scripts/ を消したため、
+// 写された hook がすべて exit 127 になり、codex の会話にエラーが出続けた。
+//
+// # なぜ書き換えではなく削除か
+//
+// codex は hooks.json の内容を trusted_hash として覚えている。中身を書き換えると
+// 照合に失敗し、利用者に再信頼の確認を求める。**mdev は codex を hook ではなく
+// スクリーン検出で扱う**ため、このコピーはそもそも要らない。要らないものを
+// 残して確認を出させるより、消すほうが筋が通る。
+//
+// # 将来のリスク
+//
+// Codex アプリの import が settings.json の Go 版 hooks を再び取り込む可能性が
+// ある。その場合の hook は exit 0 で無害だが、pending の更新が hook 経由と
+// スクリーン検出の二重で走る懸念が残る。**install がこの検査を毎回行うことが
+// その防波堤になる**(次の install で撤去される)。
+//
+// conductor 以外の hook が混ざっていれば触らない。利用者や他のツールが足した
+// ものを巻き添えにしないためで、そのときは手で外してもらう案内だけを出す。
+func (i *Installer) removeCodexHooksCopy(out io.Writer) error {
+	path := i.Paths.CodexHooksPath()
+	data, found, err := i.Files.Read(path)
+	if err != nil || !found {
+		return err
+	}
+
+	report, err := domain.InspectCodexHooks(data)
+	if err != nil {
+		// 読めない形は触らない。conductor 由来だと判定できない以上、
+		// 消してよいものではない。
+		_, _ = fmt.Fprintf(out, "  ! %s を読めませんでした(触っていません): %v\n", path, err)
+		return nil
+	}
+
+	switch report.Verdict {
+	case domain.CodexHooksNone:
+		return nil
+	case domain.CodexHooksMixed:
+		_, _ = fmt.Fprintf(out, "  ! %s\n",
+			domain.RenderCodexHooksWarning(path, report.Conductor))
+		return nil
+	case domain.CodexHooksAllConductor:
+		if err := i.Files.Remove(path); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(out,
+			"  ✓ codex の hooks コピーを撤去しました(mdev は codex をスクリーン検出で扱うため不要)")
 	}
 	return nil
 }

@@ -460,3 +460,142 @@ func TestInstallStopsWhenBackupFails(t *testing.T) {
 		t.Errorf("退避に失敗したのに書き換えた:\n%s", files.files[testInstallPaths.Settings])
 	}
 }
+
+// codexHooksPath はテストで使う codex の hooks コピーの場所である。
+var codexHooksPath = testInstallPaths.CodexHooksPath()
+
+// codexHooksCopy は Codex アプリが写した形の hooks.json を返す。
+func codexHooksCopy(commands ...string) string {
+	hooks := make([]string, 0, len(commands))
+	for _, command := range commands {
+		hooks = append(hooks, `{"type":"command","command":"`+command+`"}`)
+	}
+	return `{"Stop":[{"matcher":"","hooks":[` + strings.Join(hooks, ",") + `]}]}` + "\n"
+}
+
+// TestInstallRemovesCodexHooksCopy は codex へ写された hooks を撤去することを
+// 確かめる。
+//
+// codex 0.147 は Claude Code 互換の hooks エンジンを内蔵しており、Codex アプリの
+// import が settings.json の hooks を CODEX_HOME/hooks.json へコピーする。
+// これを見落としたまま scripts/ を消したため、写された hook がすべて exit 127 に
+// なり codex の会話にエラーが出続けた。
+func TestInstallRemovesCodexHooksCopy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "旧 Shell 形",
+			content: codexHooksCopy("${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh"),
+		},
+		{
+			name:    "新 Go 形",
+			content: codexHooksCopy("${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			files := newFakeFileStore()
+			files.files[codexHooksPath] = tt.content
+
+			out := runInstall(t, files, allAvailable)
+
+			if _, ok := files.files[codexHooksPath]; ok {
+				t.Errorf("撤去されていない: %q", files.files[codexHooksPath])
+			}
+			if !strings.Contains(out, "hooks コピーを撤去") {
+				t.Errorf("撤去したことを伝えていない:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestInstallKeepsMixedCodexHooks は他のツールの hook が混ざっていたら
+// 触らないことを確かめる。
+//
+// **巻き添えにしない。** 利用者や他のツールが足したものを conductor の都合で
+// 消してはならない。
+func TestInstallKeepsMixedCodexHooks(t *testing.T) {
+	t.Parallel()
+
+	content := `{"Stop":[{"matcher":"","hooks":[` +
+		`{"type":"command","command":"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify"},` +
+		`{"type":"command","command":"my-own-linter --fix"}]}]}` + "\n"
+
+	files := newFakeFileStore()
+	files.files[codexHooksPath] = content
+
+	out := runInstall(t, files, allAvailable)
+
+	if files.files[codexHooksPath] != content {
+		t.Errorf("書き換えた: %q", files.files[codexHooksPath])
+	}
+	if !strings.Contains(out, "触っていません") {
+		t.Errorf("警告が出ていない:\n%s", out)
+	}
+	// 手掛かり(どの hook が conductor 由来か)も出す。
+	if !strings.Contains(out, "Stop") {
+		t.Errorf("対象の hook が示されていない:\n%s", out)
+	}
+}
+
+// TestInstallWithoutCodexHooksCopy は無ければ何もしないことを確かめる。
+func TestInstallWithoutCodexHooksCopy(t *testing.T) {
+	t.Parallel()
+
+	files := newFakeFileStore()
+	out := runInstall(t, files, allAvailable)
+
+	if _, ok := files.files[codexHooksPath]; ok {
+		t.Error("hooks のコピーを作った")
+	}
+	if strings.Contains(out, "hooks コピー") {
+		t.Errorf("要らない報告を出した:\n%s", out)
+	}
+}
+
+// TestInstallCodexHooksRemovalIsIdempotent は 2 回目で何も起きないことを
+// 確かめる。install は繰り返し実行される。
+func TestInstallCodexHooksRemovalIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	files := newFakeFileStore()
+	files.files[codexHooksPath] = codexHooksCopy(
+		"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify")
+
+	runInstall(t, files, allAvailable)
+	files.writes, files.removed = nil, nil
+
+	out := runInstall(t, files, allAvailable)
+
+	if len(files.removed) != 0 {
+		t.Errorf("2 回目が削除した: %v", files.removed)
+	}
+	if strings.Contains(out, "hooks コピーを撤去") {
+		t.Errorf("2 回目が撤去を報告した:\n%s", out)
+	}
+}
+
+// TestInstallKeepsUnreadableCodexHooks は読めない形を触らないことを確かめる。
+//
+// conductor 由来だと判定できない以上、消してよいものではない。
+func TestInstallKeepsUnreadableCodexHooks(t *testing.T) {
+	t.Parallel()
+
+	const content = `{"Stop":` + "\n"
+	files := newFakeFileStore()
+	files.files[codexHooksPath] = content
+
+	out := runInstall(t, files, allAvailable)
+
+	if files.files[codexHooksPath] != content {
+		t.Errorf("触った: %q", files.files[codexHooksPath])
+	}
+	if !strings.Contains(out, "読めませんでした") {
+		t.Errorf("警告が出ていない:\n%s", out)
+	}
+}

@@ -206,6 +206,9 @@ cd ~/projects/claude-conductor && git checkout <最終タグ> && ./install.sh
 - **ペインが即死する**: `~/.claude-conductor/layouts/multi.kdl` の呼び出しを確認する。`mdev install` を再実行すれば書き換わる
 - **hook が効かない**: `jq '.hooks' ~/.claude/settings.json` で `bin/mdev hook` を指しているか確認する
 - **codex のタスクが Dashboard に出ない**: `grep notify ~/.codex/config.toml` を確認する。別ツールが notify を使っている場合は install が触らず案内だけ出しているので、その notify から `mdev codex notify '<payload>'` を呼ぶ必要がある
+- **codex の会話に hook のエラーが出続ける**: `ls ~/.codex/hooks.json` を確認する。codex 0.147 以降は Claude Code 互換の hooks エンジンを内蔵しており、**Codex アプリの external-agent import が `~/.claude/settings.json` の hooks をここへコピーする**。`mdev install` はこのコピーが全部 conductor 由来なら撤去する（mdev は codex を hook ではなくスクリーン検出で扱うため不要）。他のツールの hook が混ざっている場合は触らず警告だけ出すので、手で取り除く
+
+  **将来のリスク**: Codex アプリの import が settings.json の Go 版 hooks を再び取り込む可能性がある。その hook は `exit 0` で無害だが、pending の更新が hook 経由とスクリーン検出の二重で走る懸念が残る。`mdev install` がこの検査を毎回行うことが防波堤になる（次の install で撤去される）ため、**取り込まれた気配があれば `mdev install` を実行すればよい**
 - **`mdev` が「レイアウトがありません」と言う**: `mdev install` を実行する
 
 ## 開発側の確認（任意）

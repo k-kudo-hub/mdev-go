@@ -63,6 +63,14 @@ func (p InstallPaths) FlavorPath() string {
 // flavorFile は廃止された切り替えフラグの名前である。
 const flavorFile = "FLAVOR"
 
+// CodexHooksPath は codex が読む hooks のコピーの場所を返す。
+//
+// config.toml と同じ CODEX_HOME 直下にある。別のフィールドを増やさないのは、
+// この 2 つが離れて設定されることが無いためである。
+func (p InstallPaths) CodexHooksPath() string {
+	return filepath.Join(filepath.Dir(p.CodexConfig), CodexHooksFileName)
+}
+
 // ConductorPath は CONDUCTOR_HOME からの相対パスを絶対パスにする。
 //
 // filepath.Join で正規化する。文字列を継ぐと CONDUCTOR_HOME が `/` の
