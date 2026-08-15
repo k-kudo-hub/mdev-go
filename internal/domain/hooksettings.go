@@ -37,27 +37,9 @@ var switchHookCommandRules = []hookCommandRule{
 	{from: "/scripts/pending-resolve.sh", to: "/bin/mdev hook resolve"},
 }
 
-// restoreHookCommandRules は switchHookCommandRules の from と to を入れ替えた
-// 逆向きの規則である。復元をバックアップの全文書き戻しではなく
-// 「切り替えと逆向きの外科的な書き換え」で行うために使う。
-//
-// 全文を書き戻すと、切り替え後に Claude Code 自身が settings.json へ書いた
-// 変更(permissions.allow の追加が典型)が黙って消える。逆変換であれば
-// hooks 以外の差分は一切触らずに残る。
-var restoreHookCommandRules = reverseHookCommandRules(switchHookCommandRules)
-
 // pendingScriptMarker は conductor の pending スクリプト呼び出しの目印である。
 // switchHookCommandRules の from はすべてこの文字列を含む。
 const pendingScriptMarker = "/scripts/pending-"
-
-// reverseHookCommandRules は規則の向きを入れ替えた新しい規則列を返す。
-func reverseHookCommandRules(rules []hookCommandRule) []hookCommandRule {
-	out := make([]hookCommandRule, 0, len(rules))
-	for _, r := range rules {
-		out = append(out, hookCommandRule{from: r.to, to: r.from})
-	}
-	return out
-}
 
 // SwitchedHookCommandSuffixes は切り替え後のコマンドの末尾を、規則の順で返す。
 //
@@ -129,19 +111,6 @@ func RemainingPendingScriptCommands(settings []byte) ([]HookCommand, error) {
 // 2 回目以降の呼び出しは変更なしになる(冪等)。
 func SwitchHookCommands(settings []byte) ([]byte, []HookCommandChange, error) {
 	return rewriteHookCommands(settings, switchHookCommandRules)
-}
-
-// RestoreHookCommands は SwitchHookCommands と逆向きの置換を行う。
-// `mdev hook` サブコマンドの呼び出しを conductor のスクリプト呼び出しへ戻す。
-//
-// 走査と編集の仕組みは SwitchHookCommands と同一で、規則の向きだけが違う。
-// そのため switch → restore の往復は(対象の文字列リテラルが素直な表記で
-// 書かれている限り)バイト単位で恒等になる。
-//
-// 既にスクリプトを指しているコマンドはどの規則にも一致しないため、
-// 2 回目以降の呼び出しは変更なしになる(冪等)。
-func RestoreHookCommands(settings []byte) ([]byte, []HookCommandChange, error) {
-	return rewriteHookCommands(settings, restoreHookCommandRules)
 }
 
 // rewriteHookCommands は rules に従って `.hooks` 配下のコマンドを書き換える。

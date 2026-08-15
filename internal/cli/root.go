@@ -31,14 +31,23 @@ const (
 	exitBlocking = 2
 )
 
+// dryRunFlag は書き込みや起動を行わないことを指定するフラグ名である。
+//
+// `mdev sessions clean` と `mdev test` が使う。以前は `mdev hooks` が持って
+// いたが、そちらを撤去したのでここへ移した。
+const dryRunFlag = "dry-run"
+
+// addDryRunFlag は --dry-run を足す。
+func addDryRunFlag(cmd *cobra.Command) {
+	cmd.Flags().Bool(dryRunFlag, false, "変更内容を表示するだけで書き込まない")
+}
+
 // Deps はサブコマンドが必要とする依存である。組み立ては cmd/mdev が行う。
 type Deps struct {
 	// Hooks は hook イベントを処理するユースケース。
 	Hooks HookService
 	// Record は作業サマリを daily log へ記録するユースケース。
 	Record RecordService
-	// HookSettings は settings.json の hooks を切り替えるユースケース。
-	HookSettings HookSettingsService
 	// Panes はダッシュボード系ペインを動かすユースケース。
 	Panes PaneService
 	// Update は conductor を最新のリリースへ入れ直すユースケース。
@@ -108,7 +117,6 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	}
 	cmd.AddCommand(newHookCommand(deps))
 	cmd.AddCommand(newRecordCommand(deps))
-	cmd.AddCommand(newHooksCommand(deps))
 	cmd.AddCommand(newPaneCommand(deps))
 	cmd.AddCommand(newVersionCommand(deps))
 	cmd.AddCommand(newSessionsCommand(deps))

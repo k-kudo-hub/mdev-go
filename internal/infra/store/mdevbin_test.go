@@ -10,10 +10,7 @@ import (
 	"github.com/k-kudo-hub/mdev-go/internal/infra/store"
 )
 
-var (
-	_ app.MdevBinaryLocator   = (*store.MdevBinaryStore)(nil)
-	_ app.TaskControlLauncher = (*store.MdevBinaryStore)(nil)
-)
+var _ app.TaskControlLauncher = (*store.MdevBinaryStore)(nil)
 
 func TestMdevBinaryStore(t *testing.T) {
 	t.Parallel()

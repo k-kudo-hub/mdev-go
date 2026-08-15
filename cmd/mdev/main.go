@@ -84,20 +84,6 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Clock:      clock,
 	}
 
-	// settings.json は CONDUCTOR_HOME ではなく Claude Code の設定であるため
-	// ホーム直下の ~/.claude/settings.json を見る。MDEV_SETTINGS_FILE を
-	// 指定すると別のファイルを対象にできる(実環境へ適用する前の試行用)。
-	// 切り替え先のバイナリは hooks のコマンド文字列と同じ規約で
-	// CONDUCTOR_HOME 配下を見る。
-	hookSettings := &app.HookSwitcher{
-		Settings: store.NewSettingsStore(
-			store.SettingsPath(home, getenv("MDEV_SETTINGS_FILE")),
-			clock,
-		),
-		Binary: store.NewMdevBinaryStore(conductorHome),
-		Flavor: store.NewFlavorStore(conductorHome),
-	}
-
 	// ダッシュボード系 4 ペイン。pending はホーム直下、daily とニュースは
 	// CONDUCTOR_HOME 配下という置き場所の違いを PaneStore がそのまま持つ。
 	paneStore := store.NewPaneStore(store.PendingRoot(home), conductorHome)
@@ -191,7 +177,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Assets:   store.NewAssetStore(conductorHome),
 		Commands: shell.NewCommandChecker(),
 		// hooks の書き換えは利用者の設定ファイルへの破壊的な操作なので、
-		// hooks switch と同じ仕組みで退避してから書く。
+		// 意図しない結果になったときに戻せるよう、退避してから書く。
 		Backup:  store.NewSettingsStore(installPaths.Settings, clock),
 		Version: version,
 	}
@@ -281,10 +267,9 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 	}
 
 	return cli.Deps{
-		Hooks:        hooks,
-		Record:       record,
-		HookSettings: hookSettings,
-		Panes:        panes,
+		Hooks:  hooks,
+		Record: record,
+		Panes:  panes,
 		Update: &app.Updater{
 			State:  updateState,
 			Remote: remoteTags,

@@ -9,8 +9,9 @@
 //
 //   - config.default.json / hooks.json: conductor と同一。hooks.json が
 //     scripts/ を指したままなのは、これが Claude Code の settings.json へ
-//     写す雛形で、mdev の形への書き換えを `mdev hooks switch` が行うためで
-//     ある(雛形の側を書き換えると、切り替えと復元の対応が崩れる)
+//     写す雛形で、mdev の形への書き換えを install が行うためである
+//     (domain.InstallHooks が置換規則を通す。雛形の側を書き換えると、
+//     その置換規則と二重に持つことになる)
 //   - init.zsh: **mdev-go で新規に書いたもの**(conductor 側の 259 行の関数
 //     定義とは別物)。PATH を通して `mdev init zsh` を eval するだけの入口で、
 //     関数の中身はバイナリが出力する

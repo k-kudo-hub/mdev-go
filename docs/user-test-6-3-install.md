@@ -37,7 +37,8 @@ cp ~/.codex/config.toml ~/.codex/config.toml.bak-6-3
 - `✓ codex の notify を mdev へ向けました`
 - `✓ layouts/*.kdl の呼び出しを mdev へ書き換えました`
 - `✓ Shell スクリプトを撤去します` + **消えるファイルの一覧**
-- `✓ FLAVOR を削除しました`
+- `✓ 不要になったファイルを撤去しました: FLAVOR, hooks.json`
+  - `hooks.json` は**配られたままのときだけ**消える。編集してある場合は残り、`! ... は編集されているため残しました(mdev はこのファイルを読みません)` が出る
 - `✓ .zshrc は設定済みです`
 
 続けて確認する。
@@ -47,6 +48,7 @@ ls ~/.claude-conductor/scripts 2>&1     # 期待: No such file or directory
 cat ~/.claude-conductor/REPO_URL        # 期待: .../mdev-go
 cat ~/.claude-conductor/VERSION         # 期待: mdev version と同じ
 ls ~/.claude-conductor/FLAVOR 2>&1      # 期待: No such file or directory
+ls ~/.claude-conductor/hooks.json 2>&1  # 期待: No such file or directory(編集していれば残る)
 grep -c '/scripts/' ~/.claude/settings.json ~/.claude-conductor/layouts/*.kdl   # 期待: すべて 0
 grep 'codex-notify' ~/.codex/config.toml                                       # 期待: 何も出ない
 ```
@@ -172,9 +174,20 @@ zellij list-sessions    # 期待: テストセッションが消えている
 mdev update
 ```
 
-**期待**（既に最新のとき）: `設定を最新の形へ揃えています...` の後に install が走り、何も書き換わらない。
+**期待（既に最新のとき）**: `既に最新です（vX.Y.Z）。` の 1 行だけ。**install は走らず、ファイルは 1 つも書き換わらない。**
 
-新しい版が出ている場合は、自己置換して「もう一度 `mdev update` を実行」と案内される。2 回目で設定の貼り直しまで進む。
+**期待（新しい版があるとき）**: 2 段で終わる。
+
+1. 1 回目: `mdev 自身を <旧> -> <新> に更新します...` → 自己置換 → **「もう一度 `mdev update` を実行してください」**の案内でそこで終わる
+   （今動いているのは置き換える前の中身なので、そのまま設定を貼ると古い実装で貼ることになる）
+2. 2 回目: 自分は最新なので自己置換は飛ばし、`<旧> -> <新> に更新します...` → install が設定を貼り直す → `✅ <新> に更新しました。`
+
+```sh
+mdev version    # 期待: 2 回目の後は新しい版を名乗る
+cat ~/.claude-conductor/VERSION   # 期待: mdev version と同じ
+```
+
+この流れは v0.13.1 の配備で実証済みである。
 
 ### 9. `mdev check-update`
 
@@ -198,7 +211,7 @@ exec zsh
 ### Shell 版へ戻す
 
 ```sh
-cd ~/projects/claude-conductor && git checkout <最終タグ> && ./install.sh
+cd ~/projects/claude-conductor && git checkout v0.9.1 && ./install.sh
 ```
 
 ### 個別の症状
@@ -214,7 +227,7 @@ cd ~/projects/claude-conductor && git checkout <最終タグ> && ./install.sh
 
 ```sh
 make build && scripts/verify-install-isolated.sh bin/mdev
-# 期待: 27 件成功 / 0 件失敗
+# 期待: 28 件成功 / 0 件失敗
 ```
 
 **実環境には触れない。** HOME・CONDUCTOR_HOME・CODEX_HOME に加えて **TMPDIR も隔離する**のが要点で、zellij のソケット置き場が `$TMPDIR/zellij-<uid>` で決まるためである。ここを実環境のままにすると、検証で作ったセッションが利用者の一覧に並び、掃除の対象にもなる。スクリプトは TMPDIR が一時ディレクトリの根そのものを指していたら起動を拒否する。

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -13,10 +14,10 @@ import (
 
 // 資産の配り方。
 //
-//   - layouts/*.kdl と hooks.json は **不在のときだけ書く**。利用者が手を
-//     入れたものを install のたびに消さないための退避路である(ADR D4 の
-//     「カスタマイズの退避路」)。既にあるものが Shell を呼んでいる場合は、
-//     上書きせず migrateLayouts が壊れる箇所だけを書き換える
+//   - layouts/*.kdl は **不在のときだけ書く**。利用者が手を入れたものを
+//     install のたびに消さないための退避路である(ADR D4 の「カスタマイズの
+//     退避路」)。既にあるものが Shell を呼んでいる場合は、上書きせず
+//     migrateLayouts が壊れる箇所だけを書き換える
 //   - config.default.json と init.zsh は中身が違えば書き直す。どちらも
 //     配布物そのもので、利用者が手を入れる先ではない(設定は config.json、
 //     シェルの追加設定は .zshrc)。**init.zsh を更新しないのが特に危険で**、
@@ -25,14 +26,53 @@ import (
 //
 // どれも「同じ内容なら書かない」ので、2 回目の install はファイルを
 // 1 つも触らない。
+//
+// **hooks.json はここに無い。** ディスクへ置いても誰も読まないためである
+// (configureHooks が見るのは埋め込みのほう)。置いてあると「これを編集すれば
+// hooks が変わる」と読めてしまうので、撤去する側に回した(obsoleteFiles)。
 var installOnlyIfAbsent = []string{
-	"hooks.json",
 	"layouts/multi.kdl",
 	"layouts/dev.kdl",
 }
 
 // installAlwaysRefresh は中身が違えば書き直す資産である。
+//
+// **config.default.json はディスクに要る。** 設定の読み込みが
+// config.json → config.default.json の順に見る作り(store.ConfigPath /
+// LoadPricing)で、後者が現役の読み先だからである。hooks.json と違い、
+// 消すと単価表もエージェントの既定も引けなくなる。
 var installAlwaysRefresh = []string{"config.default.json", "init.zsh"}
+
+// obsoleteFile は移行で不要になった CONDUCTOR_HOME 直下のファイル 1 件である。
+type obsoleteFile struct {
+	// name は CONDUCTOR_HOME からの相対パス。
+	name string
+	// asset が空でなければ、その同梱資産と **中身が一致するときだけ** 消す。
+	//
+	// 空なら中身を見ずに消す。印として置いてあるだけで、書き換えて意味を
+	// 持たせられるものではないファイルに使う。
+	asset string
+}
+
+// obsoleteFiles は移行で不要になったファイルである。
+//
+// scripts/ の撤去と同じ枠で、**残っていると誤解のもとになるもの**を消す。
+//
+//   - FLAVOR: 2 系統を切り替える印。仕組みごと廃止した(ADR D4)。中身は
+//     "go" の 1 語で、編集して別の意味を持たせられるものではない
+//   - hooks.json: settings.json へ写す雛形。install が見るのは埋め込みのほう
+//     なので、ディスクの写しを編集しても何も変わらない。ただし **編集された
+//     ものは消さない**(下記)
+var obsoleteFiles = []obsoleteFile{
+	{name: flavorFileName},
+	{name: hooksTemplateName, asset: hooksTemplateName},
+}
+
+// flavorFileName は廃止された切り替えフラグの名前である。
+const flavorFileName = "FLAVOR"
+
+// hooksTemplateName は settings.json へ写す hooks の雛形の名前である。
+const hooksTemplateName = "hooks.json"
 
 // configDefaultName は既定値のファイル名である。
 const configDefaultName = "config.default.json"
@@ -98,7 +138,7 @@ func (i *Installer) Install(out io.Writer) error {
 		i.configureCodex,
 		i.migrateLayouts,
 		i.removeShellScripts,
-		i.removeFlavor,
+		i.removeObsoleteFiles,
 	} {
 		if err := step(out); err != nil {
 			errs = append(errs, err)
@@ -301,7 +341,7 @@ func (i *Installer) configureHooks(out io.Writer) error {
 		return nil
 	}
 	// **書き換える前に退避する。** 利用者の設定ファイルなので、意図しない
-	// 結果になったときに戻せる状態を残す(`mdev hooks switch` と同じ)。
+	// 結果になったときに戻せる状態を残す(戻し方は README に書いてある)。
 	if err := i.backupSettings(out, current); err != nil {
 		return err
 	}
@@ -431,17 +471,61 @@ func (i *Installer) removeShellScripts(out io.Writer) error {
 	return i.Files.Remove(dir)
 }
 
-// removeFlavor は廃止された切り替えフラグを消す(ADR D4)。
-func (i *Installer) removeFlavor(out io.Writer) error {
-	path := i.Paths.FlavorPath()
-	if !i.Files.Exists(path) {
-		return nil
+// removeObsoleteFiles は移行で不要になったファイルを消す。
+//
+// 消すのは **mdev が置いたもので、今は誰も読まないもの** だけである
+// (obsoleteFiles を参照)。利用者のデータには触らない。
+func (i *Installer) removeObsoleteFiles(out io.Writer) error {
+	var errs []error
+	var removed []string
+	for _, obsolete := range obsoleteFiles {
+		path := i.Paths.ConductorPath(obsolete.name)
+		current, found, err := i.Files.Read(path)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !found {
+			continue
+		}
+
+		if !i.matchesAsset(obsolete, current) {
+			// **編集されているものは消さない。** 読まれないファイルであっても、
+			// 利用者が手を入れたものを黙って捨ててよい理由にはならない。
+			// 消してよいかどうかは、中身を見た本人が決める。
+			_, _ = fmt.Fprintf(out,
+				"  ! %s は編集されているため残しました(mdev はこのファイルを読みません)\n", path)
+			continue
+		}
+		if err := i.Files.Remove(path); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removed = append(removed, obsolete.name)
 	}
-	if err := i.Files.Remove(path); err != nil {
-		return err
+	if len(removed) > 0 {
+		_, _ = fmt.Fprintf(out, "  ✓ 不要になったファイルを撤去しました: %s\n",
+			strings.Join(removed, ", "))
 	}
-	_, _ = fmt.Fprintln(out, "  ✓ FLAVOR を削除しました(切り替えの仕組みは廃止されました)")
-	return nil
+	return errors.Join(errs...)
+}
+
+// matchesAsset は消してよい中身かどうかを返す。
+//
+// 照合するのは同梱資産の 1 本だけでよい。conductor v0.9.1(Shell 版の最終タグ)が
+// 配っていた hooks.json は埋め込みとバイト一致することを実測で確かめてある
+// (6-2 で mdev-go 側へ写したものがそのまま正本になっているため)。よって
+// 「配られたままのもの」はこの 1 回の比較で拾える。
+func (i *Installer) matchesAsset(obsolete obsoleteFile, current []byte) bool {
+	if obsolete.asset == "" {
+		return true
+	}
+	body, ok := i.Assets.Asset(obsolete.asset)
+	if !ok {
+		// 同梱されていない資産とは比べようがない。触らない側へ倒す。
+		return false
+	}
+	return bytes.Equal(current, body)
 }
 
 // reportShell は .zshrc の状況を伝える。**書き換えはしない。**

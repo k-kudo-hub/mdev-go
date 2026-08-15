@@ -1,14 +1,9 @@
 package store
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 )
@@ -39,7 +34,7 @@ func ClaudeSettingsPath(home string) string {
 // SettingsPath は書き換え対象の settings.json のパスを返す。
 //
 // envValue(MDEV_SETTINGS_FILE)が空でなければそれを使う。実環境の
-// ~/.claude/settings.json へ適用する前に、コピーに対して切り替えと復元を
+// ~/.claude/settings.json へ適用する前に、コピーに対して install を
 // 試せるようにするための逃げ道である。
 func SettingsPath(home, envValue string) string {
 	if envValue != "" {
@@ -48,9 +43,14 @@ func SettingsPath(home, envValue string) string {
 	return ClaudeSettingsPath(home)
 }
 
-// SettingsStore は settings.json を読み書きする app.SettingsStore の実装である。
+// SettingsStore は settings.json を退避する app.SettingsBackup の実装である。
 //
-// 書き込みは同一ディレクトリでの原子的な置き換えで行い、既存ファイルの
+// **退避専用である。** 以前は読み書きと復元(最新のバックアップを引く)も
+// 持っていたが、読み書きは install が FileStore を通るようになり、復元は
+// `mdev hooks restore` ごと廃止した(v0.14)。戻す操作は利用者が cp で行う
+// (手順は README に書いてある)。
+//
+// 退避は同一ディレクトリでの原子的な置き換えで行い、既存ファイルの
 // パーミッションを引き継ぐ。利用者が権限を絞っている設定ファイルを
 // mdev の都合で緩めないためである。
 type SettingsStore struct {
@@ -64,23 +64,11 @@ func NewSettingsStore(path string, clock app.Clock) *SettingsStore {
 	return &SettingsStore{path: path, clock: clock}
 }
 
-// Path は settings.json のパスを返す。
-func (s *SettingsStore) Path() string { return s.path }
-
-// Read は settings.json の内容をそのまま返す。
-func (s *SettingsStore) Read() ([]byte, error) {
-	b, err := os.ReadFile(s.path) //nolint:gosec // 呼び出し側が決めた設定ファイルのパス
-	if err != nil {
-		return nil, fmt.Errorf("設定ファイル %s の読み取りに失敗しました: %w", s.path, err)
-	}
-	return b, nil
-}
-
 // Backup は data を settings.json と同じディレクトリへ退避し、そのパスを返す。
 //
 // ファイル名は <対象ファイル名>.mdev-backup-<UTC タイムスタンプ(秒)> である。
 // 同じ秒に 2 回作られた場合は上書きになるが、Switch は変更がある場合にしか
-// 退避しないため、同じ秒の 2 回目は「1 回目より新しい切り替え前の内容」であり、
+// 退避しないため、同じ秒の 2 回目は「1 回目より新しい書き換え前の内容」であり、
 // 最新として上書きされるのが正しい。
 func (s *SettingsStore) Backup(data []byte) (string, error) {
 	name := s.backupPrefix() + s.clock.Now().UTC().Format(settingsBackupTimeLayout)
@@ -97,66 +85,6 @@ func (s *SettingsStore) Backup(data []byte) (string, error) {
 // 予行演習した場合に、実ファイルの復元がコピーのバックアップを拾ってしまう。
 func (s *SettingsStore) backupPrefix() string {
 	return filepath.Base(s.path) + settingsBackupInfix
-}
-
-// Write は settings.json を data で原子的に置き換える。
-func (s *SettingsStore) Write(data []byte) error {
-	if err := writeFileAtomicMode(s.path, data, s.mode()); err != nil {
-		return fmt.Errorf("設定ファイル %s の書き込みに失敗しました: %w", s.path, err)
-	}
-	return nil
-}
-
-// LatestBackup は最も新しいバックアップのパスと内容を返す。
-// バックアップが 1 つも無い場合(ディレクトリごと無い場合を含む)は
-// found=false を返す。switch を実行していない状態は異常ではないためである。
-func (s *SettingsStore) LatestBackup() (string, []byte, bool, error) {
-	dir := filepath.Dir(s.path)
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil, false, nil
-	}
-	if err != nil {
-		return "", nil, false, fmt.Errorf("ディレクトリ %s の一覧に失敗しました: %w", dir, err)
-	}
-
-	prefix := s.backupPrefix()
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() || !isBackupName(e.Name(), prefix) {
-			continue
-		}
-		names = append(names, e.Name())
-	}
-	if len(names) == 0 {
-		return "", nil, false, nil
-	}
-	// タイムスタンプの形式が辞書順 = 時系列であるため、名前の最大値が最新。
-	sort.Strings(names)
-
-	path := filepath.Join(dir, names[len(names)-1])
-	data, err := os.ReadFile(path) //nolint:gosec // 自分が作ったバックアップ
-	if err != nil {
-		return "", nil, false, fmt.Errorf("バックアップ %s の読み取りに失敗しました: %w", path, err)
-	}
-	return path, data, true, nil
-}
-
-// isBackupName は name が mdev の作ったバックアップの名前かどうかを返す。
-//
-// 前置きの一致だけでは足りない。writeFileAtomicMode の一時ファイルは
-// <対象名>.tmp-<乱数> という名前で、バックアップ書き込み中のクラッシュで
-// settings.json.mdev-backup-<ts>.tmp-<乱数> が残ると、前置きが一致し
-// 辞書順でも大きいため「最新のバックアップ」に選ばれてしまう。
-// 書きかけの内容で settings.json を復元しては復旧手段が壊れる。
-// 前置きを除いた残りがタイムスタンプそのものである名前だけを候補にする。
-func isBackupName(name, prefix string) bool {
-	rest, ok := strings.CutPrefix(name, prefix)
-	if !ok {
-		return false
-	}
-	_, err := time.Parse(settingsBackupTimeLayout, rest)
-	return err == nil
 }
 
 // mode は settings.json の現在のパーミッションを返す。

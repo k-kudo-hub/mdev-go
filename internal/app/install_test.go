@@ -35,12 +35,17 @@ func TestInstallFreshEnvironment(t *testing.T) {
 	runInstall(t, files, allAvailable)
 
 	for _, rel := range []string{
-		"config.default.json", "config.json", "hooks.json", "init.zsh",
+		"config.default.json", "config.json", "init.zsh",
 		"layouts/multi.kdl", "layouts/dev.kdl", "VERSION", "REPO_URL",
 	} {
 		if _, ok := files.files[conductorPath(rel)]; !ok {
 			t.Errorf("%s が配置されていない", rel)
 		}
+	}
+	// hooks.json はディスクへ置かない。誰も読まないうえ、置いてあると
+	// 「これを編集すれば hooks が変わる」と読めてしまう。
+	if _, ok := files.files[conductorPath("hooks.json")]; ok {
+		t.Error("hooks.json を配置した")
 	}
 	if got := files.files[conductorPath("VERSION")]; got != "v1.2.3\n" {
 		t.Errorf("VERSION = %q, want バイナリ自身の版", got)
@@ -141,6 +146,10 @@ func TestInstallMigratesShellEnvironment(t *testing.T) {
 	files.files[conductorPath("scripts/pending-notify.sh")] = "#!/bin/bash\n"
 	files.files[conductorPath("scripts/fetch-news.sh")] = "#!/bin/bash\n"
 	files.files[conductorPath("FLAVOR")] = "go\n"
+	// 配られたままの雛形(編集されていれば残る。別のテストで確かめている)。
+	if template, ok := testAssets.Asset("hooks.json"); ok {
+		files.files[conductorPath("hooks.json")] = string(template)
+	}
 	files.files[conductorPath("layouts/multi.kdl")] =
 		`args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/dashboard-loop.sh"` + "\n"
 	files.files[testInstallPaths.Settings] = `{"permissions":{"allow":["Bash(ls:*)"]},"hooks":{"Stop":[` +
@@ -160,8 +169,10 @@ func TestInstallMigratesShellEnvironment(t *testing.T) {
 			t.Errorf("撤去した %q が出力に無い:\n%s", name, out)
 		}
 	}
-	if files.Exists(conductorPath("FLAVOR")) {
-		t.Error("FLAVOR が残っている")
+	for _, name := range []string{"FLAVOR", "hooks.json"} {
+		if files.Exists(conductorPath(name)) {
+			t.Errorf("%s が残っている", name)
+		}
 	}
 	for _, path := range []string{
 		conductorPath("layouts/multi.kdl"),
@@ -458,5 +469,82 @@ func TestInstallStopsWhenBackupFails(t *testing.T) {
 	}
 	if files.files[testInstallPaths.Settings] != existing {
 		t.Errorf("退避に失敗したのに書き換えた:\n%s", files.files[testInstallPaths.Settings])
+	}
+}
+
+// TestInstallRemovesUntouchedHooksTemplate は配られたままの hooks.json を
+// 撤去することを確かめる。
+//
+// install が hooks を組み立てるときに見るのは埋め込みのほうで、ディスクの
+// 写しは誰も読まない。置いてあると「これを編集すれば hooks が変わる」と
+// 読めてしまう。
+func TestInstallRemovesUntouchedHooksTemplate(t *testing.T) {
+	t.Parallel()
+
+	template, ok := testAssets.Asset("hooks.json")
+	if !ok {
+		t.Fatal("テスト用の資産に hooks.json が無い")
+	}
+	files := newFakeFileStore()
+	files.files[conductorPath("hooks.json")] = string(template)
+
+	runInstall(t, files, allAvailable)
+
+	if _, ok := files.files[conductorPath("hooks.json")]; ok {
+		t.Errorf("撤去されていない: %q", files.files[conductorPath("hooks.json")])
+	}
+}
+
+// TestInstallKeepsEditedHooksTemplate は編集された hooks.json を残すことを
+// 確かめる。
+//
+// **読まれないファイルであっても、利用者が手を入れたものを黙って捨ててよい
+// 理由にはならない。** 消してよいかどうかは、中身を見た本人が決める。
+func TestInstallKeepsEditedHooksTemplate(t *testing.T) {
+	t.Parallel()
+
+	const edited = `{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"my-own"}]}]}` + "\n"
+	files := newFakeFileStore()
+	files.files[conductorPath("hooks.json")] = edited
+
+	out := runInstall(t, files, allAvailable)
+
+	if files.files[conductorPath("hooks.json")] != edited {
+		t.Errorf("編集されたものを触った: %q", files.files[conductorPath("hooks.json")])
+	}
+	for _, removed := range files.removed {
+		if removed == conductorPath("hooks.json") {
+			t.Fatal("編集されたものを削除した")
+		}
+	}
+	if !strings.Contains(out, "編集されているため残しました") {
+		t.Errorf("残した理由が出ていない:\n%s", out)
+	}
+	// 読まれないことも伝える(残す判断をするのに要る)。
+	if !strings.Contains(out, "読みません") {
+		t.Errorf("読まれないことを伝えていない:\n%s", out)
+	}
+}
+
+// TestInstallRemovesFlavorRegardlessOfContent は FLAVOR を中身に関わらず
+// 消すことを確かめる。
+//
+// hooks.json と違い、これは印として置いてあるだけで、書き換えて別の意味を
+// 持たせられるものではない。仕組みごと廃止されている。
+func TestInstallRemovesFlavorRegardlessOfContent(t *testing.T) {
+	t.Parallel()
+
+	for _, content := range []string{"go\n", "shell\n", "利用者が書いた何か\n"} {
+		t.Run(content, func(t *testing.T) {
+			t.Parallel()
+			files := newFakeFileStore()
+			files.files[conductorPath("FLAVOR")] = content
+
+			runInstall(t, files, allAvailable)
+
+			if files.Exists(conductorPath("FLAVOR")) {
+				t.Error("FLAVOR が残っている")
+			}
+		})
 	}
 }

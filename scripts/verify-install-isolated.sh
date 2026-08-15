@@ -98,7 +98,8 @@ ZJ
 printf '#!/bin/bash\nexit 0\n' > "$B/claude"; chmod +x "$B/zellij" "$B/claude"
 ENVBASE=(env -i PATH="$B:/usr/bin:/bin" HOME="$W/home" CONDUCTOR_HOME="$W/conductor" CODEX_HOME="$W/codex")
 "${ENVBASE[@]}" "$B/mdev" install >/dev/null 2>&1
-check "資産が配置される" "$(ls "$W/conductor" | tr '\n' ' ')" "REPO_URL VERSION config.default.json config.json hooks.json init.zsh layouts "
+# hooks.json はディスクへ置かない(install が見るのは埋め込みのほう)。
+check "資産が配置される" "$(ls "$W/conductor" | tr '\n' ' ')" "REPO_URL VERSION config.default.json config.json init.zsh layouts "
 check "REPO_URL が mdev-go" "$(cat "$W/conductor/REPO_URL")" "https://github.com/k-kudo-hub/mdev-go"
 before=$(find "$W/conductor" "$W/home" -type f -exec stat -f '%N %m %z' {} \; | sort)
 sleep 1
@@ -137,6 +138,7 @@ printf 'source "$HOME/.claude-conductor/init.zsh"\n' > "$W/home/.zshrc"
 env -i PATH="$B:/usr/bin:/bin" HOME="$W/home" CONDUCTOR_HOME="$C" CODEX_HOME="$W/codex" "$B/mdev" install >/dev/null 2>&1
 check "scripts/ が消える" "$([ -d "$C/scripts" ] && echo yes || echo no)" "no"
 check "FLAVOR が消える" "$([ -e "$C/FLAVOR" ] && echo yes || echo no)" "no"
+check "hooks.json が消える" "$([ -e "$C/hooks.json" ] && echo yes || echo no)" "no"
 check "REPO_URL が mdev-go" "$(cat "$C/REPO_URL")" "https://github.com/k-kudo-hub/mdev-go"
 check "hooks が mdev を指す" "$(python3 -c "
 import json;d=json.load(open('$W/home/.claude/settings.json'))

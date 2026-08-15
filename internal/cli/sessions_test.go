@@ -40,7 +40,7 @@ func TestSessionsCleanShowsTargets(t *testing.T) {
 	t.Parallel()
 
 	clean := &fakeSessionCleanService{result: app.CleanupResult{Plan: fullPlan()}}
-	code, out, stderr := runCLIOut(t, newCleanDeps(clean), "sessions", "clean")
+	code, out, stderr := runCLIWithOut(t, newCleanDeps(clean), "sessions", "clean")
 
 	if code != exitOK {
 		t.Fatalf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
@@ -58,7 +58,7 @@ func TestSessionsCleanDryRun(t *testing.T) {
 	t.Parallel()
 
 	clean := &fakeSessionCleanService{result: app.CleanupResult{Plan: fullPlan(), DryRun: true}}
-	code, out, _ := runCLIOut(t, newCleanDeps(clean), "sessions", "clean", "--dry-run")
+	code, out, _ := runCLIWithOut(t, newCleanDeps(clean), "sessions", "clean", "--dry-run")
 
 	if code != exitOK {
 		t.Fatalf("終了コード = %d, want %d", code, exitOK)
@@ -79,7 +79,7 @@ func TestSessionsCleanWithNothingToDo(t *testing.T) {
 	t.Parallel()
 
 	clean := &fakeSessionCleanService{}
-	code, out, _ := runCLIOut(t, newCleanDeps(clean), "sessions", "clean")
+	code, out, _ := runCLIWithOut(t, newCleanDeps(clean), "sessions", "clean")
 
 	if code != exitOK {
 		t.Errorf("終了コード = %d, want %d", code, exitOK)
@@ -95,7 +95,7 @@ func TestSessionsCleanReportsError(t *testing.T) {
 	t.Parallel()
 
 	clean := &fakeSessionCleanService{err: errors.New("zellij が無い")}
-	code, _, stderr := runCLIOut(t, newCleanDeps(clean), "sessions", "clean")
+	code, _, stderr := runCLIWithOut(t, newCleanDeps(clean), "sessions", "clean")
 
 	if code != exitError {
 		t.Errorf("終了コード = %d, want %d", code, exitError)
@@ -154,7 +154,7 @@ func TestSessionsCleanAuto(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			code, out, stderr := runCLIOut(t, newCleanDeps(tt.clean), "sessions", "clean", "--auto")
+			code, out, stderr := runCLIWithOut(t, newCleanDeps(tt.clean), "sessions", "clean", "--auto")
 
 			// **どの経路でも exit 0。** 起動を止めないための契約である。
 			if code != exitOK {
@@ -179,7 +179,7 @@ func TestSessionsCleanAutoWithDryRun(t *testing.T) {
 	t.Parallel()
 
 	clean := &fakeSessionCleanService{result: app.CleanupResult{Plan: fullPlan(), DryRun: true}}
-	if code, _, _ := runCLIOut(t, newCleanDeps(clean), "sessions", "clean", "--auto", "--dry-run"); code != exitOK {
+	if code, _, _ := runCLIWithOut(t, newCleanDeps(clean), "sessions", "clean", "--auto", "--dry-run"); code != exitOK {
 		t.Fatalf("終了コード = %d, want %d", code, exitOK)
 	}
 	if len(clean.dryRuns) != 1 || !clean.dryRuns[0] {

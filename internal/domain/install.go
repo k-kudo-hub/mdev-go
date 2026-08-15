@@ -55,14 +55,6 @@ func (p InstallPaths) InitZshPath() string {
 	return p.ConductorPath("init.zsh")
 }
 
-// FlavorPath は廃止された切り替えフラグの場所を返す(見つけたら消す)。
-func (p InstallPaths) FlavorPath() string {
-	return p.ConductorPath(flavorFile)
-}
-
-// flavorFile は廃止された切り替えフラグの名前である。
-const flavorFile = "FLAVOR"
-
 // ConductorPath は CONDUCTOR_HOME からの相対パスを絶対パスにする。
 //
 // filepath.Join で正規化する。文字列を継ぐと CONDUCTOR_HOME が `/` の

@@ -1,6 +1,16 @@
 #!/bin/bash
 # ダッシュボード系 4 ペインのゴールデン fixture を生成する。
 #
+# ⚠️ このスクリプトは claude-conductor のソースを必要とする。
+#
+# conductor をアーカイブした後は **再生成できない**。fixture は既にコミット
+# されており、テストはそれを読むだけなので**動き続ける**(このスクリプトは
+# 「その fixture がどう作られたか」の記録として残す)。
+#
+# 期待値を変えたくなった場合は、conductor の該当タグを取り出すか、fixture を
+# 手で編集したうえで **何を根拠に変えたかをコミットに残す**こと。Shell 版と
+# 一致していることが、これらの fixture の唯一の存在理由である。
+#
 # 現行 Shell 版(claude-conductor)の 4 つのペインスクリプトを ONCE モードで
 # 走らせ、その標準出力を cmd/mdev/testdata/golden-panes/<case>/expected.txt に
 # 保存する。入力(pending / daily / news)は同じ testdata の cases.json が定義し、
