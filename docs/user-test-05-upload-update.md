@@ -6,7 +6,7 @@
 
 - mdev-go **v0.9.0** を `~/.claude-conductor/bin/mdev` へ配備済み
 - claude-conductor **v0.8.0**(FLAVOR 対応 install.sh)を適用済み
-- `mdev hooks switch` 実行済み → **hooks は Go 版**、`~/.claude-conductor/FLAVOR` = `go`
+- hooks は Go 版(当時は `mdev hooks switch` で切り替えた。**このコマンドは v0.14 で廃止**され、現在は `mdev install` が行う)
 - install.sh 再実行での巻き戻り無しは検証済み(レイアウト 5 ペイン Go 版維持・hooks 不変・バックアップ増加なし)
 - upload 設定: `k-kudo-hub/context-hub` / work-log / main(有効)
 
@@ -54,4 +54,16 @@ jq -r '.hooks.Stop[0].hooks[-1].command' ~/.claude/settings.json # 期待: .../b
 ## 問題が出た場合
 
 - dd が `Upload failed. Deletion cancelled.` になる → タブは残る(会話は失われない)。そのまま報告してください
-- hooks を Shell 版に戻す: `~/.claude-conductor/bin/mdev hooks restore`(FLAVOR も消え、次の install で完全に Shell 版へ戻る)
+- hooks を元へ戻す: **`mdev hooks restore` は v0.14 で廃止された。** `mdev install` が書き換える前に取った退避から手で戻す
+
+  ```sh
+  ls -t ~/.claude/settings.json.mdev-backup-*
+  cp ~/.claude/settings.json.mdev-backup-<タイムスタンプ> ~/.claude/settings.json
+  ```
+
+- Shell 版へ戻す: claude-conductor の `v0.9.1`(Shell 実装として完結している最後のタグ)から入れ直す
+
+  ```sh
+  git clone https://github.com/k-kudo-hub/claude-conductor
+  cd claude-conductor && git checkout v0.9.1 && ./install.sh
+  ```

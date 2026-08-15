@@ -50,9 +50,22 @@ xattr -d com.apple.quarantine ~/.claude-conductor/bin/mdev
 
 `install.sh` は curl 経由なので隔離属性は付かない(念のため外す処理も入っている)。
 
+### settings.json を元へ戻す
+
+`mdev install` は Claude Code の `~/.claude/settings.json` の hooks を書き換える前に、**同じディレクトリへ退避する**。意図しない結果になった場合はそこから戻せる。
+
+```sh
+ls -t ~/.claude/settings.json.mdev-backup-*   # 新しい順に並ぶ
+cp ~/.claude/settings.json.mdev-backup-<タイムスタンプ> ~/.claude/settings.json
+```
+
+退避が作られるのは **hooks を実際に書き換えたときだけ**である(何も変わらない実行では作られないので、バックアップが際限なく増えることはない)。ファイル名の時刻は UTC。
+
+hooks だけを外したい場合は `mdev uninstall --keep-data` でも戻せる(mdev を指す hook だけを取り除き、作業ログやタスクの記録は残す)。
+
 ### Shell 版へ戻す
 
-Shell 版(claude-conductor)へは、そのリポジトリの最終タグから戻せる。
+Shell 版(claude-conductor)へは `v0.9.1` から戻せる。
 
 ```sh
 git clone https://github.com/k-kudo-hub/claude-conductor

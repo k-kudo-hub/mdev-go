@@ -37,7 +37,8 @@ cp ~/.codex/config.toml ~/.codex/config.toml.bak-6-3
 - `✓ codex の notify を mdev へ向けました`
 - `✓ layouts/*.kdl の呼び出しを mdev へ書き換えました`
 - `✓ Shell スクリプトを撤去します` + **消えるファイルの一覧**
-- `✓ FLAVOR を削除しました`
+- `✓ 不要になったファイルを撤去しました: FLAVOR, hooks.json`
+  - `hooks.json` は**配られたままのときだけ**消える。編集してある場合は残り、`! ... は編集されているため残しました(mdev はこのファイルを読みません)` が出る
 - `✓ .zshrc は設定済みです`
 
 続けて確認する。
@@ -47,6 +48,7 @@ ls ~/.claude-conductor/scripts 2>&1     # 期待: No such file or directory
 cat ~/.claude-conductor/REPO_URL        # 期待: .../mdev-go
 cat ~/.claude-conductor/VERSION         # 期待: mdev version と同じ
 ls ~/.claude-conductor/FLAVOR 2>&1      # 期待: No such file or directory
+ls ~/.claude-conductor/hooks.json 2>&1  # 期待: No such file or directory(編集していれば残る)
 grep -c '/scripts/' ~/.claude/settings.json ~/.claude-conductor/layouts/*.kdl   # 期待: すべて 0
 grep 'codex-notify' ~/.codex/config.toml                                       # 期待: 何も出ない
 ```
@@ -209,7 +211,7 @@ exec zsh
 ### Shell 版へ戻す
 
 ```sh
-cd ~/projects/claude-conductor && git checkout <最終タグ> && ./install.sh
+cd ~/projects/claude-conductor && git checkout v0.9.1 && ./install.sh
 ```
 
 ### 個別の症状

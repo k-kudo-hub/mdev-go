@@ -34,7 +34,7 @@ func ClaudeSettingsPath(home string) string {
 // SettingsPath は書き換え対象の settings.json のパスを返す。
 //
 // envValue(MDEV_SETTINGS_FILE)が空でなければそれを使う。実環境の
-// ~/.claude/settings.json へ適用する前に、コピーに対して切り替えと復元を
+// ~/.claude/settings.json へ適用する前に、コピーに対して install を
 // 試せるようにするための逃げ道である。
 func SettingsPath(home, envValue string) string {
 	if envValue != "" {
@@ -43,9 +43,14 @@ func SettingsPath(home, envValue string) string {
 	return ClaudeSettingsPath(home)
 }
 
-// SettingsStore は settings.json を読み書きする app.SettingsStore の実装である。
+// SettingsStore は settings.json を退避する app.SettingsBackup の実装である。
 //
-// 書き込みは同一ディレクトリでの原子的な置き換えで行い、既存ファイルの
+// **退避専用である。** 以前は読み書きと復元(最新のバックアップを引く)も
+// 持っていたが、読み書きは install が FileStore を通るようになり、復元は
+// `mdev hooks restore` ごと廃止した(v0.14)。戻す操作は利用者が cp で行う
+// (手順は README に書いてある)。
+//
+// 退避は同一ディレクトリでの原子的な置き換えで行い、既存ファイルの
 // パーミッションを引き継ぐ。利用者が権限を絞っている設定ファイルを
 // mdev の都合で緩めないためである。
 type SettingsStore struct {
@@ -63,7 +68,7 @@ func NewSettingsStore(path string, clock app.Clock) *SettingsStore {
 //
 // ファイル名は <対象ファイル名>.mdev-backup-<UTC タイムスタンプ(秒)> である。
 // 同じ秒に 2 回作られた場合は上書きになるが、Switch は変更がある場合にしか
-// 退避しないため、同じ秒の 2 回目は「1 回目より新しい切り替え前の内容」であり、
+// 退避しないため、同じ秒の 2 回目は「1 回目より新しい書き換え前の内容」であり、
 // 最新として上書きされるのが正しい。
 func (s *SettingsStore) Backup(data []byte) (string, error) {
 	name := s.backupPrefix() + s.clock.Now().UTC().Format(settingsBackupTimeLayout)

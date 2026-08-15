@@ -1,5 +1,12 @@
 # ユーザーテスト 01: hooks を Go 版へ切り替える
 
+> **歴史的記録**: この手順書は `mdev hooks switch` / `mdev hooks restore` を前提に書かれている。
+> **両コマンドは v0.14 で廃止された**(FLAVOR による 2 系統の切り替えを廃止し、hooks の設定は
+> `mdev install` が内包したため)。当時の検証内容の記録として残しており、本文は当時のままである。
+>
+> **現在の復元手順は [README の「settings.json を元へ戻す」](../README.md#settingsjson-を元へ戻す)を参照すること。**
+
+
 Go 版 `mdev` が実環境で動く最初のユーザーテストである。
 `~/.claude/settings.json` の hooks を Shell スクリプト呼び出しから
 `mdev hook` サブコマンドへ差し替え、現行の Shell 製ダッシュボードが

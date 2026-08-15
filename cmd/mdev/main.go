@@ -177,7 +177,7 @@ func buildDeps(home string, getenv func(string) string, clock app.Clock, sleeper
 		Assets:   store.NewAssetStore(conductorHome),
 		Commands: shell.NewCommandChecker(),
 		// hooks の書き換えは利用者の設定ファイルへの破壊的な操作なので、
-		// hooks switch と同じ仕組みで退避してから書く。
+		// 意図しない結果になったときに戻せるよう、退避してから書く。
 		Backup:  store.NewSettingsStore(installPaths.Settings, clock),
 		Version: version,
 	}
