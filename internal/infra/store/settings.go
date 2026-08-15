@@ -1,14 +1,9 @@
 package store
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/k-kudo-hub/mdev-go/internal/app"
 )
@@ -64,18 +59,6 @@ func NewSettingsStore(path string, clock app.Clock) *SettingsStore {
 	return &SettingsStore{path: path, clock: clock}
 }
 
-// Path は settings.json のパスを返す。
-func (s *SettingsStore) Path() string { return s.path }
-
-// Read は settings.json の内容をそのまま返す。
-func (s *SettingsStore) Read() ([]byte, error) {
-	b, err := os.ReadFile(s.path) //nolint:gosec // 呼び出し側が決めた設定ファイルのパス
-	if err != nil {
-		return nil, fmt.Errorf("設定ファイル %s の読み取りに失敗しました: %w", s.path, err)
-	}
-	return b, nil
-}
-
 // Backup は data を settings.json と同じディレクトリへ退避し、そのパスを返す。
 //
 // ファイル名は <対象ファイル名>.mdev-backup-<UTC タイムスタンプ(秒)> である。
@@ -97,66 +80,6 @@ func (s *SettingsStore) Backup(data []byte) (string, error) {
 // 予行演習した場合に、実ファイルの復元がコピーのバックアップを拾ってしまう。
 func (s *SettingsStore) backupPrefix() string {
 	return filepath.Base(s.path) + settingsBackupInfix
-}
-
-// Write は settings.json を data で原子的に置き換える。
-func (s *SettingsStore) Write(data []byte) error {
-	if err := writeFileAtomicMode(s.path, data, s.mode()); err != nil {
-		return fmt.Errorf("設定ファイル %s の書き込みに失敗しました: %w", s.path, err)
-	}
-	return nil
-}
-
-// LatestBackup は最も新しいバックアップのパスと内容を返す。
-// バックアップが 1 つも無い場合(ディレクトリごと無い場合を含む)は
-// found=false を返す。switch を実行していない状態は異常ではないためである。
-func (s *SettingsStore) LatestBackup() (string, []byte, bool, error) {
-	dir := filepath.Dir(s.path)
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil, false, nil
-	}
-	if err != nil {
-		return "", nil, false, fmt.Errorf("ディレクトリ %s の一覧に失敗しました: %w", dir, err)
-	}
-
-	prefix := s.backupPrefix()
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() || !isBackupName(e.Name(), prefix) {
-			continue
-		}
-		names = append(names, e.Name())
-	}
-	if len(names) == 0 {
-		return "", nil, false, nil
-	}
-	// タイムスタンプの形式が辞書順 = 時系列であるため、名前の最大値が最新。
-	sort.Strings(names)
-
-	path := filepath.Join(dir, names[len(names)-1])
-	data, err := os.ReadFile(path) //nolint:gosec // 自分が作ったバックアップ
-	if err != nil {
-		return "", nil, false, fmt.Errorf("バックアップ %s の読み取りに失敗しました: %w", path, err)
-	}
-	return path, data, true, nil
-}
-
-// isBackupName は name が mdev の作ったバックアップの名前かどうかを返す。
-//
-// 前置きの一致だけでは足りない。writeFileAtomicMode の一時ファイルは
-// <対象名>.tmp-<乱数> という名前で、バックアップ書き込み中のクラッシュで
-// settings.json.mdev-backup-<ts>.tmp-<乱数> が残ると、前置きが一致し
-// 辞書順でも大きいため「最新のバックアップ」に選ばれてしまう。
-// 書きかけの内容で settings.json を復元しては復旧手段が壊れる。
-// 前置きを除いた残りがタイムスタンプそのものである名前だけを候補にする。
-func isBackupName(name, prefix string) bool {
-	rest, ok := strings.CutPrefix(name, prefix)
-	if !ok {
-		return false
-	}
-	_, err := time.Parse(settingsBackupTimeLayout, rest)
-	return err == nil
 }
 
 // mode は settings.json の現在のパーミッションを返す。

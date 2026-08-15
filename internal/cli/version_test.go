@@ -27,7 +27,7 @@ func TestVersionCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			code, stdout, stderr := runCLIOut(t, Deps{Version: tt.version}, "version")
+			code, stdout, stderr := runCLIWithOut(t, Deps{Version: tt.version}, "version")
 			if code != exitOK {
 				t.Fatalf("終了コード = %d, want %d (stderr=%q)", code, exitOK, stderr)
 			}
@@ -54,7 +54,7 @@ func TestVersionOrDev(t *testing.T) {
 func TestVersionCommandTakesNoArgs(t *testing.T) {
 	t.Parallel()
 
-	code, _, stderr := runCLIOut(t, Deps{Version: "v1.0.0"}, "version", "extra")
+	code, _, stderr := runCLIWithOut(t, Deps{Version: "v1.0.0"}, "version", "extra")
 	if code != exitError {
 		t.Errorf("終了コード = %d, want %d", code, exitError)
 	}
