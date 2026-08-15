@@ -31,7 +31,6 @@ func TestInstallPaths(t *testing.T) {
 		{name: "mdev", got: testPaths.MdevBinaryPath(), want: "/home/dev/.claude-conductor/bin/mdev"},
 		{name: "scripts", got: testPaths.ScriptsDir(), want: "/home/dev/.claude-conductor/scripts"},
 		{name: "init.zsh", got: testPaths.InitZshPath(), want: "/home/dev/.claude-conductor/init.zsh"},
-		{name: "FLAVOR", got: testPaths.FlavorPath(), want: "/home/dev/.claude-conductor/FLAVOR"},
 		{
 			name: "相対パス",
 			got:  testPaths.ConductorPath("layouts/multi.kdl"),

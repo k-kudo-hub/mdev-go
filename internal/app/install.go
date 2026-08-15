@@ -13,10 +13,10 @@ import (
 
 // 資産の配り方。
 //
-//   - layouts/*.kdl と hooks.json は **不在のときだけ書く**。利用者が手を
-//     入れたものを install のたびに消さないための退避路である(ADR D4 の
-//     「カスタマイズの退避路」)。既にあるものが Shell を呼んでいる場合は、
-//     上書きせず migrateLayouts が壊れる箇所だけを書き換える
+//   - layouts/*.kdl は **不在のときだけ書く**。利用者が手を入れたものを
+//     install のたびに消さないための退避路である(ADR D4 の「カスタマイズの
+//     退避路」)。既にあるものが Shell を呼んでいる場合は、上書きせず
+//     migrateLayouts が壊れる箇所だけを書き換える
 //   - config.default.json と init.zsh は中身が違えば書き直す。どちらも
 //     配布物そのもので、利用者が手を入れる先ではない(設定は config.json、
 //     シェルの追加設定は .zshrc)。**init.zsh を更新しないのが特に危険で**、
@@ -25,14 +25,34 @@ import (
 //
 // どれも「同じ内容なら書かない」ので、2 回目の install はファイルを
 // 1 つも触らない。
+//
+// **hooks.json はここに無い。** ディスクへ置いても誰も読まないためである
+// (configureHooks が見るのは埋め込みのほう)。置いてあると「これを編集すれば
+// hooks が変わる」と読めてしまうので、撤去する側に回した(obsoleteFiles)。
 var installOnlyIfAbsent = []string{
-	"hooks.json",
 	"layouts/multi.kdl",
 	"layouts/dev.kdl",
 }
 
 // installAlwaysRefresh は中身が違えば書き直す資産である。
+//
+// **config.default.json はディスクに要る。** 設定の読み込みが
+// config.json → config.default.json の順に見る作り(store.ConfigPath /
+// LoadPricing)で、後者が現役の読み先だからである。hooks.json と違い、
+// 消すと単価表もエージェントの既定も引けなくなる。
 var installAlwaysRefresh = []string{"config.default.json", "init.zsh"}
+
+// obsoleteFiles は移行で不要になった CONDUCTOR_HOME 直下のファイルである。
+//
+// scripts/ の撤去と同じ枠で、**残っていると誤解のもとになるもの**を消す。
+//
+//   - FLAVOR: 2 系統を切り替える印。仕組みごと廃止した(ADR D4)
+//   - hooks.json: settings.json へ写す雛形。install が見るのは埋め込みのほう
+//     なので、ディスクの写しを編集しても何も変わらない
+var obsoleteFiles = []string{flavorFileName, "hooks.json"}
+
+// flavorFileName は廃止された切り替えフラグの名前である。
+const flavorFileName = "FLAVOR"
 
 // configDefaultName は既定値のファイル名である。
 const configDefaultName = "config.default.json"
@@ -98,7 +118,7 @@ func (i *Installer) Install(out io.Writer) error {
 		i.configureCodex,
 		i.migrateLayouts,
 		i.removeShellScripts,
-		i.removeFlavor,
+		i.removeObsoleteFiles,
 	} {
 		if err := step(out); err != nil {
 			errs = append(errs, err)
@@ -431,17 +451,29 @@ func (i *Installer) removeShellScripts(out io.Writer) error {
 	return i.Files.Remove(dir)
 }
 
-// removeFlavor は廃止された切り替えフラグを消す(ADR D4)。
-func (i *Installer) removeFlavor(out io.Writer) error {
-	path := i.Paths.FlavorPath()
-	if !i.Files.Exists(path) {
-		return nil
+// removeObsoleteFiles は移行で不要になったファイルを消す。
+//
+// 消すのは **mdev が置いたもので、今は誰も読まないもの** だけである
+// (obsoleteFiles を参照)。利用者のデータには触らない。
+func (i *Installer) removeObsoleteFiles(out io.Writer) error {
+	var errs []error
+	var removed []string
+	for _, name := range obsoleteFiles {
+		path := i.Paths.ConductorPath(name)
+		if !i.Files.Exists(path) {
+			continue
+		}
+		if err := i.Files.Remove(path); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		removed = append(removed, name)
 	}
-	if err := i.Files.Remove(path); err != nil {
-		return err
+	if len(removed) > 0 {
+		_, _ = fmt.Fprintf(out, "  ✓ 不要になったファイルを撤去しました: %s\n",
+			strings.Join(removed, ", "))
 	}
-	_, _ = fmt.Fprintln(out, "  ✓ FLAVOR を削除しました(切り替えの仕組みは廃止されました)")
-	return nil
+	return errors.Join(errs...)
 }
 
 // reportShell は .zshrc の状況を伝える。**書き換えはしない。**

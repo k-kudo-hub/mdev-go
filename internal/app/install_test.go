@@ -35,12 +35,17 @@ func TestInstallFreshEnvironment(t *testing.T) {
 	runInstall(t, files, allAvailable)
 
 	for _, rel := range []string{
-		"config.default.json", "config.json", "hooks.json", "init.zsh",
+		"config.default.json", "config.json", "init.zsh",
 		"layouts/multi.kdl", "layouts/dev.kdl", "VERSION", "REPO_URL",
 	} {
 		if _, ok := files.files[conductorPath(rel)]; !ok {
 			t.Errorf("%s が配置されていない", rel)
 		}
+	}
+	// hooks.json はディスクへ置かない。誰も読まないうえ、置いてあると
+	// 「これを編集すれば hooks が変わる」と読めてしまう。
+	if _, ok := files.files[conductorPath("hooks.json")]; ok {
+		t.Error("hooks.json を配置した")
 	}
 	if got := files.files[conductorPath("VERSION")]; got != "v1.2.3\n" {
 		t.Errorf("VERSION = %q, want バイナリ自身の版", got)
@@ -141,6 +146,7 @@ func TestInstallMigratesShellEnvironment(t *testing.T) {
 	files.files[conductorPath("scripts/pending-notify.sh")] = "#!/bin/bash\n"
 	files.files[conductorPath("scripts/fetch-news.sh")] = "#!/bin/bash\n"
 	files.files[conductorPath("FLAVOR")] = "go\n"
+	files.files[conductorPath("hooks.json")] = `{"Stop":[]}` + "\n"
 	files.files[conductorPath("layouts/multi.kdl")] =
 		`args "-c" "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/dashboard-loop.sh"` + "\n"
 	files.files[testInstallPaths.Settings] = `{"permissions":{"allow":["Bash(ls:*)"]},"hooks":{"Stop":[` +
@@ -160,8 +166,10 @@ func TestInstallMigratesShellEnvironment(t *testing.T) {
 			t.Errorf("撤去した %q が出力に無い:\n%s", name, out)
 		}
 	}
-	if files.Exists(conductorPath("FLAVOR")) {
-		t.Error("FLAVOR が残っている")
+	for _, name := range []string{"FLAVOR", "hooks.json"} {
+		if files.Exists(conductorPath(name)) {
+			t.Errorf("%s が残っている", name)
+		}
 	}
 	for _, path := range []string{
 		conductorPath("layouts/multi.kdl"),
