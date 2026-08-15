@@ -473,28 +473,63 @@ func codexHooksCopy(commands ...string) string {
 	return `{"Stop":[{"matcher":"","hooks":[` + strings.Join(hooks, ",") + `]}]}` + "\n"
 }
 
-// TestInstallRemovesCodexHooksCopy は codex へ写された hooks を撤去することを
+// removedScriptHook は 6-3 で撤去済みのスクリプトを指す hook である。
+const removedScriptHook = "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh"
+
+// workingMdevHook は Go 版を指す hook である(exit 0 で動く)。
+const workingMdevHook = "${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify"
+
+// TestInstallWarnsAboutBrokenCodexHooks は壊れた hooks を知らせることを
 // 確かめる。
 //
 // codex 0.147 は Claude Code 互換の hooks エンジンを内蔵しており、Codex アプリの
 // import が settings.json の hooks を CODEX_HOME/hooks.json へコピーする。
 // これを見落としたまま scripts/ を消したため、写された hook がすべて exit 127 に
 // なり codex の会話にエラーが出続けた。
-func TestInstallRemovesCodexHooksCopy(t *testing.T) {
+//
+// **知らせるだけで直さない。** このファイルは利用者が意図して置いた設定かも
+// しれず、消すか直すかを決められるのは利用者だけである。
+func TestInstallWarnsAboutBrokenCodexHooks(t *testing.T) {
+	t.Parallel()
+
+	content := codexHooksCopy(removedScriptHook)
+	files := newFakeFileStore()
+	files.files[codexHooksPath] = content
+
+	out := runInstall(t, files, allAvailable)
+
+	// **1 バイトも触らない。**
+	if files.files[codexHooksPath] != content {
+		t.Errorf("書き換えた: %q", files.files[codexHooksPath])
+	}
+	for _, removed := range files.removed {
+		if removed == codexHooksPath {
+			t.Fatal("削除した")
+		}
+	}
+	// 事実と選択肢の両方を出す。
+	for _, want := range []string{"127", "rm ", "bin/mdev hook", "再信頼の確認"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q が出ていない:\n%s", want, out)
+		}
+	}
+}
+
+// TestInstallSilentOnWorkingCodexHooks は動いている hooks で黙ることを
+// 確かめる。
+//
+// Go 版は exit 0 で動く。動いているものに警告を出すと、利用者は毎回の
+// install で意味の無い赤を見ることになる。
+func TestInstallSilentOnWorkingCodexHooks(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
 		content string
 	}{
-		{
-			name:    "旧 Shell 形",
-			content: codexHooksCopy("${CONDUCTOR_HOME:-$HOME/.claude-conductor}/scripts/pending-notify.sh"),
-		},
-		{
-			name:    "新 Go 形",
-			content: codexHooksCopy("${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify"),
-		},
+		{name: "Go 版だけ", content: codexHooksCopy(workingMdevHook)},
+		{name: "conductor と無関係", content: codexHooksCopy("my-own-linter --fix")},
+		{name: "読めない形", content: `{"Stop":` + "\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -504,46 +539,36 @@ func TestInstallRemovesCodexHooksCopy(t *testing.T) {
 
 			out := runInstall(t, files, allAvailable)
 
-			if _, ok := files.files[codexHooksPath]; ok {
-				t.Errorf("撤去されていない: %q", files.files[codexHooksPath])
+			if files.files[codexHooksPath] != tt.content {
+				t.Errorf("触った: %q", files.files[codexHooksPath])
 			}
-			if !strings.Contains(out, "hooks コピーを撤去") {
-				t.Errorf("撤去したことを伝えていない:\n%s", out)
+			if strings.Contains(out, "hooks") && strings.Contains(out, "127") {
+				t.Errorf("要らない警告を出した:\n%s", out)
 			}
 		})
 	}
 }
 
-// TestInstallKeepsMixedCodexHooks は他のツールの hook が混ざっていたら
-// 触らないことを確かめる。
-//
-// **巻き添えにしない。** 利用者や他のツールが足したものを conductor の都合で
-// 消してはならない。
-func TestInstallKeepsMixedCodexHooks(t *testing.T) {
+// TestInstallWarnsAboutMixedCodexHooks は壊れたものが 1 つでもあれば知らせる
+// ことを確かめる。動いているものが混ざっていても、壊れている事実は変わらない。
+func TestInstallWarnsAboutMixedCodexHooks(t *testing.T) {
 	t.Parallel()
 
-	content := `{"Stop":[{"matcher":"","hooks":[` +
-		`{"type":"command","command":"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify"},` +
-		`{"type":"command","command":"my-own-linter --fix"}]}]}` + "\n"
-
+	content := codexHooksCopy(workingMdevHook, removedScriptHook)
 	files := newFakeFileStore()
 	files.files[codexHooksPath] = content
 
 	out := runInstall(t, files, allAvailable)
 
 	if files.files[codexHooksPath] != content {
-		t.Errorf("書き換えた: %q", files.files[codexHooksPath])
+		t.Errorf("触った: %q", files.files[codexHooksPath])
 	}
-	if !strings.Contains(out, "触っていません") {
+	if !strings.Contains(out, "127") {
 		t.Errorf("警告が出ていない:\n%s", out)
-	}
-	// 手掛かり(どの hook が conductor 由来か)も出す。
-	if !strings.Contains(out, "Stop") {
-		t.Errorf("対象の hook が示されていない:\n%s", out)
 	}
 }
 
-// TestInstallWithoutCodexHooksCopy は無ければ何もしないことを確かめる。
+// TestInstallWithoutCodexHooksCopy は無ければ何も言わないことを確かめる。
 func TestInstallWithoutCodexHooksCopy(t *testing.T) {
 	t.Parallel()
 
@@ -553,49 +578,37 @@ func TestInstallWithoutCodexHooksCopy(t *testing.T) {
 	if _, ok := files.files[codexHooksPath]; ok {
 		t.Error("hooks のコピーを作った")
 	}
-	if strings.Contains(out, "hooks コピー") {
+	if strings.Contains(out, "hooks.json の hooks") {
 		t.Errorf("要らない報告を出した:\n%s", out)
 	}
 }
 
-// TestInstallCodexHooksRemovalIsIdempotent は 2 回目で何も起きないことを
-// 確かめる。install は繰り返し実行される。
-func TestInstallCodexHooksRemovalIsIdempotent(t *testing.T) {
-	t.Parallel()
-
-	files := newFakeFileStore()
-	files.files[codexHooksPath] = codexHooksCopy(
-		"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook notify")
-
-	runInstall(t, files, allAvailable)
-	files.writes, files.removed = nil, nil
-
-	out := runInstall(t, files, allAvailable)
-
-	if len(files.removed) != 0 {
-		t.Errorf("2 回目が削除した: %v", files.removed)
-	}
-	if strings.Contains(out, "hooks コピーを撤去") {
-		t.Errorf("2 回目が撤去を報告した:\n%s", out)
-	}
-}
-
-// TestInstallKeepsUnreadableCodexHooks は読めない形を触らないことを確かめる。
+// TestInstallCodexHooksWarningIsIdempotent は 2 回目も同じ結果になることを
+// 確かめる。
 //
-// conductor 由来だと判定できない以上、消してよいものではない。
-func TestInstallKeepsUnreadableCodexHooks(t *testing.T) {
+// 直さないので警告は繰り返し出る(それが正しい)。**ファイルが変わらないこと**
+// と、警告が増えも減りもしないことを見る。
+func TestInstallCodexHooksWarningIsIdempotent(t *testing.T) {
 	t.Parallel()
 
-	const content = `{"Stop":` + "\n"
+	content := codexHooksCopy(removedScriptHook)
 	files := newFakeFileStore()
 	files.files[codexHooksPath] = content
 
-	out := runInstall(t, files, allAvailable)
+	first := runInstall(t, files, allAvailable)
+	files.writes, files.removed = nil, nil
+	second := runInstall(t, files, allAvailable)
 
 	if files.files[codexHooksPath] != content {
-		t.Errorf("触った: %q", files.files[codexHooksPath])
+		t.Errorf("2 回目が触った: %q", files.files[codexHooksPath])
 	}
-	if !strings.Contains(out, "読めませんでした") {
-		t.Errorf("警告が出ていない:\n%s", out)
+	if len(files.removed) != 0 {
+		t.Errorf("2 回目が削除した: %v", files.removed)
+	}
+	if strings.Count(first, "127") != strings.Count(second, "127") {
+		t.Errorf("警告の回数が変わった:\n1 回目:\n%s\n2 回目:\n%s", first, second)
+	}
+	if strings.Count(second, "127") != 1 {
+		t.Errorf("警告が %d 回, want 1:\n%s", strings.Count(second, "127"), second)
 	}
 }

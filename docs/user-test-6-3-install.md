@@ -206,10 +206,25 @@ cd ~/projects/claude-conductor && git checkout <最終タグ> && ./install.sh
 - **ペインが即死する**: `~/.claude-conductor/layouts/multi.kdl` の呼び出しを確認する。`mdev install` を再実行すれば書き換わる
 - **hook が効かない**: `jq '.hooks' ~/.claude/settings.json` で `bin/mdev hook` を指しているか確認する
 - **codex のタスクが Dashboard に出ない**: `grep notify ~/.codex/config.toml` を確認する。別ツールが notify を使っている場合は install が触らず案内だけ出しているので、その notify から `mdev codex notify '<payload>'` を呼ぶ必要がある
-- **codex の会話に hook のエラーが出続ける**: `ls ~/.codex/hooks.json` を確認する。codex 0.147 以降は Claude Code 互換の hooks エンジンを内蔵しており、**Codex アプリの external-agent import が `~/.claude/settings.json` の hooks をここへコピーする**。`mdev install` はこのコピーが全部 conductor 由来なら撤去する（mdev は codex を hook ではなくスクリーン検出で扱うため不要）。他のツールの hook が混ざっている場合は触らず警告だけ出すので、手で取り除く
+- **codex の会話に hook のエラーが出続ける（exit 127）**: `ls ~/.codex/hooks.json` を確認する。codex 0.147 以降は Claude Code 互換の hooks エンジンを内蔵しており、**Codex アプリの external-agent import が `~/.claude/settings.json` の hooks をここへコピーする**。6-3 で `scripts/` を削除したため、コピーされた hook が参照先を失っている。
 
-  **将来のリスク**: Codex アプリの import が settings.json の Go 版 hooks を再び取り込む可能性がある。その hook は `exit 0` で無害だが、pending の更新が hook 経由とスクリーン検出の二重で走る懸念が残る。`mdev install` がこの検査を毎回行うことが防波堤になる（次の install で撤去される）ため、**取り込まれた気配があれば `mdev install` を実行すればよい**
-- **`mdev` が「レイアウトがありません」と言う**: `mdev install` を実行する
+  `mdev install` はこれを検出して警告するが、**消しも書き換えもしない**（利用者が意図して置いた設定かもしれず、どうするかを決められるのは利用者だけであるため）。選択肢は 2 つ。
+
+  ```sh
+  # (a) この hooks が不要なら消す
+  rm ~/.codex/hooks.json
+  # mdev は codex をスクリーン検出で扱うため、消しても動作に影響はない
+  ```
+
+  ```sh
+  # (b) 使いたいなら該当コマンドを手で書き換える
+  #   ${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook <resolve|post-tool|notify>
+  # codex 側で再信頼の確認が表示される
+  ```
+
+  **(b) は未検証である。** codex の hooks エンジンで `mdev hook` がどう動くか、スクリーン検出と二重に pending を更新しないかは確かめていない。二重動作が疑われる場合は (a) で切り分けるとよい。
+
+  `~/.codex/config.toml` の `[hooks.state]` は放置してよい（参照先が無ければ何も起こさない残骸）。
 
 ## 開発側の確認（任意）
 

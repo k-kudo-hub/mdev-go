@@ -11,96 +11,86 @@ import (
 // external-agent import が `~/.claude/settings.json` の hooks を
 // `$CODEX_HOME/hooks.json` へ **コピーする**。
 //
-// mdev はこのコピーを知らないまま `scripts/` を消したため、コピーされた hook が
+// 統合 6-3 はこのコピーを知らないまま `scripts/` を消したため、写された hook が
 // すべて exit 127 になり、codex の会話にエラーが出続けた(実環境で発生)。
 //
-// # なぜ書き換えではなく削除か
+// # mdev は直さない。知らせるだけである
 //
-// codex は hooks.json の内容を `trusted_hash` として config.toml に覚えている。
-// 中身を書き換えるとその照合に失敗し、利用者に再信頼の確認を求める。**mdev は
-// codex を hook ではなくスクリーン検出で扱う**ので、このコピーはそもそも要らない。
-// 要らないものを残して確認を出させるより、消すほうが筋が通る。
+// **このファイルは利用者が意図して置いた設定かもしれない。** 消すのも書き換える
+// のも mdev の裁量を越える。理由は 3 つある。
 //
-// # config.toml の [hooks.state] は触らない
+//   - codex の hooks エンジンで mdev hook がどう動くかを検証していない。
+//     スクリーン検出と二重に pending を更新する懸念がある
+//   - codex は hooks.json の内容を trusted_hash として覚えており、書き換えると
+//     再信頼の確認が利用者に出る。こちらの都合でそれを起こさない
+//   - 消してよいかどうかは利用者にしか決められない。install が黙って消すと、
+//     意図して置いた設定が次の install で消える作りになる
 //
-// 参照先のファイルが消えれば、その項目は codex から見て単なる残骸になる
-// (存在しない hook の信頼記録なので、何も起こさない)。TOML を書き換える手間と
-// 壊す危険に見合わない。
+// できるのは「壊れていることと、直し方の選択肢」を伝えるところまでである。
 
 // CodexHooksFileName は codex が読む hooks のコピーの名前である。
 const CodexHooksFileName = "hooks.json"
 
-// CodexHooksVerdict は hooks.json をどう扱うべきかである。
-type CodexHooksVerdict int
+// conductorScriptsMarker は撤去済みのスクリプト置き場を指す目印である。
+const conductorScriptsMarker = "/scripts/"
 
-const (
-	// CodexHooksNone は hook が 1 つも無い(消すものが無い)ことを表す。
-	CodexHooksNone CodexHooksVerdict = iota
-	// CodexHooksAllConductor はすべてが conductor 由来で、消してよいことを表す。
-	CodexHooksAllConductor
-	// CodexHooksMixed は conductor 以外が混ざっており、触ってはならないことを表す。
-	CodexHooksMixed
-)
+// conductorHomeMarkers は conductor の設置場所を指す書き方である。
+//
+// 環境変数の展開形と、展開済みの絶対パスの両方を受ける。前者は hooks.json が
+// settings.json から素直に写された場合、後者は写す側が展開してしまった場合に
+// 現れる。
+var conductorHomeMarkers = []string{"CONDUCTOR_HOME", "/" + conductorHomeDirName + "/"}
 
-// CodexHooksReport は hooks.json の検査結果である。
-type CodexHooksReport struct {
-	// Verdict はどう扱うべきか。
-	Verdict CodexHooksVerdict
-	// Conductor は conductor 由来と判定した hook である(警告の列挙に使う)。
-	Conductor []HookCommand
-	// Foreign は conductor 由来でない hook である。
-	Foreign []HookCommand
-}
+// conductorHomeDirName は CONDUCTOR_HOME 未設定時のディレクトリ名である。
+const conductorHomeDirName = ".claude-conductor"
 
-// InspectCodexHooks は codex の hooks.json を検査する。
+// BrokenCodexHooks は codex の hooks.json のうち、**撤去済みのスクリプトを
+// 指している** hook を返す。
 //
-// **conductor 由来かどうかだけを見る。** 判定は 2 つの形を対象にする。
+// これが空でなければ、codex の会話でその hook が exit 127 になる。
 //
-//   - 旧 Shell 版: コマンドに `/scripts/pending-` を含む
-//   - Go 版: コマンドが `bin/mdev hook <名前>` で終わる
-//
-// どちらでもない hook が 1 つでもあれば Mixed とし、呼び出し側は触らない。
-// 利用者や他のツールが足したものを巻き添えにしないためである。
+// 見るのは「conductor の scripts/ を指しているか」だけである。Go 版の
+// `bin/mdev hook ...` を指すものは exit 0 で動くので対象にしない(動いている
+// ものを壊れていると言わない)。conductor と無関係な hook も当然対象外である。
 //
 // 上位の形は 2 通りを受ける。`{"hooks": {...}}` と、イベント名が直に並ぶ
 // `{...}` である。codex 側がどちらで写すかは版によって変わりうるので、
 // 見分けずに両方を扱う。
-func InspectCodexHooks(data []byte) (CodexHooksReport, error) {
+func BrokenCodexHooks(data []byte) ([]HookCommand, error) {
 	if !json.Valid(data) {
-		return CodexHooksReport{}, errors.New("hooks.json として解釈できる JSON ではありません")
+		return nil, errors.New("hooks.json として解釈できる JSON ではありません")
 	}
-	// null や配列でも json.Valid は通る。イベントの対応表として読めない形は
-	// 「conductor 由来だと判定できない」ので、触らない側へ倒すためにエラーにする。
 	if !isJSONObject(data) {
-		return CodexHooksReport{}, errors.New("hooks.json のトップレベルがオブジェクトではありません")
+		return nil, errors.New("hooks.json のトップレベルがオブジェクトではありません")
 	}
 
 	events, err := codexHookEvents(data)
 	if err != nil {
-		return CodexHooksReport{}, err
+		return nil, err
 	}
 
-	var report CodexHooksReport
+	var broken []HookCommand
 	for _, name := range sortedEventNames(events) {
 		for _, command := range codexEventCommands(events[name]) {
-			entry := HookCommand{Event: name, Command: command}
-			if isConductorHookCommand(command) {
-				report.Conductor = append(report.Conductor, entry)
-				continue
+			if referencesRemovedScripts(command) {
+				broken = append(broken, HookCommand{Event: name, Command: command})
 			}
-			report.Foreign = append(report.Foreign, entry)
 		}
 	}
+	return broken, nil
+}
 
-	switch {
-	case len(report.Conductor) == 0 && len(report.Foreign) == 0:
-		report.Verdict = CodexHooksNone
-	case len(report.Foreign) > 0:
-		report.Verdict = CodexHooksMixed
-	default:
-		report.Verdict = CodexHooksAllConductor
+// referencesRemovedScripts は撤去済みのスクリプトを指しているかを返す。
+func referencesRemovedScripts(command string) bool {
+	if !strings.Contains(command, conductorScriptsMarker) {
+		return false
 	}
-	return report, nil
+	for _, marker := range conductorHomeMarkers {
+		if strings.Contains(command, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // codexHookEvents は上位の形を吸収してイベントの対応表を返す。
@@ -132,8 +122,8 @@ func sortedEventNames(events map[string]json.RawMessage) []string {
 // codexEventCommands はイベント 1 件に含まれるコマンド文字列を順に返す。
 //
 // 形は Claude Code の settings.json と同じで、matcher の配列の中に hook の
-// 配列が入る。解釈できない形は「コマンドが無い」として扱う(呼び出し側は
-// conductor 由来だと判定できないので触らない側へ倒れる)。
+// 配列が入る。解釈できない形は「コマンドが無い」として扱う(壊れていると
+// 断定できないので、黙っている側へ倒れる)。
 func codexEventCommands(raw json.RawMessage) []string {
 	var matchers []struct {
 		Hooks []struct {
@@ -152,18 +142,22 @@ func codexEventCommands(raw json.RawMessage) []string {
 	return out
 }
 
-// isConductorHookCommand は conductor が置いた hook かどうかを返す。
-func isConductorHookCommand(command string) bool {
-	return strings.Contains(command, pendingScriptMarker) || callsMdevHook(command)
-}
-
-// RenderCodexHooksWarning は触らなかったときの案内を組み立てる。
-func RenderCodexHooksWarning(path string, conductor []HookCommand) string {
-	names := make([]string, 0, len(conductor))
-	for _, hook := range conductor {
-		names = append(names, hook.Event)
+// RenderCodexHooksWarning は壊れた hook の事実と直し方を組み立てる。
+//
+// **どちらを選ぶかは利用者が決める。** mdev はどちらも代行しない。
+func RenderCodexHooksWarning(path string, broken []HookCommand) []string {
+	events := make([]string, 0, len(broken))
+	for _, hook := range broken {
+		events = append(events, hook.Event)
 	}
-	return path + " に conductor 由来の hook が残っています(" +
-		strings.Join(names, ", ") + ")。" +
-		"他のツールの hook と混ざっているため触っていません。手で取り除いてください。"
+	return []string{
+		path + " の hooks が削除済みのスクリプトを参照しています(" +
+			strings.Join(events, ", ") + ")。codex の会話で hook エラー(127)になります。",
+		"この hooks が不要なら削除してください: rm " + path,
+		"  (mdev は codex をスクリーン検出で扱うため、消しても動作に影響はありません)",
+		"使いたい場合は該当コマンドを " +
+			"${CONDUCTOR_HOME:-$HOME/.claude-conductor}/bin/mdev hook <resolve|post-tool|notify> " +
+			"へ手動で更新してください。",
+		"  (codex 側で再信頼の確認が表示されます)",
+	}
 }
