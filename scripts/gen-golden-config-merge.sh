@@ -1,6 +1,16 @@
 #!/bin/bash
 # config.json マージのゴールデン fixture を生成する。
 #
+# ⚠️ このスクリプトは claude-conductor のソースを必要とする。
+#
+# conductor をアーカイブした後は **再生成できない**。fixture は既にコミット
+# されており、テストはそれを読むだけなので**動き続ける**(このスクリプトは
+# 「その fixture がどう作られたか」の記録として残す)。
+#
+# 期待値を変えたくなった場合は、conductor の該当タグを取り出すか、fixture を
+# 手で編集したうえで **何を根拠に変えたかをコミットに残す**こと。Shell 版と
+# 一致していることが、これらの fixture の唯一の存在理由である。
+#
 # 現行 Shell 版(claude-conductor)の install.sh:138-149 の jq 式に
 # internal/domain/testdata/golden-config-merge/cases.json が定義する設定を
 # 与え、その出力を <case>/expected.json に保存する。

@@ -1,8 +1,16 @@
 # mdev-go
 
-[claude-conductor](https://github.com/k-kudo-hub/claude-conductor)(Shell Script 製の `mdev`)を Go でリライトするプロジェクト。
+Zellij 上で複数のコーディングエージェント(Claude Code / Codex CLI)セッションを、1 つのダッシュボードから統括する CLI。
 
-Zellij 上で複数のコーディングエージェント(Claude Code / Codex CLI)セッションをダッシュボードから統括する。
+タスクごとにタブを立て、どれが応答待ちでどれが終わったのかを一覧で見ながら、番号 1 つで行き来する。終わったタスクは会話の要約つきでログへ残してから畳む。
+
+## これは claude-conductor の後継である
+
+もとは [claude-conductor](https://github.com/k-kudo-hub/claude-conductor) という Shell Script 製の `mdev` だった。機能が増えるにつれて、jq と awk に依存した状態管理・シェル依存の文字列処理・テストの書きにくさが積み上がり、1 つの変更が別の場所を静かに壊すようになった。そこで**振る舞いを 1 つずつ突き合わせながら** Go へ移し、このリポジトリへ移転した。
+
+移植は勘に頼らず、現行版へ同じ入力を流して得た出力を期待値として固定する方法(golden テスト)で進めた。`scripts/gen-golden-*.sh` がその記録である。設定ファイルや作業ログの形式は Shell 版と互換なので、**移行しても過去のデータはそのまま読める**。
+
+移行の判断は [docs/adr/](docs/adr/) に残してある。
 
 ## インストール
 
@@ -47,10 +55,15 @@ xattr -d com.apple.quarantine ~/.claude-conductor/bin/mdev
 Shell 版(claude-conductor)へは、そのリポジトリの最終タグから戻せる。
 
 ```sh
-git clone https://github.com/k-kudo-hub/claude-conductor && cd claude-conductor && ./install.sh
+git clone https://github.com/k-kudo-hub/claude-conductor
+cd claude-conductor && git checkout v0.9.1 && ./install.sh
 ```
 
+`v0.9.1` が Shell 実装として完結している最後のタグである。
+
 ## 使い方
+
+### セッションを開く
 
 ```sh
 mdev              # 今いるディレクトリのセッションへ入る(無ければ作る)
@@ -58,14 +71,48 @@ mdev <名前>       # 名前を指定して入る
 mdev --new        # 時刻付きで新しく作る
 dev               # 単一の開発セッション(エージェント + エディタ + git)
 zs                # 既存のセッションを選んで入る
-mdev test <worktree>   # worktree のソースを隔離環境で試す
 ```
 
-ダッシュボードでは `n` で新しいタスクを作る。
+`mdev` は **attach-or-create** である。同じディレクトリから何度実行しても同じセッションへ戻るので、時刻付きのセッションが積み上がらない。
+
+### ダッシュボードの操作
+
+| キー | 動作 |
+|---|---|
+| `n` | 新しいタスクを作る |
+| `<番号>` | そのタスクのタブへ移る |
+| `d` + `<番号>` | そのタスクを削除する(作業ログをアップロードしてから閉じる) |
+| `r` | News を取り直す(News ペイン) |
+
+タスクタブの下部にも操作バーが出る(`m`: ダッシュボードへ / `w`: 返答待ちへ退避 / `dd`: 削除)。
+
+### その他のコマンド
+
+```sh
+mdev install           # 設置と移行(何度実行しても同じ状態になる)
+mdev update            # 新しい版へ自己置換し、設定を貼り直す
+mdev uninstall         # 取り除く(--keep-data で設定の解除だけ)
+mdev sessions clean    # 溜まったセッションと残骸を片付ける
+mdev news fetch        # AI 関連ニュースを取得する
+mdev test <worktree>   # worktree のソースを隔離環境で試す(開発用)
+mdev version           # 版を表示する
+```
+
+## 設計
+
+`cli` / `tui` → `app` → `domain` の一方向で、外部とのやり取りは `infra` が `app` の port を実装する形に閉じている(ports & adapters)。`domain` は標準ライブラリだけで動き、時刻すら受け取る側にある。依存の向きは CI で機械的に検査している。
+
+| 層 | 役割 |
+|---|---|
+| `internal/domain` | 判断そのもの(純粋関数)。Shell 版との互換はここで固定する |
+| `internal/app` | 手順の組み立てと port の定義 |
+| `internal/infra` | zellij・git・ファイル・外部 CLI との接続 |
+| `internal/cli` / `internal/tui` | 入出力の変換と画面 |
+| `assets` | 配布物(レイアウト・既定設定)の埋め込み |
 
 ## ステータス
 
-Shell 版からの移行が最終段階。計画は [docs/adr/](docs/adr/) を参照。
+Shell 版からの移行は完了段階。判断の記録は [docs/adr/](docs/adr/) を参照。
 
 - [ADR-0001: Shell Script 版 mdev を Go でリライトする](docs/adr/0001-rewrite-mdev-in-go.md)
 - [ADR-0002: ports & adapters によるアーキテクチャ設計](docs/adr/0002-ports-and-adapters-architecture.md)

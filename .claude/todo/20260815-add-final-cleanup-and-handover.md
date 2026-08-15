@@ -11,9 +11,9 @@ ADR-0004 の最終フェーズ。mdev-go 側の残務(deprecated 除去・ドキ
 - [x] `mdev hooks switch/restore` コマンドの除去(6-3 で deprecated 化済み。FLAVOR 廃止に伴い存在理由が消滅。hookswitch の変換ロジックのうち install が使う部分は install 側に残す)
 - [x] 手順書 §8 の不整合修正: user-test-6-3-install.md の update フロー記述を実挙動(v0.13.1 で実証済みの「自己置換 → 再実行で install」)に合わせ、未使用の RenderUpdateApplying を削除
 - [x] CONDUCTOR_HOME 残骸の整理: `hooks.json`(ディスク上は不使用 — install は embed を参照)を install の撤去対象に追加。`config.default.json` は**残す**(store の読み込みフォールバックが現役で参照。理由をコメントに)
-- [ ] golden 生成スクリプト(gen-golden-*)に「conductor アーカイブ後は再生成不可。fixture がコミット済みのためテストは継続動作する」旨のヘッダ注記
-- [ ] README 更新: ブートストラップ 1 発のインストール手順(ブラウザ DL 時の xattr 注意込み)・アーキテクチャ概要・claude-conductor からの移転である旨
-- [ ] ADR-0004 に追記: Shell 版最終リリースのタグ(D8-1)と、**ADR-0001 のデータ形式凍結の解除**(D8-4)を Accepted の決定として記録
+- [x] golden 生成スクリプト(gen-golden-*)に「conductor アーカイブ後は再生成不可。fixture がコミット済みのためテストは継続動作する」旨のヘッダ注記
+- [x] README 更新: ブートストラップ 1 発のインストール手順(ブラウザ DL 時の xattr 注意込み)・アーキテクチャ概要・claude-conductor からの移転である旨
+- [x] ADR-0004 に追記: Shell 版最終リリースのタグ(D8-1)と、**ADR-0001 のデータ形式凍結の解除**(D8-4)を Accepted の決定として記録
 
 ### B. conductor 側のクローズ
 

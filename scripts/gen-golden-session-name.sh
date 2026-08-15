@@ -1,6 +1,16 @@
 #!/bin/bash
 # セッション名切り詰めのゴールデン表を生成する。
 #
+# ⚠️ このスクリプトは claude-conductor のソースを必要とする。
+#
+# conductor をアーカイブした後は **再生成できない**。fixture は既にコミット
+# されており、テストはそれを読むだけなので**動き続ける**(このスクリプトは
+# 「その fixture がどう作られたか」の記録として残す)。
+#
+# 期待値を変えたくなった場合は、conductor の該当タグを取り出すか、fixture を
+# 手で編集したうえで **何を根拠に変えたかをコミットに残す**こと。Shell 版と
+# 一致していることが、これらの fixture の唯一の存在理由である。
+#
 # 現行 init.zsh の `_conductor_session_name` を **その場で source して** 呼び、
 # 入力と出力の対を internal/domain/testdata/session-names.tsv に書き出す。
 # Go 側の ZellijSessionName はこの表と 1 件も違わないことをテストで固定する。
