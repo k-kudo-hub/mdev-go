@@ -304,13 +304,13 @@ func taskControlPromptTimeoutCmd(token int) tea.Cmd {
 func (m TaskControlModel) View() tea.View {
 	switch {
 	case m.notice != "":
-		return tea.NewView("  " + m.notice + "\n")
+		return paneView("  " + m.notice + "\n")
 	case m.awaiting:
-		return tea.NewView("  " + taskControlDeletePrompt + "\n")
+		return paneView("  " + taskControlDeletePrompt + "\n")
 	}
 	out := m.text
 	if m.err != nil {
 		out += "  " + errorLine(m.err) + "\n"
 	}
-	return tea.NewView(out)
+	return paneView(out)
 }

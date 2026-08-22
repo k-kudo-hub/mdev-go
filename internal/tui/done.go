@@ -214,5 +214,5 @@ func (m DoneModel) View() tea.View {
 	case m.awaiting:
 		out += "  " + restorePrompt + "\n"
 	}
-	return tea.NewView(out)
+	return paneView(out)
 }
