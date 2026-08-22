@@ -15,7 +15,7 @@
 
 - [x] 全 6 モデルの `View()` が `AltScreen = true` の `tea.View` を返すことを検証するテストを作成(失敗を確認)
 - [x] `paneView` ヘルパー(`tea.NewView` + `AltScreen = true`)を実装し、全 `View()` の `tea.NewView` 呼び出しを置き換えてテストを通す
-- [ ] `make check`(fmt-check / lint / arch / cover / build)を実行して修正
+- [x] `make check`(fmt-check / lint / arch / cover / build)を実行して修正(修正不要で全パス)
 
 ## 完了条件
 
