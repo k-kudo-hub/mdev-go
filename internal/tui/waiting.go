@@ -108,5 +108,5 @@ func (m WaitingModel) View() tea.View {
 	if m.err != nil {
 		out += "  " + errorLine(m.err) + "\n"
 	}
-	return tea.NewView(out)
+	return paneView(out)
 }

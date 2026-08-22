@@ -297,6 +297,22 @@ func promptTimeoutCmd(token int) tea.Cmd {
 	})
 }
 
+// paneView は全ペイン共通の tea.View を組み立てる。
+//
+// alt screen を有効にするのは、通常バッファで描くと古いフレームが zellij の
+// スクロールバックへ蓄積し、ペインのリサイズ時に zellij がそれを新しい幅で
+// 折り返し直して画面上へ再出現させるためである(重複ヘッダー・行の断片)。
+// alt screen はスクロールバックを持たず、リサイズで全面クリア+再描画される。
+//
+// Bubble Tea v2 の alt screen は Program のオプションではなく View() が返す
+// tea.View のフィールドで毎フレーム指定する。1 フレームでも素の tea.NewView を
+// 返すとその瞬間に通常バッファへ戻るため、View() は必ずここを通すこと。
+func paneView(content string) tea.View {
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
+}
+
 // errorLine はエラーを画面へ出す 1 行にする。
 //
 // 現行 Shell 版はこの種のエラーを画面に出さない(そもそも失敗を検出せず、

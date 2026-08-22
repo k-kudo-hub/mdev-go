@@ -291,15 +291,15 @@ func (m TaskCreateModel) View() tea.View {
 	menu := m.pane.Menu(m.env)
 	switch m.step {
 	case stepMenu:
-		return tea.NewView(menu)
+		return paneView(menu)
 	case stepBusy:
-		return tea.NewView(menu + "  " + m.busyLabel + "\n")
+		return paneView(menu + "  " + m.busyLabel + "\n")
 	case stepNotice:
-		return tea.NewView(menu + m.notice)
+		return paneView(menu + m.notice)
 	case stepName:
-		return tea.NewView(menu + m.input.View())
+		return paneView(menu + m.input.View())
 	case stepDir, stepType, stepAgent:
-		return tea.NewView(menu + m.list.View())
+		return paneView(menu + m.list.View())
 	}
-	return tea.NewView(menu)
+	return paneView(menu)
 }

@@ -409,7 +409,7 @@ func noticeCmd(token int) tea.Cmd {
 
 // View は画面を返す。本体は domain のレンダリング関数が組み立てる。
 func (m DashboardModel) View() tea.View {
-	return tea.NewView(m.body())
+	return paneView(m.body())
 }
 
 // body は表示する文字列を組み立てる。

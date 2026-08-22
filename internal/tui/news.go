@@ -148,7 +148,7 @@ func (m NewsModel) refreshCmd(poll bool) tea.Cmd {
 // View は画面を返す。
 func (m NewsModel) View() tea.View {
 	if m.fetching {
-		return tea.NewView(m.snapshot.FetchingText)
+		return paneView(m.snapshot.FetchingText)
 	}
-	return tea.NewView(m.snapshot.Text)
+	return paneView(m.snapshot.Text)
 }
